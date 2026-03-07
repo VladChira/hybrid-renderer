@@ -1,6 +1,6 @@
-#include <iostream>
+#include "engine/Engine.h"
 
-int main() {
-    std::cout << "Hello from Hybrid Renderer\n";
-    return 0;
+int main()
+{
+  return hybrid::engine::Run();
 }

@@ -104,11 +104,16 @@ target_link_libraries(hybrid_engine
     external::stb
   PRIVATE
     thirdparty::assimp
+    thirdparty::glfw
+    external::imgui_glfw_opengl3
 )
 
 # Add engine sources here:
 target_sources(hybrid_engine PRIVATE
   src/engine/Engine.cpp
+  src/core/App.cpp
+  src/platform/Platform.cpp
+  src/ui/Ui.cpp
 )
 
 target_include_directories(hybrid_engine
