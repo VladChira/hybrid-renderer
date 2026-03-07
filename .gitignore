@@ -1,5 +1,7 @@
 out/
 
+CMakeUserPresets.json
+
 .vscode/
 
 # Prerequisites
