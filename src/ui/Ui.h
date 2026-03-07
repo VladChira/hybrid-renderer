@@ -8,23 +8,23 @@
 namespace hybrid::ui
 {
 
-  struct UiConfig
-  {
-    std::string glsl_version = "#version 330";
-  };
+    struct UiConfig
+    {
+        std::string glsl_version = "#version 330";
+    };
 
-  class Ui
-  {
-  public:
-    bool Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle);
-    void Shutdown();
+    class Ui
+    {
+    public:
+        bool Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle);
+        void Shutdown();
 
-    CommandBuffer Frame(float delta_seconds);
+        CommandBuffer Frame(float delta_seconds);
 
-  private:
-    void *m_window = nullptr;
-    bool m_initialized = false;
-    UiConfig m_config{};
-  };
+    private:
+        void *m_window = nullptr;
+        bool m_initialized = false;
+        UiConfig m_config{};
+    };
 
 } // namespace hybrid::ui

@@ -5,10 +5,10 @@
 namespace hybrid::engine
 {
 
-  int Run()
-  {
-    core::App app;
-    return app.Run();
-  }
+    int Run()
+    {
+        core::App app;
+        return app.Run();
+    }
 
 } // namespace hybrid::engine
