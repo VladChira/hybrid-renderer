@@ -1,8 +1,11 @@
 #include "ui/Ui.h"
 
 #include "core/Log.h"
+#include "themes/Themes.h"
 
 #include <glad.h>
+
+#include <utility>
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -11,6 +14,24 @@
 
 namespace hybrid::ui
 {
+
+    namespace
+    {
+        class PlaceholderPanel final : public Panel
+        {
+        public:
+            explicit PlaceholderPanel(std::string title)
+                : Panel(std::move(title))
+            {
+            }
+
+        private:
+            void DrawContents(PanelContext &context) override
+            {
+                (void)context;
+            }
+        };
+    }
 
     bool Ui::Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle)
     {
@@ -29,7 +50,16 @@ namespace hybrid::ui
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        ImGui::StyleColorsDark();
+
+        io = &ImGui::GetIO();
+        io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        std::string font_path = std::string(HYBRID_PROJECT_ROOT) + "/assets/fonts/DMSans-Regular.ttf";
+        io->Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0);
+
+        // Default theme
+        embraceTheDarknessTheme();
+        // embraceTheLightnessTheme();
+        
 
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
         {
@@ -55,6 +85,18 @@ namespace hybrid::ui
 
         m_window = window;
         m_config = config;
+        m_layout = DockspaceLayout::Default();
+        if (m_panels.Empty())
+        {
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Properties"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Materials"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Console"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Viewport"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Performance"));
+        }
         m_initialized = true;
         return true;
     }
@@ -88,14 +130,13 @@ namespace hybrid::ui
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::Begin("Hybrid Renderer");
-        float fps = delta_seconds > 0.0f ? (1.0f / delta_seconds) : 0.0f;
-        ImGui::Text("FPS: %.1f", fps);
-        if (ImGui::Button("Quit"))
-        {
-            commands.push_back(UiCommand{UiCommand::Type::Quit});
-        }
-        ImGui::End();
+        m_dockspace.BeginFrame();
+        m_dockspace.BuildLayout(m_layout);
+
+        PanelContext context{};
+        context.delta_seconds = delta_seconds;
+        context.commands = &commands;
+        m_panels.DrawAll(context);
 
         ImGui::Render();
 
@@ -110,6 +151,29 @@ namespace hybrid::ui
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         return commands;
+    }
+
+    void Ui::RegisterPanel(std::unique_ptr<Panel> panel)
+    {
+        m_panels.Register(std::move(panel));
+        m_dockspace.ResetLayout();
+    }
+
+    void Ui::ClearPanels()
+    {
+        m_panels.Clear();
+        m_dockspace.ResetLayout();
+    }
+
+    void Ui::SetDockspaceLayout(const DockspaceLayout &layout)
+    {
+        m_layout = layout;
+        m_dockspace.ResetLayout();
+    }
+
+    void Ui::ResetDockspaceLayout()
+    {
+        m_dockspace.ResetLayout();
     }
 
 } // namespace hybrid::ui
