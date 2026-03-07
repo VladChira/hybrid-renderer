@@ -1,5 +1,7 @@
 #include "platform/Platform.h"
 
+#include "core/Log.h"
+
 #include <GLFW/glfw3.h>
 
 #include <cstddef>
@@ -95,9 +97,11 @@ namespace hybrid::platform
             return true;
         }
 
+        LOG_INFO("Initializing GLFW...");
         glfwSetErrorCallback(ErrorCallback);
         if (!glfwInit())
         {
+            LOG_ERROR("GLFW failed to initialize");
             return false;
         }
 
@@ -127,6 +131,8 @@ namespace hybrid::platform
         glfwMakeContextCurrent(window);
         glfwSwapInterval(config.vsync ? 1 : 0);
 
+        LOG_INFO("GLFW initialized");
+
         m_initialized = true;
         return true;
     }
@@ -137,6 +143,8 @@ namespace hybrid::platform
         {
             return;
         }
+
+        LOG_WARN("Platform module shutting down...");
 
         if (m_window)
         {

@@ -2,6 +2,9 @@
 
 #include <chrono>
 
+#include "core/Log.h"
+#include "utils/Banner.h"
+
 namespace hybrid::core
 {
     /**
@@ -9,23 +12,45 @@ namespace hybrid::core
      */
     int App::Run(const AppConfig &config)
     {
+        Log::Init();
+        LOG_INFO("Starting Hybrid Renderer...");
+
+        if (const std::string banner = utils::LoadBannerText(); !banner.empty())
+        {
+           LOG_INFO("\n\n" + banner + "\n\n");
+        }
+        else
+        {
+            LOG_ERROR("Banner not found, skipping...");
+        }
+
+        LOG_INFO("Starting Platform module...");
         platform::Platform platform;
         if (!platform.Init(config.platform))
         {
+            LOG_CRITICAL("Platform module failed to start, aborting...");
             return 1;
         }
+        LOG_INFO("Platform module started");
 
+        LOG_INFO("Starting UI module...");
         ui::Ui ui;
         if (!ui.Init(config.ui, platform.GetNativeHandle()))
         {
+            LOG_CRITICAL("UI module failed to start, aborting...");
             platform.Shutdown();
             return 2;
         }
+        LOG_INFO("UI module started");
+
+        LOG_INFO("----------------- READY! -----------------");
 
         RunMainLoop(platform, ui);
 
         ui.Shutdown();
         platform.Shutdown();
+
+        LOG_WARN("----------------- Shutting down, goodbye! -----------------");
 
         return 0;
     }

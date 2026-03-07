@@ -11,6 +11,10 @@ option(HYBRID_IMGUI_DEMO   "Compile imgui_demo.cpp into ImGui library" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+
+
 # Output dirs (works for single- and multi-config generators)
 set(_HYBRID_OUT_BIN "${CMAKE_BINARY_DIR}/bin")
 set(_HYBRID_OUT_LIB "${CMAKE_BINARY_DIR}/lib")
@@ -47,9 +51,10 @@ endif()
 # Dependencies (vcpkg expects these to be available via toolchain)
 # --------------------
 find_package(OpenGL REQUIRED)
-find_package(glm 1.0.3 CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 # Helper: resolve varying exported target names into stable wrapper targets.
 function(hybrid_require_target out_var)
@@ -66,6 +71,7 @@ hybrid_require_target(_HYBRID_GLFW_TGT   glfw glfw3 glfw3::glfw glfw3::glfw3)
 hybrid_require_target(_HYBRID_ASSIMP_TGT assimp::assimp assimp)
 # glm via vcpkg is glm::glm; no need to wrap, but we can for consistency:
 hybrid_require_target(_HYBRID_GLM_TGT    glm::glm)
+hybrid_require_target(_HYBRID_SPDLOG_TGT    spdlog::spdlog)
 
 add_library(thirdparty_glfw INTERFACE)
 add_library(thirdparty::glfw ALIAS thirdparty_glfw)
@@ -82,6 +88,10 @@ target_link_libraries(thirdparty_glm INTERFACE "${_HYBRID_GLM_TGT}")
 add_library(thirdparty_opengl INTERFACE)
 add_library(thirdparty::opengl ALIAS thirdparty_opengl)
 target_link_libraries(thirdparty_opengl INTERFACE OpenGL::GL)
+
+add_library(thirdparty_spdlog INTERFACE)
+add_library(thirdparty::spdlog ALIAS thirdparty_spdlog)
+target_link_libraries(thirdparty_spdlog INTERFACE "${_HYBRID_SPDLOG_TGT}")
 
 # --------------------
 # In-tree externals (imgui/glad/stb/entt)
@@ -106,22 +116,35 @@ target_link_libraries(hybrid_engine
     thirdparty::assimp
     thirdparty::glfw
     external::imgui_glfw_opengl3
+    thirdparty::spdlog
 )
 
 # Add engine sources here:
 target_sources(hybrid_engine PRIVATE
   src/engine/Engine.cpp
+
   src/core/App.cpp
+  src/core/Log.cpp
+
   src/platform/Platform.cpp
+
   src/ui/Ui.cpp
+
   src/assets/AssetManager.cpp
+
   src/utils/PathUtils.cpp
+  src/utils/Banner.cpp
 )
 
 target_include_directories(hybrid_engine
   PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+
+target_compile_definitions(hybrid_engine PRIVATE
+  HYBRID_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 
 if(HYBRID_BUILD_EDITOR)
   add_executable(hybrid_editor)

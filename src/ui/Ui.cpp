@@ -1,5 +1,7 @@
 #include "ui/Ui.h"
 
+#include "core/Log.h"
+
 #include <glad.h>
 
 #include <GLFW/glfw3.h>
@@ -22,6 +24,8 @@ namespace hybrid::ui
         {
             return false;
         }
+
+        LOG_INFO("Initializing ImGui...");
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -47,6 +51,8 @@ namespace hybrid::ui
             return false;
         }
 
+        LOG_INFO("ImGui initialized");
+
         m_window = window;
         m_config = config;
         m_initialized = true;
@@ -59,6 +65,8 @@ namespace hybrid::ui
         {
             return;
         }
+
+        LOG_WARN("UI module shutting down...");
 
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
