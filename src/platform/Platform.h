@@ -9,8 +9,8 @@ namespace hybrid::platform
 
     struct PlatformConfig
     {
-        int width = 1280;
-        int height = 720;
+        int width = 1920;
+        int height = 1080;
         std::string title = "Hybrid Renderer";
         bool vsync = true;
     };
