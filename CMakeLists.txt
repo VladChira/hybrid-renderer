@@ -114,6 +114,8 @@ target_sources(hybrid_engine PRIVATE
   src/core/App.cpp
   src/platform/Platform.cpp
   src/ui/Ui.cpp
+  src/assets/AssetManager.cpp
+  src/utils/PathUtils.cpp
 )
 
 target_include_directories(hybrid_engine
