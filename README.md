@@ -25,3 +25,8 @@ Use the “x64 Native Tools Command Prompt for VS 2022” (or otherwise ensure t
 - `set VCPKG_ROOT=C:\\path\\to\\vcpkg`
 - `cmake --preset win-ninja`
 - `cmake --build --preset win-ninja`
+
+## Progress images
+
+<p align="center"><img src="images/snapshot-1.png" width="700"/></p>
+<p align="center">UI Scaffold</p>
