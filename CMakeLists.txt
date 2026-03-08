@@ -116,7 +116,9 @@ target_link_libraries(hybrid_engine
     thirdparty::assimp
     thirdparty::glfw
     external::imgui_glfw_opengl3
+    external::implot
     thirdparty::spdlog
+    $<$<PLATFORM_ID:Windows>:Psapi>
 )
 
 # Add engine sources here:
@@ -125,11 +127,13 @@ target_sources(hybrid_engine PRIVATE
 
   src/core/App.cpp
   src/core/Log.cpp
+  src/core/ResourceMonitor.cpp
 
   src/platform/Platform.cpp
 
   src/ui/Ui.cpp
   src/ui/panels/ConsolePanel.cpp
+  src/ui/panels/PerformancePanel.cpp
   src/ui/panels/Panel.cpp
   src/ui/Dockspace.cpp
 
@@ -162,6 +166,7 @@ if(HYBRID_BUILD_EDITOR)
       hybrid::warnings
       external::glad
       external::imgui_glfw_opengl3
+      external::implot
       thirdparty::glfw
       thirdparty::opengl
   )

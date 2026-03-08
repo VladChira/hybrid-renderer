@@ -73,6 +73,25 @@ target_link_libraries(external_imgui PUBLIC
 )
 
 # --------------------
+# ImPlot (source) - depends on ImGui
+# --------------------
+add_library(external_implot STATIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/implot/implot.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/implot/implot_items.cpp"
+)
+
+add_library(external::implot ALIAS external_implot)
+
+target_include_directories(external_implot SYSTEM PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/implot"
+  "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+)
+
+target_link_libraries(external_implot PUBLIC
+  external::imgui
+)
+
+# --------------------
 # ImGui backends: GLFW + OpenGL3
 # Requires wrapper targets created in root:
 #   thirdparty::glfw

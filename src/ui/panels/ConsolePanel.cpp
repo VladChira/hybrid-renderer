@@ -56,8 +56,7 @@ namespace hybrid::ui
     {
         (void)context;
 
-        const float bottom_space = ImGui::GetStyle().ItemSpacing.y;
-        if (ImGui::BeginChild("ScrollRegion##Console", ImVec2(0, -bottom_space), false, 0))
+        if (const float bottom_space = ImGui::GetStyle().ItemSpacing.y; ImGui::BeginChild("ScrollRegion##Console", ImVec2(0, -bottom_space), false, 0))
         {
             ImGui::PushTextWrapPos();
 

@@ -3,6 +3,7 @@
 #include "ui/UiCommands.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <memory>
 #include <string>

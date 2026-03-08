@@ -1,9 +1,11 @@
 #include "ui/Ui.h"
 
 #include "core/Log.h"
+#include "core/ResourceMonitor.h"
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
 #include "panels/PlaceholderPanel.h"
+#include "panels/PerformancePanel.h"
 
 #include <glad.h>
 
@@ -11,6 +13,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <implot.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
@@ -34,6 +37,7 @@ namespace hybrid::ui
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
+        ImPlot::CreateContext();
 
         io = &ImGui::GetIO();
         io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -46,6 +50,7 @@ namespace hybrid::ui
 
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
         {
+            ImPlot::DestroyContext();
             ImGui::DestroyContext();
             return false;
         }
@@ -53,6 +58,7 @@ namespace hybrid::ui
         if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
         {
             ImGui_ImplGlfw_Shutdown();
+            ImPlot::DestroyContext();
             ImGui::DestroyContext();
             return false;
         }
@@ -60,6 +66,7 @@ namespace hybrid::ui
         if (!ImGui_ImplOpenGL3_Init(config.glsl_version.c_str()))
         {
             ImGui_ImplGlfw_Shutdown();
+            ImPlot::DestroyContext();
             ImGui::DestroyContext();
             return false;
         }
@@ -71,6 +78,7 @@ namespace hybrid::ui
         m_layout = DockspaceLayout::Default();
         m_theme = config.theme;
         m_theme_palette = BuildThemePalette(m_theme);
+        core::ResourceMonitor::Init();
         if (m_panels.Empty())
         {
             RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"), DockTarget::RightTop);
@@ -80,7 +88,7 @@ namespace hybrid::ui
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"), DockTarget::LeftTop);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Viewport"), DockTarget::Main);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Performance"), DockTarget::LeftBottom);
+            RegisterPanel(std::make_unique<PerformancePanel>(), DockTarget::LeftBottom);
         }
         m_initialized = true;
         return true;
@@ -97,6 +105,8 @@ namespace hybrid::ui
 
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
+        core::ResourceMonitor::Shutdown();
+        ImPlot::DestroyContext();
         ImGui::DestroyContext();
 
         m_window = nullptr;

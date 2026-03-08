@@ -45,8 +45,7 @@ namespace hybrid::ui
             return;
         }
 
-        const ImGuiDockNodeFlags dock_flags = DockNodeFlags();
-        if (dock_flags != 0)
+        if (const ImGuiDockNodeFlags dock_flags = DockNodeFlags(); dock_flags != 0)
         {
             ImGuiWindowClass window_class{};
             window_class.DockNodeFlagsOverrideSet = dock_flags;
