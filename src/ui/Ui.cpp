@@ -40,6 +40,7 @@ namespace hybrid::ui
         std::string font_path = std::string(HYBRID_PROJECT_ROOT) + "/assets/fonts/DMSans-Regular.ttf";
         io->Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0);
 
+        LOG_INFO("Default theme is " + ThemeKindToString(config.theme));
         ApplyTheme(config.theme);
         
 

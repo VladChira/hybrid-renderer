@@ -34,6 +34,7 @@ namespace hybrid::ui
 
     protected:
         virtual ImGuiWindowFlags WindowFlags() const;
+        virtual ImGuiDockNodeFlags DockNodeFlags() const;
         virtual void DrawContents(PanelContext &context) = 0;
 
     private:

@@ -4,6 +4,7 @@
 #include "ui/themes/Themes.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace hybrid::ui
 {
@@ -44,6 +45,11 @@ namespace hybrid::ui
     ConsolePanel::ConsolePanel()
         : Panel("Console")
     {
+    }
+
+    ImGuiDockNodeFlags ConsolePanel::DockNodeFlags() const
+    {
+        return ImGuiDockNodeFlags_NoWindowMenuButton;
     }
 
     void ConsolePanel::DrawContents(PanelContext &context)

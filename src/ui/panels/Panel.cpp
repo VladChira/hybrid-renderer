@@ -1,6 +1,7 @@
 #include "Panel.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <utility>
 
@@ -32,11 +33,24 @@ namespace hybrid::ui
         return 0;
     }
 
+    ImGuiDockNodeFlags Panel::DockNodeFlags() const
+    {
+        return 0;
+    }
+
     void Panel::Render(PanelContext &context)
     {
         if (!m_is_open)
         {
             return;
+        }
+
+        const ImGuiDockNodeFlags dock_flags = DockNodeFlags();
+        if (dock_flags != 0)
+        {
+            ImGuiWindowClass window_class{};
+            window_class.DockNodeFlagsOverrideSet = dock_flags;
+            ImGui::SetNextWindowClass(&window_class);
         }
 
         if (ImGui::Begin(m_title.c_str(), &m_is_open, WindowFlags()))

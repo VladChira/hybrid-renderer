@@ -12,6 +12,7 @@ namespace hybrid::ui
 
     private:
         void DrawContents(PanelContext &context) override;
+        ImGuiDockNodeFlags DockNodeFlags() const override;
     };
 
 } // namespace hybrid::ui

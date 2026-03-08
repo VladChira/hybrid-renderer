@@ -15,6 +15,18 @@ namespace hybrid::ui
         Lightness
     };
 
+    inline std::string ThemeKindToString(ThemeKind theme_kind)
+    {
+        switch(theme_kind)
+        {
+            case ThemeKind::Darkness:
+                return "Darkness";
+            case ThemeKind::Lightness:
+                return "Lightness";
+        }
+        return "unknown"; // this is fine, no need to throw or assert here
+    }
+
     struct LogColorPalette
     {
         ImVec4 critical{};

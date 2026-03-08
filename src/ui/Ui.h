@@ -20,7 +20,7 @@ namespace hybrid::ui
     struct UiConfig
     {
         std::string glsl_version = "#version 330";
-        ThemeKind theme = ThemeKind::Lightness;
+        ThemeKind theme = ThemeKind::Darkness;
     };
 
     class Ui
