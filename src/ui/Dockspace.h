@@ -16,7 +16,8 @@ namespace hybrid::ui
         RightTop,
         RightBottom,
 
-        Bottom
+        BottomLeft,
+        BottomRight
     };
 
     struct DockAssignment
@@ -34,6 +35,7 @@ namespace hybrid::ui
         float right_split_ratio = 0.5f;
 
         float bottom_ratio = 0.3f;
+        float bottom_split_ratio = 0.5f;
         std::vector<DockAssignment> assignments;
 
         static DockspaceLayout Default();

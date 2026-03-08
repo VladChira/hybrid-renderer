@@ -9,16 +9,6 @@ namespace hybrid::ui
     DockspaceLayout DockspaceLayout::Default()
     {
         DockspaceLayout layout;
-        layout.assignments = {
-            {"Scene Hierarchy", DockTarget::RightTop},
-            {"Properties", DockTarget::RightBottom},
-            {"Materials", DockTarget::Bottom},
-            {"Content Browser", DockTarget::RightTop},
-            {"Console", DockTarget::Bottom},
-            {"Settings", DockTarget::LeftTop},
-            {"Performance", DockTarget::LeftBottom},
-            {"Viewport", DockTarget::Main},
-        };
         return layout;
     }
 
@@ -45,6 +35,8 @@ namespace hybrid::ui
         ImGuiID dock_right_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, layout.right_ratio, nullptr, &dock_main_id);
 
         ImGuiID dock_bottom_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, layout.bottom_ratio, nullptr, &dock_main_id);
+        ImGuiID dock_bottom_right_id = ImGui::DockBuilderSplitNode(dock_bottom_id, ImGuiDir_Right, layout.bottom_split_ratio, nullptr, &dock_bottom_id);
+        ImGuiID dock_bottom_left_id = dock_bottom_id;
 
         ImGuiID dock_right_top_id = ImGui::DockBuilderSplitNode(dock_right_id, ImGuiDir_Up, layout.right_split_ratio, nullptr, &dock_right_id);
 
@@ -56,7 +48,7 @@ namespace hybrid::ui
 
         for (const auto &assignment : layout.assignments)
         {
-            ImGuiID target;
+            ImGuiID target = 0;
             switch (assignment.target)
             {
             case DockTarget::Main:
@@ -74,8 +66,11 @@ namespace hybrid::ui
             case DockTarget::RightBottom:
                 target = dock_right_bottom_id;
                 break;
-            case DockTarget::Bottom:
-                target = dock_bottom_id;
+            case DockTarget::BottomLeft:
+                target = dock_bottom_left_id;
+                break;
+            case DockTarget::BottomRight:
+                target = dock_bottom_right_id;
                 break;
             }
 

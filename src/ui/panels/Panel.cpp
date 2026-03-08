@@ -27,6 +27,11 @@ namespace hybrid::ui
         m_is_open = open;
     }
 
+    ImGuiWindowFlags Panel::WindowFlags() const
+    {
+        return 0;
+    }
+
     void Panel::Render(PanelContext &context)
     {
         if (!m_is_open)
@@ -34,7 +39,7 @@ namespace hybrid::ui
             return;
         }
 
-        if (ImGui::Begin(m_title.c_str(), &m_is_open))
+        if (ImGui::Begin(m_title.c_str(), &m_is_open, WindowFlags()))
         {
             DrawContents(context);
         }

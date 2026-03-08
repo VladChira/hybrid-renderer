@@ -129,6 +129,7 @@ target_sources(hybrid_engine PRIVATE
   src/platform/Platform.cpp
 
   src/ui/Ui.cpp
+  src/ui/panels/ConsolePanel.cpp
   src/ui/panels/Panel.cpp
   src/ui/Dockspace.cpp
 

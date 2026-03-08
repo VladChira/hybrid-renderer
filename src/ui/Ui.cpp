@@ -2,6 +2,8 @@
 
 #include "core/Log.h"
 #include "themes/Themes.h"
+#include "panels/ConsolePanel.h"
+#include "panels/PlaceholderPanel.h"
 
 #include <glad.h>
 
@@ -14,24 +16,6 @@
 
 namespace hybrid::ui
 {
-
-    namespace
-    {
-        class PlaceholderPanel final : public Panel
-        {
-        public:
-            explicit PlaceholderPanel(std::string title)
-                : Panel(std::move(title))
-            {
-            }
-
-        private:
-            void DrawContents(PanelContext &context) override
-            {
-                (void)context;
-            }
-        };
-    }
 
     bool Ui::Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle)
     {
@@ -88,14 +72,14 @@ namespace hybrid::ui
         m_layout = DockspaceLayout::Default();
         if (m_panels.Empty())
         {
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Properties"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Materials"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Console"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Viewport"));
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Performance"));
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Properties"), DockTarget::RightBottom);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Materials"), DockTarget::BottomLeft);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"), DockTarget::LeftTop);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Viewport"), DockTarget::Main);
+            RegisterPanel(std::make_unique<PlaceholderPanel>("Performance"), DockTarget::LeftBottom);
         }
         m_initialized = true;
         return true;
@@ -153,15 +137,27 @@ namespace hybrid::ui
         return commands;
     }
 
-    void Ui::RegisterPanel(std::unique_ptr<Panel> panel)
+    void Ui::RegisterPanel(std::unique_ptr<Panel> panel, DockTarget target)
     {
+        const std::string title = panel->Title();
+        LOG_INFO("Registering panel " + title);
         m_panels.Register(std::move(panel));
+        for (auto it = m_layout.assignments.begin(); it != m_layout.assignments.end(); ++it)
+        {
+            if (it->panel_title == title)
+            {
+                m_layout.assignments.erase(it);
+                break;
+            }
+        }
+        m_layout.assignments.push_back({title, target});
         m_dockspace.ResetLayout();
     }
 
     void Ui::ClearPanels()
     {
         m_panels.Clear();
+        m_layout.assignments.clear();
         m_dockspace.ResetLayout();
     }
 

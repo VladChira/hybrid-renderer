@@ -2,6 +2,8 @@
 
 #include "ui/UiCommands.h"
 
+#include <imgui.h>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,6 +30,7 @@ namespace hybrid::ui
         void Render(PanelContext &context);
 
     protected:
+        virtual ImGuiWindowFlags WindowFlags() const;
         virtual void DrawContents(PanelContext &context) = 0;
 
     private:

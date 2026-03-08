@@ -27,7 +27,7 @@ namespace hybrid::ui
         bool Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle);
         void Shutdown();
 
-        void RegisterPanel(std::unique_ptr<Panel> panel);
+        void RegisterPanel(std::unique_ptr<Panel> panel, DockTarget target = DockTarget::Main);
         void ClearPanels();
         void SetDockspaceLayout(const DockspaceLayout &layout);
         void ResetDockspaceLayout();
