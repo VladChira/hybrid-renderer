@@ -11,10 +11,13 @@
 namespace hybrid::ui
 {
 
+    struct ThemePalette;
+
     struct PanelContext
     {
         float delta_seconds = 0.0f;
         CommandBuffer *commands = nullptr;
+        const ThemePalette *theme = nullptr;
     };
 
     class Panel

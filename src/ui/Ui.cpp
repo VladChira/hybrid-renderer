@@ -40,9 +40,7 @@ namespace hybrid::ui
         std::string font_path = std::string(HYBRID_PROJECT_ROOT) + "/assets/fonts/DMSans-Regular.ttf";
         io->Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0);
 
-        // Default theme
-        embraceTheDarknessTheme();
-        // embraceTheLightnessTheme();
+        ApplyTheme(config.theme);
         
 
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
@@ -70,6 +68,8 @@ namespace hybrid::ui
         m_window = window;
         m_config = config;
         m_layout = DockspaceLayout::Default();
+        m_theme = config.theme;
+        m_theme_palette = BuildThemePalette(m_theme);
         if (m_panels.Empty())
         {
             RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"), DockTarget::RightTop);
@@ -120,6 +120,7 @@ namespace hybrid::ui
         PanelContext context{};
         context.delta_seconds = delta_seconds;
         context.commands = &commands;
+        context.theme = &m_theme_palette;
         m_panels.DrawAll(context);
 
         ImGui::Render();

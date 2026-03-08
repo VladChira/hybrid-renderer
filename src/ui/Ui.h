@@ -3,6 +3,7 @@
 #include "platform/PlatformEvents.h"
 #include "ui/Dockspace.h"
 #include "ui/panels/Panel.h"
+#include "themes/Themes.h"
 #include "ui/UiCommands.h"
 
 #include "imgui.h"
@@ -19,6 +20,7 @@ namespace hybrid::ui
     struct UiConfig
     {
         std::string glsl_version = "#version 330";
+        ThemeKind theme = ThemeKind::Lightness;
     };
 
     class Ui
@@ -41,6 +43,8 @@ namespace hybrid::ui
         DockspaceLayout m_layout{};
         Dockspace m_dockspace{};
         PanelRegistry m_panels{};
+        ThemeKind m_theme = ThemeKind::Darkness;
+        ThemePalette m_theme_palette{};
 
         ImGuiIO *io;
     };

@@ -2,7 +2,7 @@
 
 #include "imgui.h"
 
-void embraceTheLightnessTheme()
+inline void embraceTheLightnessTheme()
 {
     ImVec4 *colors = ImGui::GetStyle().Colors;
     colors[ImGuiCol_Text] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
@@ -85,4 +85,3 @@ void embraceTheLightnessTheme()
     style.LogSliderDeadzone = 4;
     style.TabRounding = 4;
 }
-

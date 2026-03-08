@@ -2,7 +2,7 @@
 
 #include "imgui.h"
 
-void embraceTheDarknessTheme()
+inline void embraceTheDarknessTheme()
 {
     ImVec4 *colors = ImGui::GetStyle().Colors;
     colors[ImGuiCol_Text] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);

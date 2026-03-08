@@ -1,6 +1,7 @@
 #include "ConsolePanel.h"
 
 #include "core/Log.h"
+#include "ui/themes/Themes.h"
 
 #include <imgui.h>
 
@@ -8,30 +9,35 @@ namespace hybrid::ui
 {
     namespace
     {
-        ImVec4 ColorForLine(const std::string &line)
+        ImVec4 ColorForLine(const std::string &line, const ThemePalette *theme)
         {
-            if (line.find("[critical]") != std::string::npos || line.find("[error]") != std::string::npos)
+            const ImVec4 fallback = theme ? theme->log.fallback : ImGui::GetStyle().Colors[ImGuiCol_Text];
+            if (line.find("[critical]") != std::string::npos)
             {
-                return ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+                return theme ? theme->log.critical : ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+            }
+            if (line.find("[error]") != std::string::npos)
+            {
+                return theme ? theme->log.error : ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
             }
             if (line.find("[warn]") != std::string::npos)
             {
-                return ImVec4(1.0f, 0.75f, 0.0f, 1.0f);
+                return theme ? theme->log.warn : ImVec4(1.0f, 0.75f, 0.0f, 1.0f);
             }
             if (line.find("[info]") != std::string::npos)
             {
-                return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                return theme ? theme->log.info : fallback;
             }
             if (line.find("[debug]") != std::string::npos)
             {
-                return ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+                return theme ? theme->log.debug : ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
             }
             if (line.find("[trace]") != std::string::npos)
             {
-                return ImVec4(0.6f, 0.8f, 1.0f, 1.0f);
+                return theme ? theme->log.trace : ImVec4(0.6f, 0.8f, 1.0f, 1.0f);
             }
 
-            return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+            return fallback;
         }
     } // namespace
 
@@ -52,7 +58,7 @@ namespace hybrid::ui
             const auto lines = core::Log::GetInMemoryLog();
             for (const auto &line : lines)
             {
-                const ImVec4 color = ColorForLine(line);
+                const ImVec4 color = ColorForLine(line, context.theme);
                 ImGui::PushStyleColor(ImGuiCol_Text, color);
                 ImGui::TextUnformatted(line.c_str());
                 ImGui::PopStyleColor();
