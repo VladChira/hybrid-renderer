@@ -3,12 +3,18 @@ include(GoogleTest)
 
 add_executable(hybrid_assets_tests
   assets/AssetsMockTest.cpp
+  assets/StbImageLoaderTest.cpp
+  scene/SceneWorldTest.cpp
 )
 
 target_link_libraries(hybrid_assets_tests PRIVATE
   GTest::gtest_main
   GTest::gmock
   hybrid::engine
+)
+
+target_compile_definitions(hybrid_assets_tests PRIVATE
+  HYBRID_TEST_RESOURCES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test-resources"
 )
 
 target_include_directories(hybrid_assets_tests PRIVATE
