@@ -84,6 +84,9 @@ namespace hybrid::assets
         AssetHandle<T> LoadHandle(const std::string &path);
 
         template <typename T>
+        AssetHandle<T> Add(const std::string &path, std::shared_ptr<T> asset);
+
+        template <typename T>
         T *Get(AssetId id);
 
         template <typename T>
@@ -153,6 +156,25 @@ namespace hybrid::assets
     AssetHandle<T> AssetManager::LoadHandle(const std::string &path)
     {
         return AssetHandle<T>(Load<T>(path), this);
+    }
+
+    template <typename T>
+    AssetHandle<T> AssetManager::Add(const std::string &path, std::shared_ptr<T> asset)
+    {
+        if (!asset)
+        {
+            return {};
+        }
+
+        AssetId id{m_next_id++};
+        AssetRecord record{};
+        record.id = id;
+        record.path = path;
+        record.type = std::type_index(typeid(T));
+        record.asset = std::move(asset);
+
+        m_assets.try_emplace(id, std::move(record));
+        return AssetHandle<T>(id, this);
     }
 
     template <typename T>

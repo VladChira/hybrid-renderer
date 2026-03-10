@@ -37,11 +37,11 @@ namespace hybrid::assets
         std::filesystem::path resolved(path);
         if (resolved.is_absolute())
         {
-            return resolved.string();
+            return resolved.make_preferred().string();
         }
 
         std::filesystem::path root(m_root_path);
-        return (root / resolved).string();
+        return (root / resolved).make_preferred().string();
     }
 
 } // namespace hybrid::assets

@@ -1,5 +1,7 @@
 #include "assets/StbImageLoader.h"
 
+#include "core/Log.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -74,14 +76,17 @@ namespace hybrid::assets
         std::vector<std::byte> bytes;
         if (!data_source->ReadAllBytes(request.path, bytes))
         {
+            LOG_ERROR("[StbImageLoader] Failed to read image bytes");
             return {};
         }
         if (bytes.empty())
         {
+            LOG_ERROR("[StbImageLoader] Image byte buffer is empty");
             return {};
         }
         if (bytes.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
         {
+            LOG_ERROR("[StbImageLoader] Image file too large for stb_image");
             return {};
         }
 
@@ -99,6 +104,14 @@ namespace hybrid::assets
             float *pixels = stbi_loadf_from_memory(data, length, &width, &height, &channels, 0);
             if (!pixels)
             {
+                LOG_ERROR(std::string("[StbImageLoader] HDR decode failed: ") + stbi_failure_reason());
+                return {};
+            }
+
+            if (width <= 0 || height <= 0 || channels <= 0)
+            {
+                LOG_ERROR("[StbImageLoader] Invalid HDR image dimensions");
+                stbi_image_free(pixels);
                 return {};
             }
 
@@ -106,7 +119,13 @@ namespace hybrid::assets
             image->height = height;
             image->channels = channels;
 
-            const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels);
+            const uint64_t count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(channels);
+            if (count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+            {
+                LOG_ERROR("[StbImageLoader] HDR image size overflow");
+                stbi_image_free(pixels);
+                return {};
+            }
             image->pixels_f32.assign(pixels, pixels + count);
             stbi_image_free(pixels);
         }
@@ -115,6 +134,14 @@ namespace hybrid::assets
             stbi_uc *pixels = stbi_load_from_memory(data, length, &width, &height, &channels, 0);
             if (!pixels)
             {
+                LOG_ERROR(std::string("[StbImageLoader] Decode failed: ") + stbi_failure_reason());
+                return {};
+            }
+
+            if (width <= 0 || height <= 0 || channels <= 0)
+            {
+                LOG_ERROR("[StbImageLoader] Invalid image dimensions");
+                stbi_image_free(pixels);
                 return {};
             }
 
@@ -122,16 +149,22 @@ namespace hybrid::assets
             image->height = height;
             image->channels = channels;
 
-            const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels);
+            const uint64_t count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(channels);
+            if (count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+            {
+                LOG_ERROR("[StbImageLoader] Image size overflow");
+                stbi_image_free(pixels);
+                return {};
+            }
             image->pixels.assign(pixels, pixels + count);
             stbi_image_free(pixels);
         }
 
         if (!image->IsValid())
         {
+            LOG_ERROR("[StbImageLoader] Decoded image is invalid");
             return {};
         }
-
         return image;
     }
 

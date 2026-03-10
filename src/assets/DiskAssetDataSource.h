@@ -17,10 +17,9 @@ namespace hybrid::assets
         bool ReadAllBytes(const std::string &path, std::vector<std::byte> &out_bytes) override;
 
         const std::string &RootPath() const { return m_root_path; }
-
-    private:
         std::string ResolvePath(const std::string &path) const;
 
+    private:
         std::string m_root_path;
     };
 

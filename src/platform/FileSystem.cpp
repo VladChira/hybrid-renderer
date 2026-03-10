@@ -1,5 +1,7 @@
 #include "platform/FileSystem.h"
 
+#include "core/Log.h"
+
 #include <fstream>
 
 namespace hybrid::platform
@@ -12,6 +14,7 @@ namespace hybrid::platform
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file)
         {
+            LOG_ERROR("File not found or could not be loaded");
             return false;
         }
 

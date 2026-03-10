@@ -2,8 +2,14 @@
 
 #include <chrono>
 
+#include "assets/AssimpSceneLoader.h"
+#include "assets/DiskAssetDataSource.h"
+#include "assets/StbImageLoader.h"
+#include "core/scene/types/SceneAssets.h"
 #include "core/Log.h"
 #include "utils/Banner.h"
+
+#include <thread>
 
 namespace hybrid::core
 {
@@ -42,6 +48,14 @@ namespace hybrid::core
             return 2;
         }
         LOG_INFO("UI module started");
+
+        LOG_INFO("Starting Asset Manager...");
+        assets::AssetManager asset_manager;
+        asset_manager.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
+        asset_manager.RegisterLoader(std::make_unique<assets::StbImageLoader>());
+        asset_manager.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&asset_manager)); // pass a ref to the manager to load other assets
+        auto scene_id = asset_manager.Load<core::scene::SceneAsset>("scenes/sponza/Sponza.gltf");
+        LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
 
