@@ -3,13 +3,18 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <fstream>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
+#elif defined(__linux__)
+#include <unistd.h>
 #endif
 
 namespace hybrid::core
@@ -116,6 +121,31 @@ namespace hybrid::core
             return static_cast<double>(counters.WorkingSetSize) / (1024.0 * 1024.0);
         }
         return 0.0;
+#elif defined(__linux__)
+        // /proc/self/statm: size resident shared text lib data dt (all in pages)
+        // We use resident pages (RSS) as the closest equivalent to Windows WorkingSetSize.
+        std::ifstream statm("/proc/self/statm");
+        if (!statm.is_open())
+        {
+            return 0.0;
+        }
+
+        std::size_t total_pages = 0;
+        std::size_t resident_pages = 0;
+        statm >> total_pages >> resident_pages;
+        if (!statm.good() && !statm.eof())
+        {
+            return 0.0;
+        }
+
+        const long page_size = ::sysconf(_SC_PAGESIZE);
+        if (page_size <= 0)
+        {
+            return 0.0;
+        }
+
+        const double bytes = static_cast<double>(resident_pages) * static_cast<double>(page_size);
+        return bytes / (1024.0 * 1024.0);
 #else
         return 0.0;
 #endif
