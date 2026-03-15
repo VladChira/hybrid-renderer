@@ -2,6 +2,7 @@
 #include "assets/DiskAssetDataSource.h"
 
 #include "core/Log.h"
+#include "core/scene/SceneWorld.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
@@ -9,6 +10,7 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -154,27 +156,36 @@ namespace hybrid::assets
         }
 
         void AppendNode(const aiNode &node,
-                        int parent_index,
+                        entt::entity parent_entity,
                         const std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> &mesh_handles,
-                        hybrid::core::scene::SceneAsset &scene)
+                        hybrid::core::scene::SceneWorld &scene)
         {
-            auto node_index = static_cast<int>(scene.nodes.size());
-            scene.nodes.emplace_back();
+            const std::string node_name = node.mName.C_Str();
+            entt::entity entity = scene.CreateEntity(node_name);
+            auto &registry = scene.Registry();
 
-            scene.nodes[node_index].name = node.mName.C_Str();
-            scene.nodes[node_index].parent_index = parent_index;
-            scene.nodes[node_index].local = ToTransform(node.mTransformation);
+            if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(entity))
+            {
+                transform->local = ToTransform(node.mTransformation);
+                transform->dirty = true;
+            }
+
+            if (parent_entity != entt::null)
+            {
+                scene.SetParent(entity, parent_entity);
+            }
 
             if (node.mNumMeshes == 1)
             {
                 const unsigned int mesh_index = node.mMeshes[0];
                 if (mesh_index < mesh_handles.size())
                 {
-                    scene.nodes[node_index].mesh = mesh_handles[mesh_index];
+                    registry.emplace<hybrid::core::scene::MeshRendererComponent>(
+                        entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
                 }
                 else
                 {
-                    LOG_WARN("[AssimpSceneLoader] Node '" + scene.nodes[node_index].name +
+                    LOG_WARN("[AssimpSceneLoader] Node '" + node_name +
                              "' mesh index out of range: " + std::to_string(mesh_index) +
                              " (max " + std::to_string(mesh_handles.size()) + ")");
                 }
@@ -186,29 +197,30 @@ namespace hybrid::assets
                     const unsigned int mesh_index = node.mMeshes[i];
                     if (mesh_index >= mesh_handles.size())
                     {
-                        LOG_WARN("[AssimpSceneLoader] Node '" + scene.nodes[node_index].name +
+                        LOG_WARN("[AssimpSceneLoader] Node '" + node_name +
                                  "' mesh index out of range: " + std::to_string(mesh_index) +
                                  " (max " + std::to_string(mesh_handles.size()) + ")");
                         continue;
                     }
 
-                    hybrid::core::scene::SceneNode mesh_node{};
-                    mesh_node.name = scene.nodes[node_index].name + "_mesh_" + std::to_string(i);
-                    mesh_node.parent_index = node_index;
-                    mesh_node.local = hybrid::core::scene::Transform{};
-                    mesh_node.mesh = mesh_handles[mesh_index];
-
-                    auto mesh_node_index = static_cast<int>(scene.nodes.size());
-                    scene.nodes.push_back(std::move(mesh_node));
-                    scene.nodes[node_index].children.push_back(mesh_node_index);
+                    const std::string mesh_name = node_name.empty()
+                                                      ? ("mesh_" + std::to_string(i))
+                                                      : (node_name + "_mesh_" + std::to_string(i));
+                    entt::entity mesh_entity = scene.CreateEntity(mesh_name);
+                    if (auto *mesh_transform = registry.try_get<hybrid::core::scene::TransformComponent>(mesh_entity))
+                    {
+                        mesh_transform->local = hybrid::core::scene::Transform{};
+                        mesh_transform->dirty = true;
+                    }
+                    scene.SetParent(mesh_entity, entity);
+                    registry.emplace<hybrid::core::scene::MeshRendererComponent>(
+                        mesh_entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
                 }
             }
 
             for (unsigned int i = 0; i < node.mNumChildren; ++i)
             {
-                auto child_index = static_cast<int>(scene.nodes.size());
-                scene.nodes[node_index].children.push_back(child_index);
-                AppendNode(*node.mChildren[i], node_index, mesh_handles, scene);
+                AppendNode(*node.mChildren[i], entity, mesh_handles, scene);
             }
         }
 
@@ -241,7 +253,7 @@ namespace hybrid::assets
 
     std::type_index AssimpSceneLoader::Type() const
     {
-        return std::type_index(typeid(hybrid::core::scene::SceneAsset));
+        return std::type_index(typeid(hybrid::core::scene::SceneWorld));
     }
 
     bool AssimpSceneLoader::SupportsExtension(std::string_view extension) const
@@ -296,8 +308,7 @@ namespace hybrid::assets
 
         LOG_INFO("[AssimpSceneLoader] \t Loading materials...");
 
-        auto result = std::make_shared<hybrid::core::scene::SceneAsset>();
-        result->name = request.path;
+        auto result = std::make_shared<hybrid::core::scene::SceneWorld>();
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MaterialAsset>> material_handles;
         material_handles.reserve(scene->mNumMaterials);
@@ -496,9 +507,7 @@ namespace hybrid::assets
 
         if (scene->mRootNode)
         {
-            auto root_index = static_cast<int>(result->nodes.size());
-            result->root_nodes.push_back(root_index);
-            AppendNode(*scene->mRootNode, -1, mesh_handles, *result);
+            AppendNode(*scene->mRootNode, entt::null, mesh_handles, *result);
         }
 
         LOG_INFO("[AssimpSceneLoader] glTF scene loaded");

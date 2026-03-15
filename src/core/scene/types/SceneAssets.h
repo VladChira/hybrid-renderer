@@ -118,20 +118,4 @@ namespace hybrid::core::scene
         float occlusion_strength = 1.0f;
     };
 
-    struct SceneNode
-    {
-        std::string name;
-        int parent_index = -1;
-        std::vector<int> children;
-        Transform local{};
-        assets::AssetHandle<MeshAsset> mesh;
-    };
-
-    struct SceneAsset
-    {
-        std::string name;
-        std::vector<SceneNode> nodes;
-        std::vector<int> root_nodes;
-    };
-
 } // namespace hybrid::core::scene
