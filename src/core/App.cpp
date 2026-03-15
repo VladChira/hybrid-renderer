@@ -13,6 +13,11 @@
 
 namespace hybrid::core
 {
+    App::App()
+        : m_scene_loader(&m_assets)
+    {
+    }
+
     /**
      * Initialize the modules, run the main loop, shutdown in reverse order
      */
@@ -50,11 +55,11 @@ namespace hybrid::core
         LOG_INFO("UI module started");
 
         LOG_INFO("Starting Asset Manager...");
-        assets::AssetManager asset_manager;
-        asset_manager.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
-        asset_manager.RegisterLoader(std::make_unique<assets::StbImageLoader>());
-        asset_manager.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&asset_manager)); // pass a ref to the manager to load other assets
-        auto scene_id = asset_manager.Load<core::scene::SceneWorld>("scenes/sponza/Sponza.gltf");
+        m_assets.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
+        m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
+        m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
+
+        RequestSceneLoad("scenes/sponza/Sponza.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -85,6 +90,20 @@ namespace hybrid::core
             ui::CommandBuffer commands = ui.Frame(delta_seconds);
             ProcessUiCommands(commands);
 
+            scene::SceneLoadResult load_result{};
+            if (m_scene_loader.TryConsumeResult(load_result))
+            {
+                if (load_result.success)
+                {
+                    m_active_scene = load_result.scene_id;
+                    LOG_INFO("[App] Scene loaded: " + load_result.path);
+                }
+                else
+                {
+                    LOG_ERROR("[App] Scene load failed: " + load_result.path);
+                }
+            }
+
             platform.SwapBuffers();
         }
     }
@@ -109,6 +128,12 @@ namespace hybrid::core
                 m_should_quit = true;
             }
         }
+    }
+
+    void App::RequestSceneLoad(const std::string &path)
+    {
+        LOG_INFO("[App] Queuing scene load: " + path);
+        m_scene_loader.RequestLoad(path);
     }
 
 } // namespace hybrid::core
