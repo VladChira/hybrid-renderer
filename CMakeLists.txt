@@ -136,8 +136,13 @@ target_sources(hybrid_engine PRIVATE
 
   src/ui/Ui.cpp
   src/ui/panels/ConsolePanel.cpp
+  src/ui/panels/PropertiesPanel.cpp
   src/ui/panels/PerformancePanel.cpp
   src/ui/panels/Panel.cpp
+  src/ui/panels/SceneHierarchyPanel.cpp
+  src/ui/panels/components/NameComponentDrawer.cpp
+  src/ui/panels/components/TransformComponentDrawer.cpp
+  src/ui/panels/components/MeshRendererComponentDrawer.cpp
   src/ui/Dockspace.cpp
 
   src/assets/AssetManager.cpp

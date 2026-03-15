@@ -5,6 +5,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <entt/entt.hpp>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,12 +15,15 @@ namespace hybrid::ui
 {
 
     struct ThemePalette;
+    struct UiState;
 
     struct PanelContext
     {
         float delta_seconds = 0.0f;
         CommandBuffer *commands = nullptr;
         const ThemePalette *theme = nullptr;
+        const UiState *state = nullptr;
+        entt::entity *selected_entity = nullptr;
     };
 
     class Panel

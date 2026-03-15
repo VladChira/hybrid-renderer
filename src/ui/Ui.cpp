@@ -5,7 +5,9 @@
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
 #include "panels/PlaceholderPanel.h"
+#include "panels/PropertiesPanel.h"
 #include "panels/PerformancePanel.h"
+#include "panels/SceneHierarchyPanel.h"
 
 #include <glad.h>
 
@@ -81,8 +83,8 @@ namespace hybrid::ui
         core::ResourceMonitor::Init();
         if (m_panels.Empty())
         {
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Scene Hierarchy"), DockTarget::RightTop);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Properties"), DockTarget::RightBottom);
+            RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Materials"), DockTarget::BottomLeft);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
@@ -113,7 +115,7 @@ namespace hybrid::ui
         m_initialized = false;
     }
 
-    CommandBuffer Ui::Frame(float delta_seconds)
+    CommandBuffer Ui::Frame(float delta_seconds, const UiState &state)
     {
         CommandBuffer commands;
         if (!m_initialized || !m_window)
@@ -132,6 +134,8 @@ namespace hybrid::ui
         context.delta_seconds = delta_seconds;
         context.commands = &commands;
         context.theme = &m_theme_palette;
+        context.state = &state;
+        context.selected_entity = &m_selected_entity;
         m_panels.DrawAll(context);
 
         ImGui::Render();

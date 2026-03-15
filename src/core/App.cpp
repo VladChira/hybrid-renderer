@@ -87,9 +87,6 @@ namespace hybrid::core
             float delta_seconds = std::chrono::duration<float>(now - last_time).count();
             last_time = now;
 
-            ui::CommandBuffer commands = ui.Frame(delta_seconds);
-            ProcessUiCommands(commands);
-
             scene::SceneLoadResult load_result{};
             if (m_scene_loader.TryConsumeResult(load_result))
             {
@@ -103,6 +100,14 @@ namespace hybrid::core
                     LOG_ERROR("[App] Scene load failed: " + load_result.path);
                 }
             }
+
+            ui::UiState ui_state{};
+            ui_state.scene_world = m_active_scene.IsValid()
+                                       ? m_assets.Get<scene::SceneWorld>(m_active_scene)
+                                       : nullptr;
+
+            ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
+            ProcessUiCommands(commands);
 
             platform.SwapBuffers();
         }

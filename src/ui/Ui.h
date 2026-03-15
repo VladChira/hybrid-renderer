@@ -5,11 +5,14 @@
 #include "ui/panels/Panel.h"
 #include "themes/Themes.h"
 #include "ui/UiCommands.h"
+#include "ui/UiState.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+
+#include <entt/entt.hpp>
 
 #include <memory>
 #include <string>
@@ -34,7 +37,7 @@ namespace hybrid::ui
         void SetDockspaceLayout(const DockspaceLayout &layout);
         void ResetDockspaceLayout();
 
-        CommandBuffer Frame(float delta_seconds);
+        CommandBuffer Frame(float delta_seconds, const UiState &state);
 
     private:
         void *m_window = nullptr;
@@ -45,6 +48,7 @@ namespace hybrid::ui
         PanelRegistry m_panels{};
         ThemeKind m_theme = ThemeKind::Darkness;
         ThemePalette m_theme_palette{};
+        entt::entity m_selected_entity{entt::null};
 
         ImGuiIO *io;
     };
