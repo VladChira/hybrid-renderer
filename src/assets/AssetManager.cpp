@@ -10,6 +10,7 @@ namespace hybrid::assets
 
     void AssetManager::SetDataSource(std::shared_ptr<IAssetDataSource> data_source)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_data_source = std::move(data_source);
     }
 
@@ -19,13 +20,21 @@ namespace hybrid::assets
         {
             return;
         }
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_loaders.push_back(std::move(loader));
     }
 
     AssetId AssetManager::Load(const std::string &path, std::type_index type)
     {
         const std::string extension = utils::ExtractExtension(path);
-        IAssetLoader *loader = FindLoader(type, extension);
+
+        IAssetLoader *loader = nullptr;
+        std::shared_ptr<IAssetDataSource> data_source;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            loader = FindLoader(type, extension);
+            data_source = m_data_source;
+        }
         if (!loader)
         {
             return {};
@@ -35,12 +44,13 @@ namespace hybrid::assets
         request.path = path;
         request.extension = extension;
 
-        std::shared_ptr<void> asset = loader->Load(request, m_data_source.get());
+        std::shared_ptr<void> asset = loader->Load(request, data_source.get());
         if (!asset)
         {
             return {};
         }
 
+        std::lock_guard<std::mutex> lock(m_mutex);
         AssetId id{m_next_id++};
         AssetRecord record{};
         record.id = id;
@@ -54,16 +64,19 @@ namespace hybrid::assets
 
     bool AssetManager::Unload(AssetId id)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_assets.erase(id) > 0;
     }
 
     bool AssetManager::IsLoaded(AssetId id) const
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_assets.find(id) != m_assets.end();
     }
 
     std::string AssetManager::GetPath(AssetId id) const
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         const auto *record = FindRecord(id);
         if (!record)
         {

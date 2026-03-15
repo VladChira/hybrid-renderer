@@ -4,6 +4,7 @@ include(GoogleTest)
 add_executable(hybrid_assets_tests
   assets/AssetsMockTest.cpp
   assets/StbImageLoaderTest.cpp
+  assets/AssetManagerTest.cpp
   scene/SceneWorldTest.cpp
 )
 

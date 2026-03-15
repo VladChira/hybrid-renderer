@@ -7,6 +7,7 @@
 #include <string_view>
 #include <typeindex>
 #include <unordered_map>
+#include <mutex>
 #include <vector>
 
 namespace hybrid::assets
@@ -112,6 +113,7 @@ namespace hybrid::assets
         AssetRecord *FindRecord(AssetId id);
         const AssetRecord *FindRecord(AssetId id) const;
 
+        mutable std::mutex m_mutex;
         std::unordered_map<AssetId, AssetRecord, AssetIdHash> m_assets;
         std::vector<std::unique_ptr<IAssetLoader>> m_loaders;
         std::shared_ptr<IAssetDataSource> m_data_source;
@@ -166,6 +168,7 @@ namespace hybrid::assets
             return {};
         }
 
+        std::lock_guard<std::mutex> lock(m_mutex);
         AssetId id{m_next_id++};
         AssetRecord record{};
         record.id = id;
@@ -180,6 +183,7 @@ namespace hybrid::assets
     template <typename T>
     T *AssetManager::Get(AssetId id)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         const auto *record = FindRecord(id);
         if (!record || record->type != std::type_index(typeid(T)))
         {
@@ -191,6 +195,7 @@ namespace hybrid::assets
     template <typename T>
     const T *AssetManager::Get(AssetId id) const
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         const auto *record = FindRecord(id);
         if (!record || record->type != std::type_index(typeid(T)))
         {
