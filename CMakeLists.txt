@@ -153,6 +153,11 @@ target_sources(hybrid_engine PRIVATE
 
   src/renderer/Renderer.cpp
   src/renderer/SceneWorldSnapshot.cpp
+  src/renderer/opengl/GLBuffer.cpp
+  src/renderer/opengl/GLTexture.cpp
+  src/renderer/opengl/GLFramebuffer.cpp
+  src/renderer/opengl/GLShaderProgram.cpp
+  src/renderer/opengl/GLVertexArray.cpp
 
   src/utils/PathUtils.cpp
   src/utils/Banner.cpp
