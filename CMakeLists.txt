@@ -140,6 +140,7 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/PerformancePanel.cpp
   src/ui/panels/Panel.cpp
   src/ui/panels/SceneHierarchyPanel.cpp
+  src/ui/panels/ViewportPanel.cpp
   src/ui/panels/components/NameComponentDrawer.cpp
   src/ui/panels/components/TransformComponentDrawer.cpp
   src/ui/panels/components/MeshRendererComponentDrawer.cpp
@@ -149,6 +150,9 @@ target_sources(hybrid_engine PRIVATE
   src/assets/DiskAssetDataSource.cpp
   src/assets/AssimpSceneLoader.cpp
   src/assets/StbImageLoader.cpp
+
+  src/renderer/Renderer.cpp
+  src/renderer/SceneWorldSnapshot.cpp
 
   src/utils/PathUtils.cpp
   src/utils/Banner.cpp

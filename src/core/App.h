@@ -3,6 +3,7 @@
 #include "assets/AssetManager.h"
 #include "core/scene/SceneLoadService.h"
 #include "platform/Platform.h"
+#include "renderer/Renderer.h"
 #include "ui/Ui.h"
 
 #include <string>
@@ -23,9 +24,16 @@ namespace hybrid::core
         int Run(const AppConfig &config = {});
 
     private:
-        void RunMainLoop(platform::Platform &platform, ui::Ui &ui);
-        void ProcessPlatformEvents(const platform::PlatformEvents &events);
-        void ProcessUiCommands(const ui::CommandBuffer &commands);
+        void RunMainLoop(platform::Platform &platform,
+                         ui::Ui &ui,
+                         renderer::Renderer &renderer,
+                         renderer::RenderExtent initial_render_extent);
+        void ProcessPlatformEvents(const platform::PlatformEvents &events,
+                                  renderer::Renderer &renderer,
+                                  renderer::RenderExtent &current_render_extent);
+        void ProcessUiCommands(const ui::CommandBuffer &commands,
+                               renderer::Renderer &renderer,
+                               renderer::RenderExtent &current_render_extent);
         void RequestSceneLoad(const std::string &path);
 
         assets::AssetManager m_assets;

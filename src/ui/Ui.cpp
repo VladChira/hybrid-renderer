@@ -8,6 +8,7 @@
 #include "panels/PropertiesPanel.h"
 #include "panels/PerformancePanel.h"
 #include "panels/SceneHierarchyPanel.h"
+#include "panels/ViewportPanel.h"
 
 #include <glad.h>
 
@@ -89,7 +90,7 @@ namespace hybrid::ui
             RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"), DockTarget::LeftTop);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Viewport"), DockTarget::Main);
+            RegisterPanel(std::make_unique<ViewportPanel>(), DockTarget::Main);
             RegisterPanel(std::make_unique<PerformancePanel>(), DockTarget::LeftBottom);
         }
         m_initialized = true;
