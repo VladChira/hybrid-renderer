@@ -10,10 +10,14 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <algorithm>
 #include <array>
+#include <future>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include <glm/glm.hpp>
@@ -86,6 +90,7 @@ namespace hybrid::assets
                                  const std::string &scene_path,
                                  hybrid::core::scene::TextureColorSpace color_space,
                                  AssetManager &assets,
+                                 std::unordered_map<std::string, assets::AssetHandle<assets::ImageAsset>> &texture_cache,
                                  hybrid::core::scene::MaterialTexture &out_texture)
         {
             if (material.GetTextureCount(type) == 0)
@@ -117,7 +122,16 @@ namespace hybrid::assets
 
             const std::string resolved_path = ResolveTexturePath(scene_path, raw_path);
             out_texture.name = raw_path;
-            out_texture.image = assets.LoadHandle<assets::ImageAsset>(resolved_path);
+            if (const auto cached = texture_cache.find(resolved_path); cached != texture_cache.end())
+            {
+                out_texture.image = cached->second;
+            }
+            else
+            {
+                auto image_handle = assets.LoadHandle<assets::ImageAsset>(resolved_path);
+                texture_cache.try_emplace(resolved_path, image_handle);
+                out_texture.image = image_handle;
+            }
             out_texture.texcoord = static_cast<int>(uv_index);
             out_texture.color_space = color_space;
             out_texture.sampler.wrap_s = ToWrap(map_modes[0]);
@@ -224,26 +238,6 @@ namespace hybrid::assets
             }
         }
 
-        hybrid::core::scene::Aabb ComputeBounds(const std::vector<hybrid::core::scene::Vertex> &vertices)
-        {
-            hybrid::core::scene::Aabb bounds{};
-            if (vertices.empty())
-            {
-                return bounds;
-            }
-
-            bounds.min = vertices.front().position;
-            bounds.max = vertices.front().position;
-            bounds.valid = true;
-
-            for (const auto &vertex : vertices)
-            {
-                bounds.min = glm::min(bounds.min, vertex.position);
-                bounds.max = glm::max(bounds.max, vertex.position);
-            }
-
-            return bounds;
-        }
     } // namespace
 
     AssimpSceneLoader::AssimpSceneLoader(AssetManager *asset_manager)
@@ -312,6 +306,8 @@ namespace hybrid::assets
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MaterialAsset>> material_handles;
         material_handles.reserve(scene->mNumMaterials);
+        std::unordered_map<std::string, assets::AssetHandle<assets::ImageAsset>> texture_cache;
+        texture_cache.reserve(scene->mNumMaterials * 4);
 
         for (unsigned int i = 0; i < scene->mNumMaterials; ++i)
         {
@@ -375,27 +371,33 @@ namespace hybrid::assets
 
             FillMaterialTexture(*material, aiTextureType_BASE_COLOR, request.path,
                                 hybrid::core::scene::TextureColorSpace::Srgb, *m_assets,
+                                texture_cache,
                                 material_asset.base_color_texture);
 
             if (!FillMaterialTexture(*material, aiTextureType_METALNESS, request.path,
                                      hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+                                     texture_cache,
                                      material_asset.metallic_roughness_texture))
             {
                 FillMaterialTexture(*material, aiTextureType_DIFFUSE_ROUGHNESS, request.path,
                                     hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+                                    texture_cache,
                                     material_asset.metallic_roughness_texture);
             }
 
             FillMaterialTexture(*material, aiTextureType_NORMALS, request.path,
                                 hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+                                texture_cache,
                                 material_asset.normal_texture);
 
             FillMaterialTexture(*material, aiTextureType_LIGHTMAP, request.path,
                                 hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+                                texture_cache,
                                 material_asset.occlusion_texture);
 
             FillMaterialTexture(*material, aiTextureType_EMISSIVE, request.path,
                                 hybrid::core::scene::TextureColorSpace::Srgb, *m_assets,
+                                texture_cache,
                                 material_asset.emissive_texture);
 
             const std::string asset_path = request.path + "#material/" + std::to_string(i);
@@ -404,18 +406,16 @@ namespace hybrid::assets
             material_handles.push_back(material_handle);
         }
 
-        std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> mesh_handles;
-        mesh_handles.reserve(scene->mNumMeshes);
+        std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> mesh_handles(scene->mNumMeshes);
 
         LOG_INFO("[AssimpSceneLoader] \t Loading meshes...");
 
-        for (unsigned int i = 0; i < scene->mNumMeshes; ++i)
+        auto load_mesh = [&](unsigned int i) -> assets::AssetHandle<hybrid::core::scene::MeshAsset>
         {
             const aiMesh *mesh = scene->mMeshes[i];
             if (!mesh)
             {
-                mesh_handles.emplace_back();
-                continue;
+                return {};
             }
 
             hybrid::core::scene::MeshAsset mesh_asset{};
@@ -423,6 +423,11 @@ namespace hybrid::assets
 
             hybrid::core::scene::MeshPrimitive primitive{};
             primitive.vertices.resize(mesh->mNumVertices);
+            const bool has_normals = mesh->HasNormals();
+            const bool has_tangents = mesh->HasTangentsAndBitangents();
+            const bool has_uv0 = mesh->HasTextureCoords(0);
+            const bool has_uv1 = mesh->HasTextureCoords(1);
+            const bool has_color0 = mesh->HasVertexColors(0);
 
             for (unsigned int v = 0; v < mesh->mNumVertices; ++v)
             {
@@ -430,38 +435,38 @@ namespace hybrid::assets
                 const aiVector3D &pos = mesh->mVertices[v];
                 vertex.position = {pos.x, pos.y, pos.z};
 
-                if (mesh->HasNormals())
+                if (has_normals)
                 {
                     const aiVector3D &n = mesh->mNormals[v];
                     vertex.normal = {n.x, n.y, n.z};
                 }
 
-                if (mesh->HasTangentsAndBitangents())
+                if (has_tangents)
                 {
                     const aiVector3D &t = mesh->mTangents[v];
                     vertex.tangent = {t.x, t.y, t.z, 1.0f};
                 }
 
-                if (mesh->HasTextureCoords(0))
+                if (has_uv0)
                 {
                     const aiVector3D &uv = mesh->mTextureCoords[0][v];
                     vertex.uv0 = {uv.x, uv.y};
                 }
 
-                if (mesh->HasTextureCoords(1))
+                if (has_uv1)
                 {
                     const aiVector3D &uv = mesh->mTextureCoords[1][v];
                     vertex.uv1 = {uv.x, uv.y};
                 }
 
-                if (mesh->HasVertexColors(0))
+                if (has_color0)
                 {
                     const aiColor4D &c = mesh->mColors[0][v];
                     vertex.color0 = {c.r, c.g, c.b, c.a};
                 }
             }
 
-            if (mesh->mNumVertices <= 0)
+            if (mesh->mNumVertices == 0)
             {
                 LOG_WARN("[AssimpSceneLoader] Mesh " + std::to_string(i) + " has zero vertices");
             }
@@ -480,6 +485,11 @@ namespace hybrid::assets
                 primitive.indices.push_back(face.mIndices[1]);
                 primitive.indices.push_back(face.mIndices[2]);
             }
+            if (skipped_faces > 0)
+            {
+                LOG_WARN("[AssimpSceneLoader] Mesh " + std::to_string(i) +
+                         " skipped non-triangle faces: " + std::to_string(skipped_faces));
+            }
             if (mesh->mMaterialIndex < material_handles.size())
             {
                 primitive.material = material_handles[mesh->mMaterialIndex];
@@ -489,7 +499,18 @@ namespace hybrid::assets
                 LOG_WARN("[AssimpSceneLoader] Mesh " + std::to_string(i) + " material handle invalid");
             }
 
-            primitive.bounds = ComputeBounds(primitive.vertices);
+            primitive.bounds.valid = mesh->mNumVertices > 0;
+            if (primitive.bounds.valid)
+            {
+                const auto &first = primitive.vertices.front().position;
+                primitive.bounds.min = first;
+                primitive.bounds.max = first;
+                for (const auto &vertex : primitive.vertices)
+                {
+                    primitive.bounds.min = glm::min(primitive.bounds.min, vertex.position);
+                    primitive.bounds.max = glm::max(primitive.bounds.max, vertex.position);
+                }
+            }
             if (!primitive.bounds.valid)
             {
                 LOG_WARN("[AssimpSceneLoader] Mesh " + std::to_string(i) + " has invalid bounds");
@@ -498,9 +519,41 @@ namespace hybrid::assets
             mesh_asset.bounds = mesh_asset.primitives.front().bounds;
 
             const std::string asset_path = request.path + "#mesh/" + std::to_string(i);
-            auto mesh_handle = m_assets->Add(asset_path, std::make_shared<hybrid::core::scene::MeshAsset>(
-                                                             std::move(mesh_asset)));
-            mesh_handles.push_back(mesh_handle);
+            return m_assets->Add(asset_path, std::make_shared<hybrid::core::scene::MeshAsset>(std::move(mesh_asset)));
+        };
+
+        const unsigned int mesh_count = scene->mNumMeshes;
+        const unsigned int hw_threads = std::max(1u, std::thread::hardware_concurrency());
+        const unsigned int worker_count = std::min(mesh_count, hw_threads);
+        if (worker_count <= 1)
+        {
+            for (unsigned int i = 0; i < mesh_count; ++i)
+            {
+                mesh_handles[i] = load_mesh(i);
+            }
+        }
+        else
+        {
+            std::vector<std::future<void>> workers;
+            workers.reserve(worker_count);
+
+            LOG_INFO("[AssimpSceneLoader] \t Processing meshes across " + std::to_string(worker_count) + " workers");
+
+            for (unsigned int worker = 0; worker < worker_count; ++worker)
+            {
+                workers.emplace_back(std::async(std::launch::async, [&, worker]()
+                                                {
+                                                    for (unsigned int i = worker; i < mesh_count; i += worker_count)
+                                                    {
+                                                        mesh_handles[i] = load_mesh(i);
+                                                    }
+                                                }));
+            }
+
+            for (auto &worker : workers)
+            {
+                worker.get();
+            }
         }
 
         LOG_INFO("[AssimpSceneLoader] \t Building scene tree...");
