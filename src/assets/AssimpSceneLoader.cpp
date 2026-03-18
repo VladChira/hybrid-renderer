@@ -1,4 +1,5 @@
 #include "assets/AssimpSceneLoader.h"
+#include "assets/AssimpTextureCache.h"
 #include "assets/DiskAssetDataSource.h"
 
 #include "core/Log.h"
@@ -17,7 +18,6 @@
 #include <functional>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 
 #include <glm/glm.hpp>
@@ -59,18 +59,6 @@ namespace hybrid::assets
             return true;
         }
 
-        std::string ResolveTexturePath(const std::string &scene_path, const std::string &texture_path)
-        {
-            std::filesystem::path tex(texture_path);
-            if (tex.is_absolute())
-            {
-                return tex.string();
-            }
-            std::filesystem::path base(scene_path);
-            base = base.parent_path();
-            return (base / tex).string();
-        }
-
         hybrid::core::scene::TextureWrap ToWrap(aiTextureMapMode mode)
         {
             switch (mode)
@@ -87,10 +75,8 @@ namespace hybrid::assets
 
         bool FillMaterialTexture(const aiMaterial &material,
                                  aiTextureType type,
-                                 const std::string &scene_path,
                                  hybrid::core::scene::TextureColorSpace color_space,
-                                 AssetManager &assets,
-                                 std::unordered_map<std::string, assets::AssetHandle<assets::ImageAsset>> &texture_cache,
+                                 AssimpTextureCache &texture_cache,
                                  hybrid::core::scene::MaterialTexture &out_texture)
         {
             if (material.GetTextureCount(type) == 0)
@@ -120,18 +106,8 @@ namespace hybrid::assets
                 return false;
             }
 
-            const std::string resolved_path = ResolveTexturePath(scene_path, raw_path);
             out_texture.name = raw_path;
-            if (const auto cached = texture_cache.find(resolved_path); cached != texture_cache.end())
-            {
-                out_texture.image = cached->second;
-            }
-            else
-            {
-                auto image_handle = assets.LoadHandle<assets::ImageAsset>(resolved_path);
-                texture_cache.try_emplace(resolved_path, image_handle);
-                out_texture.image = image_handle;
-            }
+            out_texture.image = texture_cache.GetOrLoad(raw_path);
             out_texture.texcoord = static_cast<int>(uv_index);
             out_texture.color_space = color_space;
             out_texture.sampler.wrap_s = ToWrap(map_modes[0]);
@@ -304,18 +280,15 @@ namespace hybrid::assets
 
         auto result = std::make_shared<hybrid::core::scene::SceneWorld>();
 
-        std::vector<assets::AssetHandle<hybrid::core::scene::MaterialAsset>> material_handles;
-        material_handles.reserve(scene->mNumMaterials);
-        std::unordered_map<std::string, assets::AssetHandle<assets::ImageAsset>> texture_cache;
-        texture_cache.reserve(scene->mNumMaterials * 4);
+        std::vector<assets::AssetHandle<hybrid::core::scene::MaterialAsset>> material_handles(scene->mNumMaterials);
+        AssimpTextureCache texture_cache(m_assets, request.path);
 
-        for (unsigned int i = 0; i < scene->mNumMaterials; ++i)
+        auto load_material = [&](unsigned int i) -> assets::AssetHandle<hybrid::core::scene::MaterialAsset>
         {
             const aiMaterial *material = scene->mMaterials[i];
             if (!material)
             {
-                material_handles.emplace_back();
-                continue;
+                return {};
             }
 
             hybrid::core::scene::MaterialAsset material_asset{};
@@ -369,41 +342,74 @@ namespace hybrid::assets
                 material_asset.alpha_cutoff = alpha_cutoff;
             }
 
-            FillMaterialTexture(*material, aiTextureType_BASE_COLOR, request.path,
-                                hybrid::core::scene::TextureColorSpace::Srgb, *m_assets,
+            FillMaterialTexture(*material, aiTextureType_BASE_COLOR,
+                                hybrid::core::scene::TextureColorSpace::Srgb,
                                 texture_cache,
                                 material_asset.base_color_texture);
 
-            if (!FillMaterialTexture(*material, aiTextureType_METALNESS, request.path,
-                                     hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+            if (!FillMaterialTexture(*material, aiTextureType_METALNESS,
+                                     hybrid::core::scene::TextureColorSpace::Linear,
                                      texture_cache,
                                      material_asset.metallic_roughness_texture))
             {
-                FillMaterialTexture(*material, aiTextureType_DIFFUSE_ROUGHNESS, request.path,
-                                    hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+                FillMaterialTexture(*material, aiTextureType_DIFFUSE_ROUGHNESS,
+                                    hybrid::core::scene::TextureColorSpace::Linear,
                                     texture_cache,
                                     material_asset.metallic_roughness_texture);
             }
 
-            FillMaterialTexture(*material, aiTextureType_NORMALS, request.path,
-                                hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+            FillMaterialTexture(*material, aiTextureType_NORMALS,
+                                hybrid::core::scene::TextureColorSpace::Linear,
                                 texture_cache,
                                 material_asset.normal_texture);
 
-            FillMaterialTexture(*material, aiTextureType_LIGHTMAP, request.path,
-                                hybrid::core::scene::TextureColorSpace::Linear, *m_assets,
+            FillMaterialTexture(*material, aiTextureType_LIGHTMAP,
+                                hybrid::core::scene::TextureColorSpace::Linear,
                                 texture_cache,
                                 material_asset.occlusion_texture);
 
-            FillMaterialTexture(*material, aiTextureType_EMISSIVE, request.path,
-                                hybrid::core::scene::TextureColorSpace::Srgb, *m_assets,
+            FillMaterialTexture(*material, aiTextureType_EMISSIVE,
+                                hybrid::core::scene::TextureColorSpace::Srgb,
                                 texture_cache,
                                 material_asset.emissive_texture);
 
             const std::string asset_path = request.path + "#material/" + std::to_string(i);
-            auto material_handle = m_assets->Add(asset_path, std::make_shared<hybrid::core::scene::MaterialAsset>(
-                                                                 std::move(material_asset)));
-            material_handles.push_back(material_handle);
+            return m_assets->Add(asset_path, std::make_shared<hybrid::core::scene::MaterialAsset>(
+                                                 std::move(material_asset)));
+        };
+
+        const unsigned int material_count = scene->mNumMaterials;
+        const unsigned int material_hw_threads = std::max(1u, std::thread::hardware_concurrency());
+        const unsigned int material_worker_count = std::min(material_count, material_hw_threads);
+        if (material_worker_count <= 1)
+        {
+            for (unsigned int i = 0; i < material_count; ++i)
+            {
+                material_handles[i] = load_material(i);
+            }
+        }
+        else
+        {
+            std::vector<std::future<void>> material_workers;
+            material_workers.reserve(material_worker_count);
+
+            LOG_INFO("[AssimpSceneLoader] \t Processing materials across " + std::to_string(material_worker_count) + " workers");
+
+            for (unsigned int worker = 0; worker < material_worker_count; ++worker)
+            {
+                material_workers.emplace_back(std::async(std::launch::async, [&, worker]()
+                                                         {
+                                                             for (unsigned int i = worker; i < material_count; i += material_worker_count)
+                                                             {
+                                                                 material_handles[i] = load_material(i);
+                                                             }
+                                                         }));
+            }
+
+            for (auto &worker : material_workers)
+            {
+                worker.get();
+            }
         }
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> mesh_handles(scene->mNumMeshes);

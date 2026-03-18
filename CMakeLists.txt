@@ -150,6 +150,7 @@ target_sources(hybrid_engine PRIVATE
   src/assets/AssetManager.cpp
   src/assets/DiskAssetDataSource.cpp
   src/assets/AssimpSceneLoader.cpp
+  src/assets/AssimpTextureCache.cpp
   src/assets/StbImageLoader.cpp
 
   src/renderer/Renderer.cpp

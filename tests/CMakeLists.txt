@@ -5,6 +5,7 @@ add_executable(hybrid_assets_tests
   assets/AssetsMockTest.cpp
   assets/StbImageLoaderTest.cpp
   assets/AssetManagerTest.cpp
+  assets/AssimpTextureCacheTest.cpp
   scene/SceneWorldTest.cpp
 )
 
