@@ -14,7 +14,10 @@ namespace hybrid::ui
 
     void Dockspace::BeginFrame() const
     {
-        ImGui::DockSpaceOverViewport(ImGui::GetMainViewport()->ID);
+        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        ImGui::DockSpaceOverViewport(viewport->ID,
+                                     viewport,
+                                     ImGuiDockNodeFlags_PassthruCentralNode);
     }
 
     void Dockspace::BuildLayout(const DockspaceLayout &layout)
@@ -26,7 +29,8 @@ namespace hybrid::ui
 
         ImGuiID dockspace_id = ImGui::GetMainViewport()->ID;
         ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderAddNode(dockspace_id,
+                                  ImGuiDockNodeFlags_DockSpace | ImGuiDockNodeFlags_PassthruCentralNode);
         ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
         ImGuiID dock_main_id = dockspace_id;

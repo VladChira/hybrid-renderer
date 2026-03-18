@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/scene/types/SceneAssets.h"
-#include "platform/PlatformEvents.h"
 
 #include <cstdint>
 #include <vector>
@@ -86,7 +85,6 @@ namespace hybrid::renderer
 
     struct RendererConfig
     {
-        platform::NativeWindowHandle window{};
         RenderExtent initial_extent{};
         bool vsync = true;
     };

@@ -53,7 +53,6 @@ namespace hybrid::core
         LOG_INFO("Starting Renderer module...");
         renderer::Renderer renderer;
         renderer::RendererConfig renderer_config{};
-        renderer_config.window = platform.GetNativeHandle();
         renderer_config.initial_extent = renderer::utils::ToRenderExtent(config.platform.width, config.platform.height);
         renderer_config.vsync = config.platform.vsync;
         if (!renderer.Init(renderer_config))
@@ -144,6 +143,7 @@ namespace hybrid::core
             frame_context.time_seconds = elapsed_seconds;
             frame_context.render_extent = current_render_extent;
 
+            renderer::RendererOutputs renderer_outputs{};
             if (renderer.BeginFrame(frame_context))
             {
                 if (active_scene_world)
@@ -152,11 +152,12 @@ namespace hybrid::core
                     renderer::RenderSettings settings{};
                     renderer.SubmitScene(*active_scene_world, view, settings);
                 }
-                renderer.EndFrame();
+                renderer_outputs = renderer.EndFrame();
             }
 
             ui::UiState ui_state{};
             ui_state.scene_world = active_scene_world;
+            ui_state.viewport_color_texture = renderer_outputs.color.value;
 
             ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
             ProcessUiCommands(commands, renderer, current_render_extent);

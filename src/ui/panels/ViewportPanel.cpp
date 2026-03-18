@@ -1,8 +1,10 @@
 #include "ViewportPanel.h"
 
 #include "core/Log.h"
+#include "ui/UiState.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 
 namespace hybrid::ui
@@ -23,6 +25,11 @@ namespace hybrid::ui
     {
     }
 
+    ImGuiWindowFlags ViewportPanel::WindowFlags() const
+    {
+        return ImGuiWindowFlags_NoBackground;
+    }
+
     void ViewportPanel::DrawContents(PanelContext &context)
     {
         const ImVec2 current_size = ImGui::GetContentRegionAvail();
@@ -34,6 +41,16 @@ namespace hybrid::ui
             command.viewport_extent.height = std::max(static_cast<int>(current_size.y), 1);
             context.commands->push_back(command);
         }
+
+        if (context.state != nullptr && context.state->viewport_color_texture != 0)
+        {
+            ImGui::Image(
+                static_cast<ImTextureID>(static_cast<intptr_t>(context.state->viewport_color_texture)),
+                current_size,
+                ImVec2(0.0f, 1.0f),
+                ImVec2(1.0f, 0.0f));
+        }
+
         m_last_content_size = current_size;
     }
 

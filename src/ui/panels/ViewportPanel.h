@@ -13,6 +13,7 @@ namespace hybrid::ui
         ViewportPanel();
 
     private:
+        ImGuiWindowFlags WindowFlags() const override;
         void DrawContents(PanelContext &context) override;
 
         ImVec2 m_last_content_size{0.0f, 0.0f};

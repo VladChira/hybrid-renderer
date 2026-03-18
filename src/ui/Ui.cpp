@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/ResourceMonitor.h"
+#include "graphics/GraphicsRuntime.h"
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
 #include "panels/PlaceholderPanel.h"
@@ -36,6 +37,18 @@ namespace hybrid::ui
             return false;
         }
 
+        if (glfwGetCurrentContext() == nullptr)
+        {
+            LOG_ERROR("UI init failed: no current OpenGL context");
+            return false;
+        }
+
+        if (!graphics::EnsureOpenGLInitialized(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
+        {
+            LOG_ERROR("UI init failed: OpenGL runtime initialization failed");
+            return false;
+        }
+
         LOG_INFO("Initializing ImGui...");
 
         IMGUI_CHECKVERSION();
@@ -53,14 +66,6 @@ namespace hybrid::ui
 
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
         {
-            ImPlot::DestroyContext();
-            ImGui::DestroyContext();
-            return false;
-        }
-
-        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
-        {
-            ImGui_ImplGlfw_Shutdown();
             ImPlot::DestroyContext();
             ImGui::DestroyContext();
             return false;
@@ -146,8 +151,6 @@ namespace hybrid::ui
         glfwGetFramebufferSize(static_cast<GLFWwindow *>(m_window), &fb_width, &fb_height);
 
         glViewport(0, 0, fb_width, fb_height);
-        glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
