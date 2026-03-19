@@ -9,17 +9,6 @@
 
 namespace hybrid::ui
 {
-
-    namespace
-    {
-        bool HasViewportSizeChanged(const ImVec2 &current, const ImVec2 &previous)
-        {
-            constexpr float epsilon = 0.5f;
-            return std::fabs(current.x - previous.x) > epsilon ||
-                   std::fabs(current.y - previous.y) > epsilon;
-        }
-    } // namespace
-
     ViewportPanel::ViewportPanel()
         : Panel("Viewport")
     {
@@ -33,20 +22,36 @@ namespace hybrid::ui
     void ViewportPanel::DrawContents(PanelContext &context)
     {
         const ImVec2 current_size = ImGui::GetContentRegionAvail();
-        if (HasViewportSizeChanged(current_size, m_last_content_size) && context.commands != nullptr)
-        {
-            UiCommand command{};
-            command.type = UiCommand::Type::ViewportResize;
-            command.viewport_extent.width = std::max(static_cast<int>(current_size.x), 1);
-            command.viewport_extent.height = std::max(static_cast<int>(current_size.y), 1);
-            context.commands->push_back(command);
-        }
-
         if (context.state != nullptr && context.state->viewport_color_texture != 0)
         {
+            const auto &render_extent = context.state->viewport_render_extent;
+            const float render_width = static_cast<float>(std::max(render_extent.width, 1u));
+            const float render_height = static_cast<float>(std::max(render_extent.height, 1u));
+            const float render_aspect = render_width / render_height;
+            const float viewport_width = std::max(current_size.x, 1.0f);
+            const float viewport_height = std::max(current_size.y, 1.0f);
+            const float viewport_aspect = viewport_width / viewport_height;
+
+            ImVec2 image_size = current_size;
+            if (viewport_aspect > render_aspect)
+            {
+                image_size.x = viewport_height * render_aspect;
+                image_size.y = viewport_height;
+            }
+            else
+            {
+                image_size.x = viewport_width;
+                image_size.y = viewport_width / render_aspect;
+            }
+
+            const float x_offset = (current_size.x - image_size.x) * 0.5f;
+            const float y_offset = (current_size.y - image_size.y) * 0.5f;
+            ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + x_offset,
+                                       ImGui::GetCursorPosY() + y_offset));
+
             ImGui::Image(
                 static_cast<ImTextureID>(static_cast<intptr_t>(context.state->viewport_color_texture)),
-                current_size,
+                image_size,
                 ImVec2(0.0f, 1.0f),
                 ImVec2(1.0f, 0.0f));
         }

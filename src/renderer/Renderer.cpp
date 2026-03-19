@@ -257,7 +257,6 @@ namespace hybrid::renderer
 
     struct Renderer::Impl
     {
-        RendererConfig config{};
         RenderExtent current_extent{};
         RendererStats stats{};
         RendererOutputs outputs{};
@@ -281,7 +280,7 @@ namespace hybrid::renderer
         Shutdown();
     }
 
-    bool Renderer::Init(const RendererConfig &config)
+    bool Renderer::Init()
     {
         if (glfwGetCurrentContext() == nullptr)
         {
@@ -302,9 +301,6 @@ namespace hybrid::renderer
             LOG_ERROR("[Renderer] Init failed: forward shader program build failed");
             return false;
         }
-
-        m_impl->config = config;
-        m_impl->current_extent = config.initial_extent;
 
         if (m_impl->current_extent.IsValid())
         {

@@ -19,7 +19,7 @@ namespace hybrid::renderer
         Renderer(Renderer &&) noexcept = default;
         Renderer &operator=(Renderer &&) noexcept = default;
 
-        bool Init(const RendererConfig &config);
+        bool Init();
         void Shutdown();
 
         void Resize(const RenderExtent &extent);

@@ -52,10 +52,7 @@ namespace hybrid::core
 
         LOG_INFO("Starting Renderer module...");
         renderer::Renderer renderer;
-        renderer::RendererConfig renderer_config{};
-        renderer_config.initial_extent = renderer::utils::ToRenderExtent(config.platform.width, config.platform.height);
-        renderer_config.vsync = config.platform.vsync;
-        if (!renderer.Init(renderer_config))
+        if (!renderer.Init())
         {
             LOG_CRITICAL("Renderer module failed to start, aborting...");
             platform.Shutdown();
@@ -84,7 +81,7 @@ namespace hybrid::core
 
         LOG_INFO("----------------- READY! -----------------");
 
-        RunMainLoop(platform, ui, renderer, renderer_config.initial_extent);
+        RunMainLoop(platform, ui, renderer);
 
         ui.Shutdown();
         renderer.Shutdown();
@@ -97,18 +94,16 @@ namespace hybrid::core
 
     void App::RunMainLoop(platform::Platform &platform,
                           ui::Ui &ui,
-                          renderer::Renderer &renderer,
-                          renderer::RenderExtent initial_render_extent)
+                          renderer::Renderer &renderer)
     {
         auto last_time = std::chrono::steady_clock::now();
-        renderer::RenderExtent current_render_extent = initial_render_extent;
         uint64_t frame_index = 0;
         double elapsed_seconds = 0.0;
 
         while (!m_should_quit && !platform.ShouldClose())
         {
             platform.PollEvents();
-            ProcessPlatformEvents(platform.Events(), renderer, current_render_extent);
+            ProcessPlatformEvents(platform.Events());
 
             auto now = std::chrono::steady_clock::now();
             float delta_seconds = std::chrono::duration<float>(now - last_time).count();
@@ -137,11 +132,13 @@ namespace hybrid::core
                 active_scene_world->UpdateTransforms();
             }
 
+            renderer::RenderSettings settings{};
+
             renderer::FrameContext frame_context{};
             frame_context.frame_index = frame_index;
             frame_context.delta_seconds = delta_seconds;
             frame_context.time_seconds = elapsed_seconds;
-            frame_context.render_extent = current_render_extent;
+            frame_context.render_extent = settings.render_extent;
 
             renderer::RendererOutputs renderer_outputs{};
             if (renderer.BeginFrame(frame_context))
@@ -149,7 +146,6 @@ namespace hybrid::core
                 if (active_scene_world)
                 {
                     renderer::RenderView view{};
-                    renderer::RenderSettings settings{};
                     renderer.SubmitScene(*active_scene_world, view, settings);
                 }
                 renderer_outputs = renderer.EndFrame();
@@ -158,17 +154,16 @@ namespace hybrid::core
             ui::UiState ui_state{};
             ui_state.scene_world = active_scene_world;
             ui_state.viewport_color_texture = renderer_outputs.color.value;
+            ui_state.viewport_render_extent = frame_context.render_extent;
 
             ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
-            ProcessUiCommands(commands, renderer, current_render_extent);
+            ProcessUiCommands(commands);
 
             platform.SwapBuffers();
         }
     }
 
-    void App::ProcessPlatformEvents(const platform::PlatformEvents &events,
-                                    renderer::Renderer &renderer,
-                                    renderer::RenderExtent &current_render_extent)
+    void App::ProcessPlatformEvents(const platform::PlatformEvents &events)
     {
         for (const auto &event : events)
         {
@@ -176,28 +171,16 @@ namespace hybrid::core
             {
                 m_should_quit = true;
             }
-            else if (event.type == platform::PlatformEvent::Type::FramebufferResize)
-            {
-                current_render_extent = renderer::utils::ToRenderExtent(event.width, event.height);
-                renderer.Resize(current_render_extent);
-            }
         }
     }
 
-    void App::ProcessUiCommands(const ui::CommandBuffer &commands,
-                                renderer::Renderer &renderer,
-                                renderer::RenderExtent &current_render_extent)
+    void App::ProcessUiCommands(const ui::CommandBuffer &commands)
     {
         for (const auto &command : commands)
         {
             if (command.type == ui::UiCommand::Type::Quit)
             {
                 m_should_quit = true;
-            }
-            else if (command.type == ui::UiCommand::Type::ViewportResize)
-            {
-                current_render_extent = renderer::utils::ToRenderExtent(command.viewport_extent.width, command.viewport_extent.height);
-                renderer.Resize(current_render_extent);
             }
         }
     }

@@ -26,14 +26,9 @@ namespace hybrid::core
     private:
         void RunMainLoop(platform::Platform &platform,
                          ui::Ui &ui,
-                         renderer::Renderer &renderer,
-                         renderer::RenderExtent initial_render_extent);
-        void ProcessPlatformEvents(const platform::PlatformEvents &events,
-                                  renderer::Renderer &renderer,
-                                  renderer::RenderExtent &current_render_extent);
-        void ProcessUiCommands(const ui::CommandBuffer &commands,
-                               renderer::Renderer &renderer,
-                               renderer::RenderExtent &current_render_extent);
+                         renderer::Renderer &renderer);
+        void ProcessPlatformEvents(const platform::PlatformEvents &events);
+        void ProcessUiCommands(const ui::CommandBuffer &commands);
         void RequestSceneLoad(const std::string &path);
 
         assets::AssetManager m_assets;

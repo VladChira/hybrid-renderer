@@ -45,6 +45,7 @@ namespace hybrid::renderer
     struct RenderSettings
     {
         RenderMode mode = RenderMode::Lit;
+        RenderExtent render_extent{1280, 720};
         bool show_bounds = false;
         float exposure = 1.0f;
     };
@@ -81,12 +82,6 @@ namespace hybrid::renderer
     {
         RendererOutputHandle color;
         RendererOutputHandle depth;
-    };
-
-    struct RendererConfig
-    {
-        RenderExtent initial_extent{};
-        bool vsync = true;
     };
 
 } // namespace hybrid::renderer
