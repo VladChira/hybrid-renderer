@@ -19,7 +19,7 @@ namespace hybrid::ui
         }
         else
         {
-            ImGui::Text("Target: %u", static_cast<unsigned>(entt::to_integral(component.target)));
+            ImGui::Text("Target: %u", entt::to_integral(component.target));
         }
     }
 

@@ -16,7 +16,7 @@ namespace hybrid::core::scene
     SceneLoadService::~SceneLoadService()
     {
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard lock(m_mutex);
             m_shutdown = true;
         }
         m_condition.notify_all();
@@ -29,7 +29,7 @@ namespace hybrid::core::scene
     void SceneLoadService::RequestLoad(std::string path)
     {
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard lock(m_mutex);
             m_pending_path = std::move(path);
         }
         m_condition.notify_one();
@@ -37,7 +37,7 @@ namespace hybrid::core::scene
 
     bool SceneLoadService::TryConsumeResult(SceneLoadResult &out_result)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard lock(m_mutex);
         if (!m_completed.has_value())
         {
             return false;
@@ -58,7 +58,7 @@ namespace hybrid::core::scene
         {
             std::string path;
             {
-                std::unique_lock<std::mutex> lock(m_mutex);
+                std::unique_lock lock(m_mutex);
                 m_condition.wait(lock, [&]
                                  { return m_shutdown || m_pending_path.has_value(); });
                 if (m_shutdown)
@@ -73,7 +73,7 @@ namespace hybrid::core::scene
             if (!m_assets)
             {
                 LOG_ERROR("[SceneLoadService] No asset manager available");
-                std::lock_guard<std::mutex> lock(m_mutex);
+                std::lock_guard lock(m_mutex);
                 m_completed = SceneLoadResult{std::move(path), {}, false};
                 m_state.store(State::Failed, std::memory_order_relaxed);
                 continue;
@@ -84,7 +84,7 @@ namespace hybrid::core::scene
             const bool success = id.IsValid();
 
             {
-                std::lock_guard<std::mutex> lock(m_mutex);
+                std::lock_guard lock(m_mutex);
                 m_completed = SceneLoadResult{std::move(path), id, success};
                 m_state.store(success ? State::Loaded : State::Failed, std::memory_order_relaxed);
             }

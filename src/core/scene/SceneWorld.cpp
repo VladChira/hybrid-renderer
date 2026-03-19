@@ -38,10 +38,9 @@ namespace hybrid::core::scene
             return;
         }
 
-        if (auto *hierarchy = m_registry.try_get<HierarchyComponent>(entity))
+        if (auto const *hierarchy = m_registry.try_get<HierarchyComponent>(entity))
         {
-            const entt::entity parent = hierarchy->parent;
-            if (parent != entt::null)
+            if (const entt::entity parent = hierarchy->parent; parent != entt::null)
             {
                 RemoveChild(parent, entity);
             }

@@ -21,7 +21,7 @@ namespace hybrid::assets
         const std::string resolved_path = ResolveTexturePath(texture_path);
 
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard lock(m_mutex);
             const auto it = m_cache.find(resolved_path);
             if (it != m_cache.end())
             {
@@ -32,8 +32,8 @@ namespace hybrid::assets
         auto image_handle = m_assets->LoadHandle<ImageAsset>(resolved_path);
 
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            const auto [it, inserted] = m_cache.emplace(resolved_path, image_handle);
+            std::lock_guard lock(m_mutex);
+            const auto [it, inserted] = m_cache.try_emplace(resolved_path, image_handle);
             (void)inserted;
             return it->second;
         }

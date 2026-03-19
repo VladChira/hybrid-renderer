@@ -10,7 +10,7 @@ namespace hybrid::ui
 {
     namespace
     {
-        ImVec4 ColorForLine(const std::string &line, const ThemePalette *theme)
+        ImVec4 ColorForLine(std::string_view line, const ThemePalette *theme)
         {
             const ImVec4 fallback = theme ? theme->log.fallback : ImGui::GetStyle().Colors[ImGuiCol_Text];
             if (line.find("[critical]") != std::string::npos)

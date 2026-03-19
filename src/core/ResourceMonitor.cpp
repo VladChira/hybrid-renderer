@@ -41,7 +41,7 @@ namespace hybrid::core
         }
 
         {
-            std::lock_guard<std::mutex> lock(s_samples_mutex);
+            std::lock_guard lock(s_samples_mutex);
             s_samples.clear();
             s_samples.reserve(s_capacity);
         }
@@ -61,7 +61,7 @@ namespace hybrid::core
                 sample.ram_mb = QueryProcessRamMB();
 
                 {
-                    std::lock_guard<std::mutex> lock(s_samples_mutex);
+                    std::lock_guard lock(s_samples_mutex);
                     if (s_samples.size() >= s_capacity && !s_samples.empty())
                     {
                         s_samples.erase(s_samples.begin());
@@ -93,13 +93,13 @@ namespace hybrid::core
 
     void ResourceMonitor::Clear()
     {
-        std::lock_guard<std::mutex> lock(s_samples_mutex);
+        std::lock_guard lock(s_samples_mutex);
         s_samples.clear();
     }
 
     std::vector<ResourceSample> ResourceMonitor::GetSamples()
     {
-        std::lock_guard<std::mutex> lock(s_samples_mutex);
+        std::lock_guard lock(s_samples_mutex);
         return s_samples;
     }
 

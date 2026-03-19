@@ -91,7 +91,7 @@ namespace hybrid::assets
         }
 
         const auto *data = reinterpret_cast<const stbi_uc *>(bytes.data());
-        const int length = static_cast<int>(bytes.size());
+        const auto length = static_cast<int>(bytes.size());
 
         int width = 0;
         int height = 0;
@@ -120,7 +120,7 @@ namespace hybrid::assets
             image->channels = channels;
 
             const uint64_t count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(channels);
-            if (count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+            if (count > std::numeric_limits<size_t>::max())
             {
                 LOG_ERROR("[StbImageLoader] HDR image size overflow");
                 stbi_image_free(pixels);
@@ -150,7 +150,7 @@ namespace hybrid::assets
             image->channels = channels;
 
             const uint64_t count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(channels);
-            if (count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+            if (count > std::numeric_limits<size_t>::max())
             {
                 LOG_ERROR("[StbImageLoader] Image size overflow");
                 stbi_image_free(pixels);

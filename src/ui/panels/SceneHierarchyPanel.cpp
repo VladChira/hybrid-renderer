@@ -26,7 +26,7 @@ namespace hybrid::ui
                 }
             }
 
-            const auto id = static_cast<uint32_t>(entt::to_integral(entity));
+            const auto id = entt::to_integral(entity);
             return "Entity " + std::to_string(id);
         }
 
@@ -95,8 +95,7 @@ namespace hybrid::ui
         bool drew_any = false;
         for (const entt::entity entity : view)
         {
-            const auto &hierarchy = view.get<core::scene::HierarchyComponent>(entity);
-            if (hierarchy.parent != entt::null)
+            if (const auto &hierarchy = view.get<core::scene::HierarchyComponent>(entity); hierarchy.parent != entt::null)
             {
                 continue;
             }

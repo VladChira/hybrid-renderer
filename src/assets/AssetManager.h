@@ -85,7 +85,7 @@ namespace hybrid::assets
         AssetHandle<T> LoadHandle(const std::string &path);
 
         template <typename T>
-        AssetHandle<T> Add(const std::string &path, std::shared_ptr<T> asset);
+        AssetHandle<T> Add(std::string_view path, std::shared_ptr<T> asset);
 
         template <typename T>
         T *Get(AssetId id);
@@ -161,14 +161,14 @@ namespace hybrid::assets
     }
 
     template <typename T>
-    AssetHandle<T> AssetManager::Add(const std::string &path, std::shared_ptr<T> asset)
+    AssetHandle<T> AssetManager::Add(std::string_view path, std::shared_ptr<T> asset)
     {
         if (!asset)
         {
             return {};
         }
 
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard lock(m_mutex);
         AssetId id{m_next_id++};
         AssetRecord record{};
         record.id = id;
@@ -183,7 +183,7 @@ namespace hybrid::assets
     template <typename T>
     T *AssetManager::Get(AssetId id)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard lock(m_mutex);
         const auto *record = FindRecord(id);
         if (!record || record->type != std::type_index(typeid(T)))
         {
@@ -195,7 +195,7 @@ namespace hybrid::assets
     template <typename T>
     const T *AssetManager::Get(AssetId id) const
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard lock(m_mutex);
         const auto *record = FindRecord(id);
         if (!record || record->type != std::type_index(typeid(T)))
         {
