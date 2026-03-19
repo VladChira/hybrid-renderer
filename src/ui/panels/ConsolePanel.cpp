@@ -47,11 +47,6 @@ namespace hybrid::ui
     {
     }
 
-    ImGuiDockNodeFlags ConsolePanel::DockNodeFlags() const
-    {
-        return ImGuiDockNodeFlags_NoWindowMenuButton;
-    }
-
     void ConsolePanel::DrawContents(PanelContext &context)
     {
         (void)context;

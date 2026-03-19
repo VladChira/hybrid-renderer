@@ -35,7 +35,7 @@ namespace hybrid::ui
 
     ImGuiDockNodeFlags Panel::DockNodeFlags() const
     {
-        return 0;
+        return ImGuiDockNodeFlags_NoWindowMenuButton | ImGuiDockNodeFlags_NoCloseButton;
     }
 
     void Panel::Render(PanelContext &context)
