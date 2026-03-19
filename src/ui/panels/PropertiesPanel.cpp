@@ -3,6 +3,8 @@
 #include "core/scene/SceneWorld.h"
 #include "core/scene/types/SceneComponents.h"
 #include "ui/UiState.h"
+#include "ui/panels/components/CameraComponentDrawer.h"
+#include "ui/panels/components/CameraTargetComponentDrawer.h"
 #include "ui/panels/components/MeshRendererComponentDrawer.h"
 #include "ui/panels/components/NameComponentDrawer.h"
 #include "ui/panels/components/TransformComponentDrawer.h"
@@ -58,6 +60,18 @@ namespace hybrid::ui
         if (const auto *mesh = registry.try_get<core::scene::MeshRendererComponent>(entity))
         {
             DrawMeshRendererComponent(*mesh);
+            drew_any = true;
+        }
+
+        if (const auto *camera = registry.try_get<core::scene::CameraComponent>(entity))
+        {
+            DrawCameraComponent(*camera);
+            drew_any = true;
+        }
+
+        if (const auto *camera_target = registry.try_get<core::scene::CameraTargetComponent>(entity))
+        {
+            DrawCameraTargetComponent(*camera_target);
             drew_any = true;
         }
 

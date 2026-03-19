@@ -18,6 +18,7 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include <glm/glm.hpp>
@@ -148,6 +149,7 @@ namespace hybrid::assets
         void AppendNode(const aiNode &node,
                         entt::entity parent_entity,
                         const std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> &mesh_handles,
+                        const std::unordered_map<std::string, const aiCamera *> &cameras_by_node_name,
                         hybrid::core::scene::SceneWorld &scene)
         {
             const std::string node_name = node.mName.C_Str();
@@ -163,6 +165,31 @@ namespace hybrid::assets
             if (parent_entity != entt::null)
             {
                 scene.SetParent(entity, parent_entity);
+            }
+
+            if (const auto it = cameras_by_node_name.find(node_name); it != cameras_by_node_name.end() && it->second != nullptr)
+            {
+                const aiCamera &camera = *it->second;
+                hybrid::core::scene::CameraComponent camera_component{};
+                if (camera.mHorizontalFOV > 0.0f)
+                {
+                    camera_component.horizontal_fov_radians = camera.mHorizontalFOV;
+                }
+                if (camera.mAspect > 0.0f)
+                {
+                    camera_component.aspect_ratio = camera.mAspect;
+                }
+                if (camera.mClipPlaneNear > 0.0f)
+                {
+                    camera_component.near_plane = camera.mClipPlaneNear;
+                }
+                if (camera.mClipPlaneFar > camera_component.near_plane)
+                {
+                    camera_component.far_plane = camera.mClipPlaneFar;
+                }
+
+                registry.emplace<hybrid::core::scene::CameraComponent>(entity, camera_component);
+                registry.emplace<hybrid::core::scene::CameraTargetComponent>(entity);
             }
 
             if (node.mNumMeshes == 1)
@@ -210,7 +237,7 @@ namespace hybrid::assets
 
             for (unsigned int i = 0; i < node.mNumChildren; ++i)
             {
-                AppendNode(*node.mChildren[i], entity, mesh_handles, scene);
+                AppendNode(*node.mChildren[i], entity, mesh_handles, cameras_by_node_name, scene);
             }
         }
 
@@ -564,9 +591,31 @@ namespace hybrid::assets
 
         LOG_INFO("[AssimpSceneLoader] \t Building scene tree...");
 
+        std::unordered_map<std::string, const aiCamera *> cameras_by_node_name;
+        cameras_by_node_name.reserve(scene->mNumCameras);
+        for (unsigned int i = 0; i < scene->mNumCameras; ++i)
+        {
+            const aiCamera *camera = scene->mCameras[i];
+            if (camera == nullptr)
+            {
+                continue;
+            }
+
+            const std::string node_name = camera->mName.C_Str();
+            if (node_name.empty())
+            {
+                continue;
+            }
+
+            if (!cameras_by_node_name.emplace(node_name, camera).second)
+            {
+                LOG_WARN("[AssimpSceneLoader] Duplicate camera node binding for '" + node_name + "', keeping first instance");
+            }
+        }
+
         if (scene->mRootNode)
         {
-            AppendNode(*scene->mRootNode, entt::null, mesh_handles, *result);
+            AppendNode(*scene->mRootNode, entt::null, mesh_handles, cameras_by_node_name, *result);
         }
 
         LOG_INFO("[AssimpSceneLoader] glTF scene loaded");
