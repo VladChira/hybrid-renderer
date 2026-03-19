@@ -154,6 +154,7 @@ target_sources(hybrid_engine PRIVATE
   src/assets/StbImageLoader.cpp
 
   src/renderer/Renderer.cpp
+  src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp
   src/renderer/opengl/GLBuffer.cpp
   src/renderer/opengl/GLTexture.cpp
