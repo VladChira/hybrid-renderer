@@ -7,10 +7,8 @@
 #include "assets/StbImageLoader.h"
 
 #include "core/scene/SceneWorld.h"
+#include "core/scene/SceneCameraResolver.h"
 #include "core/Log.h"
-
-#include "renderer/SceneWorldSnapshot.h"
-#include "renderer/RendererUtils.h"
 
 #include "utils/Banner.h"
 
@@ -76,7 +74,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/sponza/Sponza.gltf");
+        RequestSceneLoad("scenes/big_sponza/NewSponza_Main_glTF_003.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -145,7 +143,20 @@ namespace hybrid::core
             {
                 if (active_scene_world)
                 {
+                    const float aspect = static_cast<float>(std::max(settings.render_extent.width, 1u)) /
+                                         static_cast<float>(std::max(settings.render_extent.height, 1u));
+                    const scene::SceneCameraView scene_view =
+                        scene::ResolvePrimaryCameraView(*active_scene_world, aspect);
+
                     renderer::RenderView view{};
+                    if (scene_view.valid)
+                    {
+                        view.view = scene_view.view;
+                        view.projection = scene_view.projection;
+                        view.position = scene_view.position;
+                        view.near_plane = scene_view.near_plane;
+                        view.far_plane = scene_view.far_plane;
+                    }
                     renderer.SubmitScene(*active_scene_world, view, settings);
                 }
                 renderer_outputs = renderer.EndFrame();

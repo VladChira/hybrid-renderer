@@ -10,6 +10,13 @@ namespace hybrid::renderer
 
     namespace
     {
+        enum class InstanceBucket
+        {
+            Opaque,
+            Masked,
+            Blended
+        };
+
         core::scene::Aabb TransformAabb(const core::scene::Aabb &bounds, const glm::mat4 &world_from_local)
         {
             if (!bounds.valid)
@@ -46,16 +53,67 @@ namespace hybrid::renderer
             world_bounds.valid = true;
             return world_bounds;
         }
+
+        void MergeBounds(core::scene::Aabb &accumulated, const core::scene::Aabb &bounds)
+        {
+            if (!bounds.valid)
+            {
+                return;
+            }
+
+            if (!accumulated.valid)
+            {
+                accumulated = bounds;
+                return;
+            }
+
+            accumulated.min = glm::min(accumulated.min, bounds.min);
+            accumulated.max = glm::max(accumulated.max, bounds.max);
+            accumulated.valid = true;
+        }
+
+        InstanceBucket ResolveInstanceBucket(const core::scene::MeshAsset *mesh)
+        {
+            if (mesh == nullptr)
+            {
+                return InstanceBucket::Opaque;
+            }
+
+            bool has_masked_primitive = false;
+            for (const core::scene::MeshPrimitive &primitive : mesh->primitives)
+            {
+                const core::scene::MaterialAsset *material = primitive.material.Get();
+                if (material == nullptr)
+                {
+                    continue;
+                }
+
+                if (material->alpha_mode == core::scene::AlphaMode::Blend)
+                {
+                    return InstanceBucket::Blended;
+                }
+
+                if (material->alpha_mode == core::scene::AlphaMode::Mask)
+                {
+                    has_masked_primitive = true;
+                }
+            }
+
+            return has_masked_primitive ? InstanceBucket::Masked : InstanceBucket::Opaque;
+        }
     } // namespace
 
-    RenderSceneSnapshot BuildRenderSceneSnapshot(const core::scene::SceneWorld &scene_world)
+    FrameSceneData BuildFrameSceneData(const core::scene::SceneWorld &scene_world)
     {
-        RenderSceneSnapshot snapshot{};
+        FrameSceneData frame_data{};
 
         const auto &registry = scene_world.Registry();
         auto view = registry.view<const core::scene::TransformComponent, const core::scene::MeshRendererComponent>();
 
-        snapshot.mesh_instances.reserve(view.size_hint());
+        const size_t reserve_count = view.size_hint();
+        frame_data.opaque_mesh_instances.reserve(reserve_count);
+        frame_data.masked_mesh_instances.reserve(reserve_count / 8);
+        frame_data.blended_mesh_instances.reserve(reserve_count / 8);
 
         for (const entt::entity entity : view)
         {
@@ -72,14 +130,50 @@ namespace hybrid::renderer
             instance.mesh = mesh_renderer.mesh;
             instance.world_from_local = transform.world;
 
-            if (const core::scene::MeshAsset *mesh = mesh_renderer.mesh.Get())
+            const core::scene::MeshAsset *mesh = mesh_renderer.mesh.Get();
+            if (mesh != nullptr)
             {
                 instance.world_bounds = TransformAabb(mesh->bounds, transform.world);
             }
 
-            snapshot.mesh_instances.push_back(instance);
+            MergeBounds(frame_data.scene_bounds, instance.world_bounds);
+
+            switch (ResolveInstanceBucket(mesh))
+            {
+            case InstanceBucket::Opaque:
+                frame_data.opaque_mesh_instances.push_back(instance);
+                break;
+            case InstanceBucket::Masked:
+                frame_data.masked_mesh_instances.push_back(instance);
+                break;
+            case InstanceBucket::Blended:
+                frame_data.blended_mesh_instances.push_back(instance);
+                break;
+            }
         }
 
+        return frame_data;
+    }
+
+    RenderSceneSnapshot BuildRenderSceneSnapshot(const core::scene::SceneWorld &scene_world)
+    {
+        FrameSceneData frame_data = BuildFrameSceneData(scene_world);
+
+        RenderSceneSnapshot snapshot{};
+        const size_t total_instance_count = frame_data.opaque_mesh_instances.size() +
+                                            frame_data.masked_mesh_instances.size() +
+                                            frame_data.blended_mesh_instances.size();
+        snapshot.mesh_instances.reserve(total_instance_count);
+
+        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
+                                       frame_data.opaque_mesh_instances.begin(),
+                                       frame_data.opaque_mesh_instances.end());
+        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
+                                       frame_data.masked_mesh_instances.begin(),
+                                       frame_data.masked_mesh_instances.end());
+        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
+                                       frame_data.blended_mesh_instances.begin(),
+                                       frame_data.blended_mesh_instances.end());
         return snapshot;
     }
 

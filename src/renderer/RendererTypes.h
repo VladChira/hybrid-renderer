@@ -45,7 +45,7 @@ namespace hybrid::renderer
     struct RenderSettings
     {
         RenderMode mode = RenderMode::Lit;
-        RenderExtent render_extent{1280, 720};
+        RenderExtent render_extent{1920, 1080};
         bool show_bounds = false;
         float exposure = 1.0f;
     };
@@ -56,6 +56,14 @@ namespace hybrid::renderer
         assets::AssetHandle<core::scene::MeshAsset> mesh;
         glm::mat4 world_from_local{1.0f};
         core::scene::Aabb world_bounds{};
+    };
+
+    struct FrameSceneData
+    {
+        std::vector<RenderMeshInstance> opaque_mesh_instances;
+        std::vector<RenderMeshInstance> masked_mesh_instances;
+        std::vector<RenderMeshInstance> blended_mesh_instances;
+        core::scene::Aabb scene_bounds{};
     };
 
     struct RenderSceneSnapshot

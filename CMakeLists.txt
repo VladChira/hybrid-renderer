@@ -130,6 +130,7 @@ target_sources(hybrid_engine PRIVATE
   src/core/ResourceMonitor.cpp
   src/core/scene/SceneLoadService.cpp
   src/core/scene/SceneWorld.cpp
+  src/core/scene/SceneCameraResolver.cpp
 
   src/platform/Platform.cpp
   src/platform/FileSystem.cpp
@@ -156,6 +157,7 @@ target_sources(hybrid_engine PRIVATE
   src/assets/StbImageLoader.cpp
 
   src/renderer/Renderer.cpp
+  src/renderer/passes/ForwardLitPass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp
   src/renderer/opengl/GLBuffer.cpp

@@ -11,6 +11,8 @@ namespace hybrid::renderer
     class Renderer
     {
     public:
+        struct Impl;
+
         Renderer();
         ~Renderer();
 
@@ -33,7 +35,6 @@ namespace hybrid::renderer
         const RendererStats &GetStats() const;
 
     private:
-        struct Impl;
         std::unique_ptr<Impl> m_impl;
     };
 
