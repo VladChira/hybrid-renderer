@@ -5,6 +5,7 @@
 #include "graphics/GraphicsRuntime.h"
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
+#include "panels/MaterialsPanel.h"
 #include "panels/PlaceholderPanel.h"
 #include "panels/PropertiesPanel.h"
 #include "panels/PerformancePanel.h"
@@ -91,7 +92,7 @@ namespace hybrid::ui
         {
             RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
             RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Materials"), DockTarget::BottomLeft);
+            RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"), DockTarget::LeftTop);
@@ -141,7 +142,7 @@ namespace hybrid::ui
         context.commands = &commands;
         context.theme = &m_theme_palette;
         context.state = &state;
-        context.selected_entity = &m_selected_entity;
+        context.selection = &m_selection;
         m_panels.DrawAll(context);
 
         ImGui::Render();

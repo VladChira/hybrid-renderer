@@ -9,6 +9,7 @@
 #include "core/scene/SceneWorld.h"
 #include "core/scene/SceneCameraResolver.h"
 #include "core/Log.h"
+#include "ui/UiStateUtils.h"
 
 #include "utils/Banner.h"
 
@@ -74,7 +75,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/big_sponza/NewSponza_Main_glTF_003.gltf");
+        RequestSceneLoad("scenes/sponza/Sponza.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -164,6 +165,7 @@ namespace hybrid::core
 
             ui::UiState ui_state{};
             ui_state.scene_world = active_scene_world;
+            ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
             ui_state.viewport_color_texture = renderer_outputs.color.value;
             ui_state.viewport_render_extent = frame_context.render_extent;
 

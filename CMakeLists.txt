@@ -138,6 +138,7 @@ target_sources(hybrid_engine PRIVATE
 
   src/ui/Ui.cpp
   src/ui/panels/ConsolePanel.cpp
+  src/ui/panels/MaterialsPanel.cpp
   src/ui/panels/PropertiesPanel.cpp
   src/ui/panels/PerformancePanel.cpp
   src/ui/panels/Panel.cpp
@@ -145,10 +146,12 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/ViewportPanel.cpp
   src/ui/panels/components/NameComponentDrawer.cpp
   src/ui/panels/components/TransformComponentDrawer.cpp
+  src/ui/panels/components/MaterialComponentDrawer.cpp
   src/ui/panels/components/MeshRendererComponentDrawer.cpp
   src/ui/panels/components/CameraComponentDrawer.cpp
   src/ui/panels/components/CameraTargetComponentDrawer.cpp
   src/ui/Dockspace.cpp
+  src/ui/UiStateUtils.cpp
 
   src/assets/AssetManager.cpp
   src/assets/DiskAssetDataSource.cpp

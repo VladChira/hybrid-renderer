@@ -12,8 +12,6 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-#include <entt/entt.hpp>
-
 #include <memory>
 #include <string>
 
@@ -48,7 +46,7 @@ namespace hybrid::ui
         PanelRegistry m_panels{};
         ThemeKind m_theme = ThemeKind::Darkness;
         ThemePalette m_theme_palette{};
-        entt::entity m_selected_entity{entt::null};
+        UiSelection m_selection{};
 
         ImGuiIO *io;
     };

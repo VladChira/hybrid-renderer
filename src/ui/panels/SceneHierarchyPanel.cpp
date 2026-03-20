@@ -32,7 +32,7 @@ namespace hybrid::ui
 
         void DrawEntityTree(const core::scene::SceneWorld &scene_world,
                             entt::entity entity,
-                            entt::entity *selected_entity)
+                            UiSelection *selection)
         {
             if (!scene_world.IsValid(entity))
             {
@@ -43,7 +43,9 @@ namespace hybrid::ui
             const bool has_children = !children.empty();
 
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-            if (selected_entity && *selected_entity == entity)
+            if (selection &&
+                selection->type == UiSelection::Type::Entity &&
+                selection->entity == entity)
             {
                 flags |= ImGuiTreeNodeFlags_Selected;
             }
@@ -57,16 +59,18 @@ namespace hybrid::ui
 
             const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
 
-            if (ImGui::IsItemClicked() && selected_entity)
+            if (ImGui::IsItemClicked() && selection)
             {
-                *selected_entity = entity;
+                selection->type = UiSelection::Type::Entity;
+                selection->entity = entity;
+                selection->material_asset_id = 0;
             }
 
             if (has_children && open)
             {
                 for (const entt::entity child : children)
                 {
-                    DrawEntityTree(scene_world, child, selected_entity);
+                    DrawEntityTree(scene_world, child, selection);
                 }
                 ImGui::TreePop();
             }
@@ -101,7 +105,7 @@ namespace hybrid::ui
             }
 
             drew_any = true;
-            DrawEntityTree(scene_world, entity, context.selected_entity);
+            DrawEntityTree(scene_world, entity, context.selection);
         }
 
         if (!drew_any)
