@@ -24,7 +24,9 @@ namespace hybrid::ui
         }
     } // namespace
 
-    void DrawMaterialComponent(const core::scene::MaterialAsset &material)
+    void DrawMaterialComponent(const core::scene::MaterialAsset &material,
+                               uint64_t material_id,
+                               CommandBuffer *commands)
     {
         if (!ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
         {
@@ -35,13 +37,22 @@ namespace hybrid::ui
         ImGui::Text("Name: %s", name);
         ImGui::Separator();
 
-        ImGui::Text("Base Color: %.3f %.3f %.3f %.3f",
-                    material.base_color_factor.r,
-                    material.base_color_factor.g,
-                    material.base_color_factor.b,
-                    material.base_color_factor.a);
-        ImGui::Text("Metallic: %.3f", material.metallic_factor);
-        ImGui::Text("Roughness: %.3f", material.roughness_factor);
+        float base_color[4] = {material.base_color_factor.r,
+                               material.base_color_factor.g,
+                               material.base_color_factor.b,
+                               material.base_color_factor.a};
+        float metallic_factor = material.metallic_factor;
+        float roughness_factor = material.roughness_factor;
+
+        if (ImGui::ColorPicker4("Base Color", base_color))
+        {
+            EnqueueCommand(*commands, MaterialSetVec4Command{material_id, MaterialVec4Property::BaseColorFactor,
+                                                             glm::vec4(base_color[0], base_color[1],
+                                                                       base_color[2], base_color[3])});
+        }
+        ImGui::DragFloat("Metallic", &metallic_factor, 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Roughness", &roughness_factor, 0.01f, 0.0f, 1.0f);
+
         ImGui::Text("Emissive: %.3f %.3f %.3f",
                     material.emissive_factor.r,
                     material.emissive_factor.g,

@@ -59,7 +59,7 @@ namespace hybrid::ui
                 return;
             }
 
-            DrawMaterialComponent(*material);
+            DrawMaterialComponent(*material, context.selection->material_asset_id, context.commands);
             return;
         }
 
