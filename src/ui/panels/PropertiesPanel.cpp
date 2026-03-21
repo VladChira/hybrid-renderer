@@ -82,13 +82,13 @@ namespace hybrid::ui
 
         if (const auto *name = registry.try_get<core::scene::NameComponent>(entity))
         {
-            DrawNameComponent(*name);
+            DrawNameComponent(entity, *name, context.commands);
             drew_any = true;
         }
 
         if (const auto *transform = registry.try_get<core::scene::TransformComponent>(entity))
         {
-            DrawTransformComponent(*transform);
+            DrawTransformComponent(entity, *transform, context.commands);
             drew_any = true;
         }
 
@@ -100,13 +100,13 @@ namespace hybrid::ui
 
         if (const auto *camera = registry.try_get<core::scene::CameraComponent>(entity))
         {
-            DrawCameraComponent(*camera);
+            DrawCameraComponent(entity, *camera, context.commands);
             drew_any = true;
         }
 
         if (const auto *camera_target = registry.try_get<core::scene::CameraTargetComponent>(entity))
         {
-            DrawCameraTargetComponent(*camera_target);
+            DrawCameraTargetComponent(entity, *camera_target, context.commands);
             drew_any = true;
         }
 

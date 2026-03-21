@@ -9,6 +9,7 @@
 #include "core/scene/SceneWorld.h"
 #include "core/scene/SceneCameraResolver.h"
 #include "core/Log.h"
+#include "core/UiCommandProcessor.h"
 #include "ui/UiStateUtils.h"
 
 #include "utils/Banner.h"
@@ -170,7 +171,7 @@ namespace hybrid::core
             ui_state.viewport_render_extent = frame_context.render_extent;
 
             ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
-            ProcessUiCommands(commands);
+            ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
 
             platform.SwapBuffers();
         }
@@ -181,17 +182,6 @@ namespace hybrid::core
         for (const auto &event : events)
         {
             if (event.type == platform::PlatformEvent::Type::WindowClose)
-            {
-                m_should_quit = true;
-            }
-        }
-    }
-
-    void App::ProcessUiCommands(const ui::CommandBuffer &commands)
-    {
-        for (const auto &command : commands)
-        {
-            if (command.type == ui::UiCommand::Type::Quit)
             {
                 m_should_quit = true;
             }

@@ -9,13 +9,15 @@ namespace hybrid::ui
 {
     namespace
     {
-        void DrawVec3Row(const char *label,
+        bool DrawVec3Row(const char *label,
                          const char *id_prefix,
                          float values[3],
+                         float speed,
                          ImU32 red_bg,
                          ImU32 green_bg,
                          ImU32 blue_bg)
         {
+            bool changed = false;
             ImGui::TableNextRow();
             ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, 14288647);
 
@@ -26,29 +28,29 @@ namespace hybrid::ui
 
             ImGui::TableNextColumn();
             ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, red_bg);
-            ImGui::DragFloat("##X", &values[0], 0.01f, 0.0f, 0.0f, "X: %.2f");
+            changed |= ImGui::DragFloat("##X", &values[0], speed, 0.0f, 0.0f, "X: %.2f");
 
             ImGui::TableNextColumn();
             ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, green_bg);
-            ImGui::DragFloat("##Y", &values[1], 0.01f, 0.0f, 0.0f, "Y: %.2f");
+            changed |= ImGui::DragFloat("##Y", &values[1], speed, 0.0f, 0.0f, "Y: %.2f");
 
             ImGui::TableNextColumn();
             ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, blue_bg);
-            ImGui::DragFloat("##Z", &values[2], 0.01f, 0.0f, 0.0f, "Z: %.2f");
+            changed |= ImGui::DragFloat("##Z", &values[2], speed, 0.0f, 0.0f, "Z: %.2f");
 
             ImGui::PopID();
+            return changed;
         }
     } // namespace
 
-    void DrawTransformComponent(const core::scene::TransformComponent &component)
+    void DrawTransformComponent(entt::entity entity,
+                                const core::scene::TransformComponent &component,
+                                CommandBuffer *commands)
     {
         if (!ImGui::CollapsingHeader("Entity Transform Component", ImGuiTreeNodeFlags_DefaultOpen))
         {
             return;
         }
-
-        ImGui::BeginDisabled();
-        ImGui::Button("Reset Transform");
 
         const auto &transform = component.local;
 
@@ -56,6 +58,21 @@ namespace hybrid::ui
         const glm::vec3 euler = glm::degrees(glm::eulerAngles(transform.rotation));
         float rotation[3] = {euler.x, euler.y, euler.z};
         float scale[3] = {transform.scale.x, transform.scale.y, transform.scale.z};
+        bool changed = false;
+
+        if (ImGui::Button("Reset Transform"))
+        {
+            position[0] = 0.0f;
+            position[1] = 0.0f;
+            position[2] = 0.0f;
+            rotation[0] = 0.0f;
+            rotation[1] = 0.0f;
+            rotation[2] = 0.0f;
+            scale[0] = 1.0f;
+            scale[1] = 1.0f;
+            scale[2] = 1.0f;
+            changed = true;
+        }
 
         if (ImGui::BeginTable("TransformTable", 4, ImGuiTableFlags_Borders))
         {
@@ -63,13 +80,23 @@ namespace hybrid::ui
             const ImU32 green_bg = ImGui::GetColorU32(ImVec4(0.16f, 0.83f, 0.02f, 1.0f));
             const ImU32 blue_bg = ImGui::GetColorU32(ImVec4(0.01f, 0.29f, 0.878f, 1.0f));
 
-            DrawVec3Row("Position", "pos", position, red_bg, green_bg, blue_bg);
-            DrawVec3Row("Rotation", "rot", rotation, red_bg, green_bg, blue_bg);
-            DrawVec3Row("Scale", "scale", scale, red_bg, green_bg, blue_bg);
+            changed |= DrawVec3Row("Position", "pos", position, 0.01f, red_bg, green_bg, blue_bg);
+            changed |= DrawVec3Row("Rotation", "rot", rotation, 0.25f, red_bg, green_bg, blue_bg);
+            changed |= DrawVec3Row("Scale", "scale", scale, 0.01f, red_bg, green_bg, blue_bg);
 
             ImGui::EndTable();
         }
-        ImGui::EndDisabled();
+
+        if (!changed || commands == nullptr)
+        {
+            return;
+        }
+
+        core::scene::Transform updated = transform;
+        updated.translation = glm::vec3(position[0], position[1], position[2]);
+        updated.rotation = glm::quat(glm::radians(glm::vec3(rotation[0], rotation[1], rotation[2])));
+        updated.scale = glm::vec3(scale[0], scale[1], scale[2]);
+        EnqueueCommand(*commands, EntitySetLocalTransformCommand{entity, updated});
     }
 
 } // namespace hybrid::ui

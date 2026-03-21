@@ -28,7 +28,6 @@ namespace hybrid::core
                          ui::Ui &ui,
                          renderer::Renderer &renderer);
         void ProcessPlatformEvents(const platform::PlatformEvents &events);
-        void ProcessUiCommands(const ui::CommandBuffer &commands);
         void RequestSceneLoad(const std::string &path);
 
         assets::AssetManager m_assets;

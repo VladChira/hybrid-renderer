@@ -1,10 +1,13 @@
 #pragma once
 
 #include "core/scene/types/SceneComponents.h"
+#include "ui/UiCommands.h"
 
 namespace hybrid::ui
 {
 
-    void DrawCameraTargetComponent(const core::scene::CameraTargetComponent &component);
+    void DrawCameraTargetComponent(entt::entity entity,
+                                   const core::scene::CameraTargetComponent &component,
+                                   CommandBuffer *commands);
 
 } // namespace hybrid::ui

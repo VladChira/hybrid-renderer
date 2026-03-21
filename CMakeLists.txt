@@ -128,6 +128,7 @@ target_sources(hybrid_engine PRIVATE
   src/core/App.cpp
   src/core/Log.cpp
   src/core/ResourceMonitor.cpp
+  src/core/UiCommandProcessor.cpp
   src/core/scene/SceneLoadService.cpp
   src/core/scene/SceneWorld.cpp
   src/core/scene/SceneCameraResolver.cpp

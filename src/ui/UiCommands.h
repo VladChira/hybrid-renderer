@@ -1,19 +1,137 @@
 #pragma once
 
+#include "core/scene/types/SceneMath.h"
+
+#include <entt/entt.hpp>
+
+#include <glm/glm.hpp>
+
+#include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace hybrid::ui
 {
-    struct UiCommand
-    {
-        enum class Type
-        {
-            Quit
-        };
 
-        Type type = Type::Quit;
+    struct QuitCommand
+    {
     };
 
+    struct EntityRenameCommand
+    {
+        entt::entity entity = entt::null;
+        std::string name;
+    };
+
+    struct EntitySetLocalTransformCommand
+    {
+        entt::entity entity = entt::null;
+        core::scene::Transform local{};
+    };
+
+    struct CameraSetLensCommand
+    {
+        entt::entity entity = entt::null;
+        float horizontal_fov_radians = 1.0471976f;
+        float near_plane = 0.1f;
+        float far_plane = 1000.0f;
+        bool override_aspect_ratio = false;
+        float aspect_ratio = 16.0f / 9.0f;
+    };
+
+    struct CameraSetTargetCommand
+    {
+        entt::entity entity = entt::null;
+        bool enabled = false;
+        entt::entity target = entt::null;
+    };
+
+    enum class MaterialScalarProperty
+    {
+        MetallicFactor,
+        RoughnessFactor,
+        AlphaCutoff,
+        NormalScale,
+        OcclusionStrength
+    };
+
+    enum class MaterialVec4Property
+    {
+        BaseColorFactor
+    };
+
+    enum class MaterialVec3Property
+    {
+        EmissiveFactor
+    };
+
+    struct MaterialSetScalarCommand
+    {
+        uint64_t material_asset_id = 0;
+        MaterialScalarProperty property = MaterialScalarProperty::MetallicFactor;
+        float value = 0.0f;
+    };
+
+    struct MaterialSetVec4Command
+    {
+        uint64_t material_asset_id = 0;
+        MaterialVec4Property property = MaterialVec4Property::BaseColorFactor;
+        glm::vec4 value{1.0f};
+    };
+
+    struct MaterialSetVec3Command
+    {
+        uint64_t material_asset_id = 0;
+        MaterialVec3Property property = MaterialVec3Property::EmissiveFactor;
+        glm::vec3 value{0.0f};
+    };
+
+    enum class EditorCameraNavigationMode
+    {
+        Orbit,
+        Pan,
+        Dolly
+    };
+
+    struct EditorCameraNavigateCommand
+    {
+        EditorCameraNavigationMode mode = EditorCameraNavigationMode::Orbit;
+        glm::vec2 delta{0.0f};
+        float amount = 0.0f;
+    };
+
+    using UiCommand = std::variant<QuitCommand,
+                                   EntityRenameCommand,
+                                   EntitySetLocalTransformCommand,
+                                   CameraSetLensCommand,
+                                   CameraSetTargetCommand,
+                                   MaterialSetScalarCommand,
+                                   MaterialSetVec4Command,
+                                   MaterialSetVec3Command,
+                                   EditorCameraNavigateCommand>;
     using CommandBuffer = std::vector<UiCommand>;
+
+    template <typename T>
+    void EnqueueCommand(std::vector<UiCommand> &buffer, T &&command)
+    {
+        buffer.emplace_back(std::forward<T>(command));
+    }
+
+    template <typename T>
+    bool IsCommandType(const UiCommand &command)
+    {
+        return std::holds_alternative<T>(command);
+    }
+
+    template <typename T>
+    const T *GetCommandIf(const UiCommand *command)
+    {
+        if (command == nullptr)
+        {
+            return nullptr;
+        }
+        return std::get_if<T>(command);
+    }
 
 } // namespace hybrid::ui
