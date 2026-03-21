@@ -143,6 +143,7 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/MaterialsPanel.cpp
   src/ui/panels/PropertiesPanel.cpp
   src/ui/panels/PerformancePanel.cpp
+  src/ui/panels/SettingsPanel.cpp
   src/ui/panels/Panel.cpp
   src/ui/panels/SceneHierarchyPanel.cpp
   src/ui/panels/ViewportPanel.cpp
@@ -163,6 +164,7 @@ target_sources(hybrid_engine PRIVATE
 
   src/renderer/Renderer.cpp
   src/renderer/passes/ForwardLitPass.cpp
+  src/renderer/passes/GBufferPass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp
   src/renderer/opengl/GLBuffer.cpp

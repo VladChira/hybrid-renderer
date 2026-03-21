@@ -1,4 +1,4 @@
-#include "renderer/passes/ForwardLitPass.h"
+#include "renderer/passes/GBufferPass.h"
 
 #include "renderer/opengl/GLBuffer.h"
 #include "renderer/opengl/GLShaderProgram.h"
@@ -44,7 +44,7 @@ namespace hybrid::renderer
         };
 
         template <typename Fn>
-        void ForEachMeshInstance(const FrameSceneData &scene, Fn &&fn)
+        void ForEachOpaqueAndMaskedMeshInstance(const FrameSceneData &scene, Fn &&fn)
         {
             for (const auto &instance : scene.opaque_mesh_instances)
             {
@@ -52,11 +52,6 @@ namespace hybrid::renderer
             }
 
             for (const auto &instance : scene.masked_mesh_instances)
-            {
-                fn(instance);
-            }
-
-            for (const auto &instance : scene.blended_mesh_instances)
             {
                 fn(instance);
             }
@@ -69,6 +64,24 @@ namespace hybrid::renderer
                 return glm::vec3(material->base_color_factor);
             }
             return glm::vec3(0.8f);
+        }
+
+        float ResolvePrimitiveMetallic(const core::scene::MeshPrimitive &primitive)
+        {
+            if (const auto *material = primitive.material.Get())
+            {
+                return material->metallic_factor;
+            }
+            return 0.0f;
+        }
+
+        float ResolvePrimitiveRoughness(const core::scene::MeshPrimitive &primitive)
+        {
+            if (const auto *material = primitive.material.Get())
+            {
+                return material->roughness_factor;
+            }
+            return 1.0f;
         }
 
         bool UploadPrimitiveToGpu(const core::scene::MeshPrimitive &primitive, CachedPrimitiveGpu &out_gpu)
@@ -122,34 +135,33 @@ namespace hybrid::renderer
         }
     } // namespace
 
-    struct ForwardLitPass::Impl
+    struct GBufferPass::Impl
     {
         std::unordered_map<PrimitiveCacheKey, CachedPrimitiveGpu, PrimitiveCacheKeyHash> primitive_cache;
     };
 
-    ForwardLitPass::ForwardLitPass(GLShaderProgram *forward_shader)
-        : m_forward_shader(forward_shader),
+    GBufferPass::GBufferPass(GLShaderProgram *gbuffer_shader)
+        : m_gbuffer_shader(gbuffer_shader),
           m_impl(std::make_unique<Impl>())
     {
     }
 
-    ForwardLitPass::~ForwardLitPass() = default;
+    GBufferPass::~GBufferPass() = default;
 
-    const char *ForwardLitPass::Name() const
+    const char *GBufferPass::Name() const
     {
-        return "ForwardLit";
+        return "GBuffer";
     }
 
-    bool ForwardLitPass::Execute(PassContext &context)
+    bool GBufferPass::Execute(PassContext &context)
     {
-        if (m_forward_shader == nullptr ||
+        if (m_gbuffer_shader == nullptr ||
             m_impl == nullptr ||
             context.scene_data == nullptr ||
             context.effective_view == nullptr ||
             context.inputs.settings == nullptr ||
-            context.stats == nullptr ||
             context.outputs == nullptr ||
-            context.targets.scene_framebuffer_id == 0)
+            context.targets.gbuffer_framebuffer_id == 0)
         {
             return false;
         }
@@ -158,21 +170,23 @@ namespace hybrid::renderer
         const RenderView &effective_view = *context.effective_view;
         const RenderSettings &settings = *context.inputs.settings;
 
-        glBindFramebuffer(GL_FRAMEBUFFER, context.targets.scene_framebuffer_id);
+        glBindFramebuffer(GL_FRAMEBUFFER, context.targets.gbuffer_framebuffer_id);
         glViewport(0, 0,
                    static_cast<GLsizei>(settings.render_extent.width),
                    static_cast<GLsizei>(settings.render_extent.height));
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        m_forward_shader->Use();
-        m_forward_shader->SetUniformMat4("u_view", effective_view.view);
-        m_forward_shader->SetUniformMat4("u_projection", effective_view.projection);
-        m_forward_shader->SetUniformVec3("u_camera_position", effective_view.position);
-        m_forward_shader->SetUniform1i("u_render_mode", static_cast<int>(settings.mode));
+        const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        glClearBufferfv(GL_COLOR, 0, clear_rt0);
+        glClearBufferfv(GL_COLOR, 1, clear_rt1);
+        glClear(GL_DEPTH_BUFFER_BIT);
 
-        const bool wireframe = settings.mode == RenderMode::Wireframe;
-        glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
+        m_gbuffer_shader->Use();
+        m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
+        m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
 
         auto draw_instance = [&](const RenderMeshInstance &instance)
         {
@@ -185,9 +199,6 @@ namespace hybrid::renderer
             for (size_t primitive_index = 0; primitive_index < mesh->primitives.size(); ++primitive_index)
             {
                 const core::scene::MeshPrimitive &primitive = mesh->primitives[primitive_index];
-                context.stats->submitted_primitives++;
-                context.stats->submitted_vertices += primitive.vertices.size();
-                context.stats->submitted_triangles += primitive.indices.size() / 3;
 
                 PrimitiveCacheKey key{};
                 key.mesh_id = instance.mesh.Id().value;
@@ -210,24 +221,25 @@ namespace hybrid::renderer
                     continue;
                 }
 
-                m_forward_shader->SetUniformMat4("u_model", instance.world_from_local);
-                m_forward_shader->SetUniformVec3("u_base_color", ResolvePrimitiveBaseColor(primitive));
+                m_gbuffer_shader->SetUniformMat4("u_model", instance.world_from_local);
+                m_gbuffer_shader->SetUniformVec3("u_base_color", ResolvePrimitiveBaseColor(primitive));
+                m_gbuffer_shader->SetUniform1f("u_metallic", ResolvePrimitiveMetallic(primitive));
+                m_gbuffer_shader->SetUniform1f("u_roughness", ResolvePrimitiveRoughness(primitive));
 
                 gpu.vao.Bind();
                 glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);
             }
         };
 
-        ForEachMeshInstance(scene, draw_instance);
+        ForEachOpaqueAndMaskedMeshInstance(scene, draw_instance);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        context.outputs->color = context.targets.scene_color;
-        context.outputs->depth = context.targets.gbuffer_depth;
         context.outputs->gbuffer_rt0 = context.targets.gbuffer_rt0;
         context.outputs->gbuffer_rt1 = context.targets.gbuffer_rt1;
+        context.outputs->depth = context.targets.gbuffer_depth;
         return true;
     }
 

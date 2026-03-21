@@ -17,6 +17,13 @@ namespace hybrid::core::scene
 namespace hybrid::ui
 {
 
+    enum class UiViewportVisualization : uint8_t
+    {
+        FinalColor = 0,
+        GBufferRt0 = 1,
+        GBufferRt1 = 2
+    };
+
     struct UiMaterialEntry
     {
         uint64_t asset_id = 0;
@@ -50,6 +57,9 @@ namespace hybrid::ui
         const core::scene::SceneWorld *scene_world = nullptr;
         std::vector<UiMaterialEntry> materials;
         uint64_t viewport_color_texture = 0;
+        uint64_t viewport_gbuffer_rt0_texture = 0;
+        uint64_t viewport_gbuffer_rt1_texture = 0;
+        UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
         renderer::RenderExtent viewport_render_extent{};
         renderer::RenderView viewport_render_view{};
         bool viewport_render_view_valid = false;

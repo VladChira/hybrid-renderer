@@ -10,6 +10,7 @@
 #include "panels/PropertiesPanel.h"
 #include "panels/PerformancePanel.h"
 #include "panels/SceneHierarchyPanel.h"
+#include "panels/SettingsPanel.h"
 #include "panels/ViewportPanel.h"
 
 #include <glad.h>
@@ -95,7 +96,7 @@ namespace hybrid::ui
             RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
             RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Settings"), DockTarget::LeftTop);
+            RegisterPanel(std::make_unique<SettingsPanel>(), DockTarget::LeftTop);
             RegisterPanel(std::make_unique<ViewportPanel>(), DockTarget::Main);
             RegisterPanel(std::make_unique<PerformancePanel>(), DockTarget::LeftBottom);
         }
@@ -137,12 +138,16 @@ namespace hybrid::ui
         m_dockspace.BeginFrame();
         m_dockspace.BuildLayout(m_layout);
 
+        UiState frame_state = state;
+        frame_state.viewport_visualization = m_viewport_visualization;
+
         PanelContext context{};
         context.delta_seconds = delta_seconds;
         context.commands = &commands;
         context.theme = &m_theme_palette;
-        context.state = &state;
+        context.state = &frame_state;
         context.selection = &m_selection;
+        context.viewport_visualization = &m_viewport_visualization;
         m_panels.DrawAll(context);
 
         ImGui::Render();

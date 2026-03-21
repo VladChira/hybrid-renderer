@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +16,7 @@ namespace hybrid::ui
     struct ThemePalette;
     struct UiState;
     struct UiSelection;
+    enum class UiViewportVisualization : uint8_t;
 
     struct PanelContext
     {
@@ -23,6 +25,7 @@ namespace hybrid::ui
         const ThemePalette *theme = nullptr;
         const UiState *state = nullptr;
         UiSelection *selection = nullptr;
+        UiViewportVisualization *viewport_visualization = nullptr;
     };
 
     class Panel

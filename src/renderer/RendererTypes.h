@@ -90,6 +90,8 @@ namespace hybrid::renderer
     {
         RendererOutputHandle color;
         RendererOutputHandle depth;
+        RendererOutputHandle gbuffer_rt0;
+        RendererOutputHandle gbuffer_rt1;
     };
 
 } // namespace hybrid::renderer

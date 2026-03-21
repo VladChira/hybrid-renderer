@@ -20,8 +20,13 @@ namespace hybrid::renderer
 
     struct PassTargets
     {
+        uint32_t scene_framebuffer_id = 0;
+        uint32_t gbuffer_framebuffer_id = 0;
         RendererOutputHandle scene_color{};
         RendererOutputHandle scene_depth{};
+        RendererOutputHandle gbuffer_rt0{};
+        RendererOutputHandle gbuffer_rt1{};
+        RendererOutputHandle gbuffer_depth{};
     };
 
     struct PassContext

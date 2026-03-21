@@ -172,6 +172,8 @@ namespace hybrid::core
             ui_state.scene_world = active_scene_world;
             ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
             ui_state.viewport_color_texture = renderer_outputs.color.value;
+            ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0.value;
+            ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1.value;
             ui_state.viewport_render_extent = frame_context.render_extent;
             ui_state.viewport_render_view = resolved_view;
             ui_state.viewport_render_view_valid = resolved_view_valid;

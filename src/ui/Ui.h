@@ -47,6 +47,7 @@ namespace hybrid::ui
         ThemeKind m_theme = ThemeKind::Darkness;
         ThemePalette m_theme_palette{};
         UiSelection m_selection{};
+        UiViewportVisualization m_viewport_visualization = UiViewportVisualization::FinalColor;
 
         ImGuiIO *io;
     };

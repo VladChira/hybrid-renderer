@@ -9,6 +9,7 @@
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLTexture.h"
 #include "renderer/passes/ForwardLitPass.h"
+#include "renderer/passes/GBufferPass.h"
 
 #include <algorithm>
 #include <chrono>
@@ -20,10 +21,10 @@ namespace hybrid::renderer
 
     namespace
     {
-        bool AllocateRenderTargets(const RenderExtent &extent,
-                                   GLFramebuffer &framebuffer,
-                                   GLTexture &color_texture,
-                                   GLTexture &depth_texture)
+        bool AllocateSceneTargets(const RenderExtent &extent,
+                                  GLFramebuffer &framebuffer,
+                                  GLTexture &color_texture,
+                                  GLTexture &depth_texture)
         {
             if (!extent.IsValid())
             {
@@ -90,6 +91,97 @@ namespace hybrid::renderer
             return true;
         }
 
+        bool AllocateGBufferTargets(const RenderExtent &extent,
+                                    GLFramebuffer &framebuffer,
+                                    GLTexture &rt0_texture,
+                                    GLTexture &rt1_texture,
+                                    GLTexture &depth_texture)
+        {
+            if (!extent.IsValid())
+            {
+                return false;
+            }
+
+            if (!framebuffer.IsValid() && !framebuffer.Create())
+            {
+                LOG_ERROR("[Renderer] Failed to create gbuffer framebuffer");
+                return false;
+            }
+
+            if (!rt0_texture.IsValid() && !rt0_texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[Renderer] Failed to create gbuffer rt0 texture");
+                return false;
+            }
+
+            if (!rt1_texture.IsValid() && !rt1_texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[Renderer] Failed to create gbuffer rt1 texture");
+                return false;
+            }
+
+            if (!depth_texture.IsValid() && !depth_texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[Renderer] Failed to create gbuffer depth texture");
+                return false;
+            }
+
+            rt0_texture.Bind();
+            rt0_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            rt0_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            rt0_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            rt0_texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            rt0_texture.SetImage2D(0,
+                                   GL_RGBA8,
+                                   static_cast<GLsizei>(extent.width),
+                                   static_cast<GLsizei>(extent.height),
+                                   GL_RGBA,
+                                   GL_UNSIGNED_BYTE,
+                                   nullptr);
+
+            rt1_texture.Bind();
+            rt1_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            rt1_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            rt1_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            rt1_texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            rt1_texture.SetImage2D(0,
+                                   GL_RGBA16F,
+                                   static_cast<GLsizei>(extent.width),
+                                   static_cast<GLsizei>(extent.height),
+                                   GL_RGBA,
+                                   GL_HALF_FLOAT,
+                                   nullptr);
+
+            depth_texture.Bind();
+            depth_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            depth_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            depth_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            depth_texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            depth_texture.SetImage2D(0,
+                                     GL_DEPTH_COMPONENT24,
+                                     static_cast<GLsizei>(extent.width),
+                                     static_cast<GLsizei>(extent.height),
+                                     GL_DEPTH_COMPONENT,
+                                     GL_FLOAT,
+                                     nullptr);
+
+            framebuffer.Bind(GL_FRAMEBUFFER);
+            framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT0, rt0_texture);
+            framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT1, rt1_texture);
+            framebuffer.AttachTexture2D(GL_DEPTH_ATTACHMENT, depth_texture);
+            framebuffer.SetDrawBuffers({GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1});
+            const bool complete = framebuffer.CheckComplete(GL_FRAMEBUFFER);
+            GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+
+            if (!complete)
+            {
+                LOG_ERROR("[Renderer] GBuffer framebuffer is incomplete");
+                return false;
+            }
+
+            return true;
+        }
+
         RendererOutputHandle ToOutputHandle(GLuint texture_id)
         {
             RendererOutputHandle handle{};
@@ -105,10 +197,15 @@ namespace hybrid::renderer
         RendererStats stats{};
         RendererOutputs outputs{};
         ShaderManager shader_manager{};
+        GLShaderProgram gbuffer_shader{};
         GLShaderProgram forward_shader{};
         GLFramebuffer scene_framebuffer{};
         GLTexture scene_color{};
         GLTexture scene_depth{};
+        GLFramebuffer gbuffer_framebuffer{};
+        GLTexture gbuffer_rt0{};
+        GLTexture gbuffer_rt1{};
+        GLTexture gbuffer_depth{};
 
         LinearPassRunner pass_runner{};
         FrameContext frame_context{};
@@ -127,6 +224,7 @@ namespace hybrid::renderer
         void ConfigurePassGraph(Renderer::Impl &impl)
         {
             impl.pass_runner.Clear();
+            impl.pass_runner.AddPass(std::make_unique<GBufferPass>(&impl.gbuffer_shader));
             impl.pass_runner.AddPass(std::make_unique<ForwardLitPass>(&impl.forward_shader));
         }
     } // namespace
@@ -155,6 +253,14 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("gbuffer.vert",
+                                                            "gbuffer.frag",
+                                                            m_impl->gbuffer_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: gbuffer shader program build failed");
+            return false;
+        }
+
         if (!m_impl->shader_manager.CompileProgramFromFiles("forward.vert",
                                                             "forward.frag",
                                                             m_impl->forward_shader))
@@ -167,16 +273,27 @@ namespace hybrid::renderer
 
         if (m_impl->current_extent.IsValid())
         {
-            if (!AllocateRenderTargets(m_impl->current_extent,
-                                       m_impl->scene_framebuffer,
-                                       m_impl->scene_color,
-                                       m_impl->scene_depth))
+            if (!AllocateSceneTargets(m_impl->current_extent,
+                                      m_impl->scene_framebuffer,
+                                      m_impl->scene_color,
+                                      m_impl->scene_depth))
+            {
+                return false;
+            }
+
+            if (!AllocateGBufferTargets(m_impl->current_extent,
+                                        m_impl->gbuffer_framebuffer,
+                                        m_impl->gbuffer_rt0,
+                                        m_impl->gbuffer_rt1,
+                                        m_impl->gbuffer_depth))
             {
                 return false;
             }
 
             m_impl->outputs.color = ToOutputHandle(m_impl->scene_color.Id());
-            m_impl->outputs.depth = ToOutputHandle(m_impl->scene_depth.Id());
+            m_impl->outputs.depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
+            m_impl->outputs.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
+            m_impl->outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
         }
 
         m_impl->initialized = true;
@@ -196,10 +313,15 @@ namespace hybrid::renderer
         m_impl->scene_data = {};
         m_impl->effective_view = {};
         m_impl->pass_runner.Clear();
+        m_impl->gbuffer_shader.Destroy();
         m_impl->forward_shader.Destroy();
         m_impl->scene_color.Destroy();
         m_impl->scene_depth.Destroy();
         m_impl->scene_framebuffer.Destroy();
+        m_impl->gbuffer_rt0.Destroy();
+        m_impl->gbuffer_rt1.Destroy();
+        m_impl->gbuffer_depth.Destroy();
+        m_impl->gbuffer_framebuffer.Destroy();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -215,16 +337,27 @@ namespace hybrid::renderer
             return;
         }
 
-        if (!AllocateRenderTargets(m_impl->current_extent,
-                                   m_impl->scene_framebuffer,
-                                   m_impl->scene_color,
-                                   m_impl->scene_depth))
+        if (!AllocateSceneTargets(m_impl->current_extent,
+                                  m_impl->scene_framebuffer,
+                                  m_impl->scene_color,
+                                  m_impl->scene_depth))
+        {
+            return;
+        }
+
+        if (!AllocateGBufferTargets(m_impl->current_extent,
+                                    m_impl->gbuffer_framebuffer,
+                                    m_impl->gbuffer_rt0,
+                                    m_impl->gbuffer_rt1,
+                                    m_impl->gbuffer_depth))
         {
             return;
         }
 
         m_impl->outputs.color = ToOutputHandle(m_impl->scene_color.Id());
-        m_impl->outputs.depth = ToOutputHandle(m_impl->scene_depth.Id());
+        m_impl->outputs.depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
+        m_impl->outputs.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
+        m_impl->outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
     }
 
     bool Renderer::BeginFrame(const FrameContext &frame)
@@ -249,18 +382,31 @@ namespace hybrid::renderer
             return false;
         }
 
-        if (!AllocateRenderTargets(m_impl->current_extent,
-                                   m_impl->scene_framebuffer,
-                                   m_impl->scene_color,
-                                   m_impl->scene_depth))
+        if (!AllocateSceneTargets(m_impl->current_extent,
+                                  m_impl->scene_framebuffer,
+                                  m_impl->scene_color,
+                                  m_impl->scene_depth))
+        {
+            return false;
+        }
+
+        if (!AllocateGBufferTargets(m_impl->current_extent,
+                                    m_impl->gbuffer_framebuffer,
+                                    m_impl->gbuffer_rt0,
+                                    m_impl->gbuffer_rt1,
+                                    m_impl->gbuffer_depth))
         {
             return false;
         }
 
         const RendererOutputHandle color_handle = ToOutputHandle(m_impl->scene_color.Id());
-        const RendererOutputHandle depth_handle = ToOutputHandle(m_impl->scene_depth.Id());
+        const RendererOutputHandle depth_handle = ToOutputHandle(m_impl->gbuffer_depth.Id());
+        const RendererOutputHandle gbuffer_rt0_handle = ToOutputHandle(m_impl->gbuffer_rt0.Id());
+        const RendererOutputHandle gbuffer_rt1_handle = ToOutputHandle(m_impl->gbuffer_rt1.Id());
         m_impl->outputs.color = color_handle;
         m_impl->outputs.depth = depth_handle;
+        m_impl->outputs.gbuffer_rt0 = gbuffer_rt0_handle;
+        m_impl->outputs.gbuffer_rt1 = gbuffer_rt1_handle;
 
         m_impl->scene_framebuffer.Bind(GL_FRAMEBUFFER);
         glViewport(0, 0,
@@ -316,8 +462,13 @@ namespace hybrid::renderer
         pass_context.scene_data = &m_impl->scene_data;
         pass_context.effective_view = &m_impl->effective_view;
         pass_context.stats = &m_impl->stats;
+        pass_context.targets.scene_framebuffer_id = m_impl->scene_framebuffer.Id();
+        pass_context.targets.gbuffer_framebuffer_id = m_impl->gbuffer_framebuffer.Id();
         pass_context.targets.scene_color = ToOutputHandle(m_impl->scene_color.Id());
         pass_context.targets.scene_depth = ToOutputHandle(m_impl->scene_depth.Id());
+        pass_context.targets.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
+        pass_context.targets.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+        pass_context.targets.gbuffer_depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
         pass_context.outputs = &pass_outputs;
 
         if (!m_impl->pass_runner.Execute(pass_context))
@@ -331,7 +482,15 @@ namespace hybrid::renderer
         }
         if (!pass_outputs.depth.IsValid())
         {
-            pass_outputs.depth = ToOutputHandle(m_impl->scene_depth.Id());
+            pass_outputs.depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
+        }
+        if (!pass_outputs.gbuffer_rt0.IsValid())
+        {
+            pass_outputs.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
+        }
+        if (!pass_outputs.gbuffer_rt1.IsValid())
+        {
+            pass_outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
         }
         m_impl->outputs = pass_outputs;
 

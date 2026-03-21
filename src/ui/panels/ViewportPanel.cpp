@@ -17,6 +17,28 @@
 
 namespace hybrid::ui
 {
+    namespace
+    {
+        uint64_t ResolveViewportTexture(const UiState &state)
+        {
+            switch (state.viewport_visualization)
+            {
+            case UiViewportVisualization::FinalColor:
+                return state.viewport_color_texture;
+            case UiViewportVisualization::GBufferRt0:
+                return state.viewport_gbuffer_rt0_texture != 0
+                           ? state.viewport_gbuffer_rt0_texture
+                           : state.viewport_color_texture;
+            case UiViewportVisualization::GBufferRt1:
+                return state.viewport_gbuffer_rt1_texture != 0
+                           ? state.viewport_gbuffer_rt1_texture
+                           : state.viewport_color_texture;
+            }
+
+            return state.viewport_color_texture;
+        }
+    } // namespace
+
     ViewportPanel::ViewportPanel()
         : Panel("Viewport")
     {
@@ -30,8 +52,15 @@ namespace hybrid::ui
     void ViewportPanel::DrawContents(PanelContext &context)
     {
         const ImVec2 current_size = ImGui::GetContentRegionAvail();
-        if (context.state != nullptr && context.state->viewport_color_texture != 0)
+        if (context.state != nullptr)
         {
+            const uint64_t viewport_texture = ResolveViewportTexture(*context.state);
+            if (viewport_texture == 0)
+            {
+                m_last_content_size = current_size;
+                return;
+            }
+
             const auto &render_extent = context.state->viewport_render_extent;
             const float render_width = static_cast<float>(std::max(render_extent.width, 1u));
             const float render_height = static_cast<float>(std::max(render_extent.height, 1u));
@@ -61,7 +90,7 @@ namespace hybrid::ui
             const ImVec2 image_max(image_min.x + image_size.x, image_min.y + image_size.y);
 
             ImGui::Image(
-                static_cast<ImTextureID>(static_cast<intptr_t>(context.state->viewport_color_texture)),
+                static_cast<ImTextureID>(static_cast<intptr_t>(viewport_texture)),
                 image_size,
                 ImVec2(0.0f, 1.0f),
                 ImVec2(1.0f, 0.0f));
