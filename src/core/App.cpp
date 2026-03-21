@@ -141,6 +141,8 @@ namespace hybrid::core
             frame_context.render_extent = settings.render_extent;
 
             renderer::RendererOutputs renderer_outputs{};
+            renderer::RenderView resolved_view{};
+            bool resolved_view_valid = false;
             if (renderer.BeginFrame(frame_context))
             {
                 if (active_scene_world)
@@ -158,7 +160,9 @@ namespace hybrid::core
                         view.position = scene_view.position;
                         view.near_plane = scene_view.near_plane;
                         view.far_plane = scene_view.far_plane;
+                        resolved_view_valid = true;
                     }
+                    resolved_view = view;
                     renderer.SubmitScene(*active_scene_world, view, settings);
                 }
                 renderer_outputs = renderer.EndFrame();
@@ -169,6 +173,8 @@ namespace hybrid::core
             ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
             ui_state.viewport_color_texture = renderer_outputs.color.value;
             ui_state.viewport_render_extent = frame_context.render_extent;
+            ui_state.viewport_render_view = resolved_view;
+            ui_state.viewport_render_view_valid = resolved_view_valid;
 
             ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
             ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);

@@ -51,6 +51,8 @@ namespace hybrid::ui
         std::vector<UiMaterialEntry> materials;
         uint64_t viewport_color_texture = 0;
         renderer::RenderExtent viewport_render_extent{};
+        renderer::RenderView viewport_render_view{};
+        bool viewport_render_view_valid = false;
     };
 
 } // namespace hybrid::ui

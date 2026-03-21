@@ -92,6 +92,24 @@ target_link_libraries(external_implot PUBLIC
 )
 
 # --------------------
+# ImGuizmo (source) - must use the same ImGui binary/layout
+# --------------------
+add_library(external_imguizmo STATIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImGuizmo.cpp"
+)
+
+add_library(external::imguizmo ALIAS external_imguizmo)
+
+target_include_directories(external_imguizmo SYSTEM PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/imguizmo"
+  "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+)
+
+target_link_libraries(external_imguizmo PUBLIC
+  external::imgui
+)
+
+# --------------------
 # ImGui backends: GLFW + OpenGL3
 # Requires wrapper targets created in root:
 #   thirdparty::glfw

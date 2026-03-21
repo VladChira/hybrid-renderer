@@ -118,6 +118,7 @@ target_link_libraries(hybrid_engine
     external::imgui_glfw_opengl3
     external::implot
     thirdparty::spdlog
+    external::imguizmo
     $<$<PLATFORM_ID:Windows>:Psapi>
 )
 
@@ -175,7 +176,9 @@ target_sources(hybrid_engine PRIVATE
 )
 
 target_include_directories(hybrid_engine
+  BEFORE
   PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
