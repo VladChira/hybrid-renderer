@@ -28,6 +28,9 @@ Use the “x64 Native Tools Command Prompt for VS 2022” (or otherwise ensure t
 
 ## Progress images
 
+<p align="center"><img src="images/snapshot-4.png" width="700"/></p>
+<p align="center">G-Buffer Pass (albedo on screen), material updating</p>
+
 <p align="center"><img src="images/snapshot-3.png" width="700"/></p>
 <p align="center">Simple visualisation, materials panel, cameras</p>
 
