@@ -105,8 +105,8 @@ namespace hybrid::platform
             return false;
         }
 
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
         GLFWwindow *window = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
@@ -131,7 +131,18 @@ namespace hybrid::platform
         glfwMakeContextCurrent(window);
         glfwSwapInterval(config.vsync ? 1 : 0);
 
-        LOG_INFO("GLFW initialized");
+        const int gl_major = glfwGetWindowAttrib(window, GLFW_CONTEXT_VERSION_MAJOR);
+        const int gl_minor = glfwGetWindowAttrib(window, GLFW_CONTEXT_VERSION_MINOR);
+        if (gl_major < 4 || (gl_major == 4 && gl_minor < 6))
+        {
+            LOG_ERROR("OpenGL 4.6 required, but created context is {}.{}", gl_major, gl_minor);
+            glfwDestroyWindow(window);
+            m_window = nullptr;
+            glfwTerminate();
+            return false;
+        }
+
+        LOG_INFO("GLFW initialized with OpenGL {}.{}", gl_major, gl_minor);
 
         m_initialized = true;
         return true;
