@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <future>
 #include <filesystem>
 #include <functional>
@@ -146,15 +147,44 @@ namespace hybrid::assets
             return result;
         }
 
+        glm::vec3 ToVec3(const aiColor3D &color)
+        {
+            return {color.r, color.g, color.b};
+        }
+
+        glm::vec3 ToVec3(const aiVector3D &value)
+        {
+            return {value.x, value.y, value.z};
+        }
+
+        glm::vec3 NormalizeOrDefault(const glm::vec3 &value, const glm::vec3 &fallback)
+        {
+            const float len2 = glm::dot(value, value);
+            if (len2 <= 1e-8f)
+            {
+                return fallback;
+            }
+            return value / std::sqrt(len2);
+        }
+
         void AppendNode(const aiNode &node,
                         entt::entity parent_entity,
                         const std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> &mesh_handles,
                         const std::unordered_map<std::string, const aiCamera *> &cameras_by_node_name,
+                        std::unordered_map<std::string, entt::entity> &entities_by_name,
                         hybrid::core::scene::SceneWorld &scene)
         {
             const std::string node_name = node.mName.C_Str();
             entt::entity entity = scene.CreateEntity(node_name);
             auto &registry = scene.Registry();
+
+            if (!node_name.empty())
+            {
+                if (!entities_by_name.try_emplace(node_name, entity).second)
+                {
+                    LOG_WARN("[AssimpSceneLoader] Duplicate node name for entity lookup: '" + node_name + "', keeping first instance");
+                }
+            }
 
             if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(entity))
             {
@@ -237,7 +267,96 @@ namespace hybrid::assets
 
             for (unsigned int i = 0; i < node.mNumChildren; ++i)
             {
-                AppendNode(*node.mChildren[i], entity, mesh_handles, cameras_by_node_name, scene);
+                AppendNode(*node.mChildren[i], entity, mesh_handles, cameras_by_node_name, entities_by_name, scene);
+            }
+        }
+
+        void AppendLights(const aiScene &ai_scene,
+                          std::unordered_map<std::string, entt::entity> &entities_by_name,
+                          hybrid::core::scene::SceneWorld &scene)
+        {
+            LOG_INFO("[AssimpSceneLoader] \t Processing lights...");
+
+            auto &registry = scene.Registry();
+
+            for (unsigned int i = 0; i < ai_scene.mNumLights; ++i)
+            {
+                const aiLight *light = ai_scene.mLights[i];
+                if (light == nullptr)
+                {
+                    continue;
+                }
+
+                const std::string source_name = light->mName.C_Str();
+                const std::string fallback_name = "Light_" + std::to_string(i);
+                const std::string entity_name = source_name.empty() ? fallback_name : source_name;
+
+                entt::entity light_entity = entt::null;
+                if (!source_name.empty())
+                {
+                    const auto it = entities_by_name.find(source_name);
+                    if (it != entities_by_name.end())
+                    {
+                        light_entity = it->second;
+                    }
+                }
+
+                if (light_entity == entt::null)
+                {
+                    light_entity = scene.CreateEntity(entity_name);
+                    if (!source_name.empty())
+                    {
+                        entities_by_name.try_emplace(source_name, light_entity);
+                    }
+
+                    if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(light_entity))
+                    {
+                        transform->local.translation = ToVec3(light->mPosition);
+                        transform->dirty = true;
+                    }
+                }
+
+                const glm::vec3 color = ToVec3(light->mColorDiffuse);
+                auto &common = registry.get_or_emplace<hybrid::core::scene::LightCommonComponent>(light_entity);
+                common.color = color;
+                common.intensity = 1.0f;
+
+                switch (light->mType)
+                {
+                case aiLightSource_POINT:
+                {
+                    auto &point = registry.get_or_emplace<hybrid::core::scene::PointLightComponent>(light_entity);
+                    point.attenuation_constant = light->mAttenuationConstant;
+                    point.attenuation_linear = light->mAttenuationLinear;
+                    point.attenuation_quadratic = light->mAttenuationQuadratic;
+                    if (light->mAttenuationQuadratic > 0.0f)
+                    {
+                        point.range = std::sqrt(1.0f / light->mAttenuationQuadratic);
+                    }
+                    break;
+                }
+                case aiLightSource_DIRECTIONAL:
+                {
+                    auto &directional = registry.get_or_emplace<hybrid::core::scene::DirectionalLightComponent>(light_entity);
+                    directional.direction = NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+                    break;
+                }
+                case aiLightSource_AREA:
+                {
+                    auto &area = registry.get_or_emplace<hybrid::core::scene::AreaLightComponent>(light_entity);
+                    area.direction = NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+                    area.size = glm::vec2(1.0f);
+                    break;
+                }
+                case aiLightSource_AMBIENT:
+                {
+                    auto const &ambient = registry.get_or_emplace<hybrid::core::scene::HdriLightComponent>(light_entity);
+                    break;
+                }
+                default:
+                    LOG_INFO("[AssimpSceneLoader] Skipping unsupported light type for '" + entity_name + "'");
+                    break;
+                }
             }
         }
 
@@ -587,7 +706,7 @@ namespace hybrid::assets
             }
         }
 
-        LOG_INFO("[AssimpSceneLoader] \t Building scene tree...");
+        LOG_INFO("[AssimpSceneLoader] \t Building scene...");
 
         std::unordered_map<std::string, const aiCamera *> cameras_by_node_name;
         cameras_by_node_name.reserve(scene->mNumCameras);
@@ -613,7 +732,11 @@ namespace hybrid::assets
 
         if (scene->mRootNode)
         {
-            AppendNode(*scene->mRootNode, entt::null, mesh_handles, cameras_by_node_name, *result);
+            std::unordered_map<std::string, entt::entity> entities_by_name;
+            entities_by_name.reserve(static_cast<size_t>(scene->mNumMeshes + scene->mNumCameras + scene->mNumLights + 8));
+
+            AppendNode(*scene->mRootNode, entt::null, mesh_handles, cameras_by_node_name, entities_by_name, *result);
+            AppendLights(*scene, entities_by_name, *result);
         }
 
         LOG_INFO("[AssimpSceneLoader] glTF scene loaded");

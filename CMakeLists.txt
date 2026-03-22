@@ -153,6 +153,11 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/components/MeshRendererComponentDrawer.cpp
   src/ui/panels/components/CameraComponentDrawer.cpp
   src/ui/panels/components/CameraTargetComponentDrawer.cpp
+  src/ui/panels/components/LightCommonComponentDrawer.cpp
+  src/ui/panels/components/PointLightComponentDrawer.cpp
+  src/ui/panels/components/DirectionalLightComponentDrawer.cpp
+  src/ui/panels/components/AreaLightComponentDrawer.cpp
+  src/ui/panels/components/HdriLightComponentDrawer.cpp
   src/ui/Dockspace.cpp
   src/ui/UiStateUtils.cpp
 

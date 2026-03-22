@@ -5,9 +5,14 @@
 #include "ui/UiState.h"
 #include "ui/panels/components/CameraComponentDrawer.h"
 #include "ui/panels/components/CameraTargetComponentDrawer.h"
+#include "ui/panels/components/DirectionalLightComponentDrawer.h"
+#include "ui/panels/components/AreaLightComponentDrawer.h"
+#include "ui/panels/components/HdriLightComponentDrawer.h"
+#include "ui/panels/components/LightCommonComponentDrawer.h"
 #include "ui/panels/components/MaterialComponentDrawer.h"
 #include "ui/panels/components/MeshRendererComponentDrawer.h"
 #include "ui/panels/components/NameComponentDrawer.h"
+#include "ui/panels/components/PointLightComponentDrawer.h"
 #include "ui/panels/components/TransformComponentDrawer.h"
 
 #include <imgui.h>
@@ -107,6 +112,36 @@ namespace hybrid::ui
         if (const auto *camera_target = registry.try_get<core::scene::CameraTargetComponent>(entity))
         {
             DrawCameraTargetComponent(entity, *camera_target, context.commands);
+            drew_any = true;
+        }
+
+        if (const auto *light_common = registry.try_get<core::scene::LightCommonComponent>(entity))
+        {
+            DrawLightCommonComponent(*light_common);
+            drew_any = true;
+        }
+
+        if (const auto *point_light = registry.try_get<core::scene::PointLightComponent>(entity))
+        {
+            DrawPointLightComponent(*point_light);
+            drew_any = true;
+        }
+
+        if (const auto *directional_light = registry.try_get<core::scene::DirectionalLightComponent>(entity))
+        {
+            DrawDirectionalLightComponent(*directional_light);
+            drew_any = true;
+        }
+
+        if (const auto *area_light = registry.try_get<core::scene::AreaLightComponent>(entity))
+        {
+            DrawAreaLightComponent(*area_light);
+            drew_any = true;
+        }
+
+        if (const auto *hdri_light = registry.try_get<core::scene::HdriLightComponent>(entity))
+        {
+            DrawHdriLightComponent(*hdri_light);
             drew_any = true;
         }
 
