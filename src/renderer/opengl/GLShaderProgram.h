@@ -30,6 +30,7 @@ namespace hybrid::renderer
 
         GLint GetUniformLocation(const char *name) const;
         void SetUniform1i(const char *name, GLint value) const;
+        void SetUniform1ui(const char *name, GLuint value) const;
         void SetUniform1f(const char *name, GLfloat value) const;
         void SetUniformVec3(const char *name, const glm::vec3 &value) const;
         void SetUniformMat4(const char *name, const glm::mat4 &value) const;

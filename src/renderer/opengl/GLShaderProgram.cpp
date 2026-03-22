@@ -138,6 +138,11 @@ namespace hybrid::renderer
         glUniform1i(GetUniformLocation(name), value);
     }
 
+    void GLShaderProgram::SetUniform1ui(const char *name, GLuint value) const
+    {
+        glUniform1ui(GetUniformLocation(name), value);
+    }
+
     void GLShaderProgram::SetUniform1f(const char *name, GLfloat value) const
     {
         glUniform1f(GetUniformLocation(name), value);
@@ -166,7 +171,7 @@ namespace hybrid::renderer
         }
 
         const GLchar *raw_source = source.data();
-        const GLint source_length = static_cast<GLint>(source.size());
+        const auto source_length = static_cast<GLint>(source.size());
         glShaderSource(out_shader, 1, &raw_source, &source_length);
         glCompileShader(out_shader);
 

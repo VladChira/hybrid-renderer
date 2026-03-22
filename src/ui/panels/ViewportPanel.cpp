@@ -6,10 +6,11 @@
 #include "ui/UiState.h"
 
 #include <ImGuizmo.h>
+#include <glad.h>
 
 #include <algorithm>
 #include <cstdint>
-#include <cmath>
+#include <limits>
 
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -19,6 +20,8 @@ namespace hybrid::ui
 {
     namespace
     {
+        constexpr uint32_t kNoEntityId = std::numeric_limits<uint32_t>::max();
+
         uint64_t ResolveViewportTexture(const UiState &state)
         {
             switch (state.viewport_visualization)
@@ -36,6 +39,47 @@ namespace hybrid::ui
             }
 
             return state.viewport_color_texture;
+        }
+
+        bool ReadEntityIdPixel(uint64_t texture_id, int32_t pixel_x, int32_t pixel_y, uint32_t &out_entity_id)
+        {
+            if (texture_id == 0)
+            {
+                return false;
+            }
+
+            static GLuint readback_framebuffer = 0;
+            if (readback_framebuffer == 0)
+            {
+                glGenFramebuffers(1, &readback_framebuffer);
+                if (readback_framebuffer == 0)
+                {
+                    return false;
+                }
+            }
+
+            GLint previous_read_framebuffer = 0;
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous_read_framebuffer);
+
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, readback_framebuffer);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   static_cast<GLuint>(texture_id),
+                                   0);
+            if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            {
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_read_framebuffer));
+                return false;
+            }
+
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            uint32_t entity_id = kNoEntityId;
+            glReadPixels(pixel_x, pixel_y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &entity_id);
+            out_entity_id = entity_id;
+
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_read_framebuffer));
+            return glGetError() == GL_NO_ERROR;
         }
     } // namespace
 
@@ -94,6 +138,43 @@ namespace hybrid::ui
                 image_size,
                 ImVec2(0.0f, 1.0f),
                 ImVec2(1.0f, 0.0f));
+
+            if (context.selection != nullptr &&
+                context.state->scene_world != nullptr &&
+                ImGui::IsItemHovered() &&
+                ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                !ImGuizmo::IsOver() &&
+                !ImGuizmo::IsUsing())
+            {
+                const ImVec2 mouse = ImGui::GetMousePos();
+                const float normalized_x = std::clamp((mouse.x - image_min.x) / std::max(image_size.x, 1.0f), 0.0f, 0.999999f);
+                const float normalized_y = std::clamp((mouse.y - image_min.y) / std::max(image_size.y, 1.0f), 0.0f, 0.999999f);
+
+                const auto pixel_x = static_cast<int32_t>(normalized_x * render_width);
+                const auto pixel_from_top = static_cast<int32_t>(normalized_y * render_height);
+                const int32_t pixel_y = static_cast<int32_t>(render_extent.height) - 1 - pixel_from_top;
+
+                uint32_t entity_id = kNoEntityId;
+                if (ReadEntityIdPixel(context.state->viewport_entity_id_texture, pixel_x, pixel_y, entity_id) &&
+                    entity_id != kNoEntityId)
+                {
+                    const auto entity = static_cast<entt::entity>(entity_id);
+                    if (context.state->scene_world->IsValid(entity))
+                    {
+                        context.selection->type = UiSelection::Type::Entity;
+                        context.selection->entity = entity;
+                        context.selection->material_asset_id = 0;
+                    }
+                    else
+                    {
+                        context.selection->Clear();
+                    }
+                }
+                else
+                {
+                    context.selection->Clear();
+                }
+            }
 
             if (context.state->viewport_render_view_valid &&
                 context.selection != nullptr &&

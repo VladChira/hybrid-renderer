@@ -228,6 +228,7 @@ namespace hybrid::renderer
         context.outputs->depth = context.targets.gbuffer_depth;
         context.outputs->gbuffer_rt0 = context.targets.gbuffer_rt0;
         context.outputs->gbuffer_rt1 = context.targets.gbuffer_rt1;
+        context.outputs->gbuffer_entity_id = context.targets.gbuffer_entity_id;
         return true;
     }
 

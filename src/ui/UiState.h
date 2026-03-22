@@ -59,6 +59,7 @@ namespace hybrid::ui
         uint64_t viewport_color_texture = 0;
         uint64_t viewport_gbuffer_rt0_texture = 0;
         uint64_t viewport_gbuffer_rt1_texture = 0;
+        uint64_t viewport_entity_id_texture = 0;
         UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
         renderer::RenderExtent viewport_render_extent{};
         renderer::RenderView viewport_render_view{};

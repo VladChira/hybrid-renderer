@@ -92,6 +92,7 @@ namespace hybrid::renderer
         RendererOutputHandle depth;
         RendererOutputHandle gbuffer_rt0;
         RendererOutputHandle gbuffer_rt1;
+        RendererOutputHandle gbuffer_entity_id;
     };
 
 } // namespace hybrid::renderer

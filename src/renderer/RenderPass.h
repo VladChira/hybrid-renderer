@@ -26,6 +26,7 @@ namespace hybrid::renderer
         RendererOutputHandle scene_depth{};
         RendererOutputHandle gbuffer_rt0{};
         RendererOutputHandle gbuffer_rt1{};
+        RendererOutputHandle gbuffer_entity_id{};
         RendererOutputHandle gbuffer_depth{};
     };
 

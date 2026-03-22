@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 
@@ -180,8 +181,10 @@ namespace hybrid::renderer
 
         const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
         glClearBufferfv(GL_COLOR, 0, clear_rt0);
         glClearBufferfv(GL_COLOR, 1, clear_rt1);
+        glClearBufferuiv(GL_COLOR, 2, clear_entity_id);
         glClear(GL_DEPTH_BUFFER_BIT);
 
         m_gbuffer_shader->Use();
@@ -225,6 +228,7 @@ namespace hybrid::renderer
                 m_gbuffer_shader->SetUniformVec3("u_base_color", ResolvePrimitiveBaseColor(primitive));
                 m_gbuffer_shader->SetUniform1f("u_metallic", ResolvePrimitiveMetallic(primitive));
                 m_gbuffer_shader->SetUniform1f("u_roughness", ResolvePrimitiveRoughness(primitive));
+                m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
 
                 gpu.vao.Bind();
                 glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);
@@ -239,6 +243,7 @@ namespace hybrid::renderer
 
         context.outputs->gbuffer_rt0 = context.targets.gbuffer_rt0;
         context.outputs->gbuffer_rt1 = context.targets.gbuffer_rt1;
+        context.outputs->gbuffer_entity_id = context.targets.gbuffer_entity_id;
         context.outputs->depth = context.targets.gbuffer_depth;
         return true;
     }

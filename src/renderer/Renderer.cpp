@@ -95,6 +95,7 @@ namespace hybrid::renderer
                                     GLFramebuffer &framebuffer,
                                     GLTexture &rt0_texture,
                                     GLTexture &rt1_texture,
+                                    GLTexture &entity_id_texture,
                                     GLTexture &depth_texture)
         {
             if (!extent.IsValid())
@@ -125,6 +126,11 @@ namespace hybrid::renderer
                 LOG_ERROR("[Renderer] Failed to create gbuffer depth texture");
                 return false;
             }
+            if (!entity_id_texture.IsValid() && !entity_id_texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[Renderer] Failed to create gbuffer entity id texture");
+                return false;
+            }
 
             rt0_texture.Bind();
             rt0_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -152,6 +158,19 @@ namespace hybrid::renderer
                                    GL_HALF_FLOAT,
                                    nullptr);
 
+            entity_id_texture.Bind();
+            entity_id_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            entity_id_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            entity_id_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            entity_id_texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            entity_id_texture.SetImage2D(0,
+                                         GL_R32UI,
+                                         static_cast<GLsizei>(extent.width),
+                                         static_cast<GLsizei>(extent.height),
+                                         GL_RED_INTEGER,
+                                         GL_UNSIGNED_INT,
+                                         nullptr);
+
             depth_texture.Bind();
             depth_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             depth_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -168,8 +187,9 @@ namespace hybrid::renderer
             framebuffer.Bind(GL_FRAMEBUFFER);
             framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT0, rt0_texture);
             framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT1, rt1_texture);
+            framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT2, entity_id_texture);
             framebuffer.AttachTexture2D(GL_DEPTH_ATTACHMENT, depth_texture);
-            framebuffer.SetDrawBuffers({GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1});
+            framebuffer.SetDrawBuffers({GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2});
             const bool complete = framebuffer.CheckComplete(GL_FRAMEBUFFER);
             GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
 
@@ -205,6 +225,7 @@ namespace hybrid::renderer
         GLFramebuffer gbuffer_framebuffer{};
         GLTexture gbuffer_rt0{};
         GLTexture gbuffer_rt1{};
+        GLTexture gbuffer_entity_id{};
         GLTexture gbuffer_depth{};
 
         LinearPassRunner pass_runner{};
@@ -285,6 +306,7 @@ namespace hybrid::renderer
                                         m_impl->gbuffer_framebuffer,
                                         m_impl->gbuffer_rt0,
                                         m_impl->gbuffer_rt1,
+                                        m_impl->gbuffer_entity_id,
                                         m_impl->gbuffer_depth))
             {
                 return false;
@@ -294,6 +316,7 @@ namespace hybrid::renderer
             m_impl->outputs.depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
             m_impl->outputs.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
             m_impl->outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+            m_impl->outputs.gbuffer_entity_id = ToOutputHandle(m_impl->gbuffer_entity_id.Id());
         }
 
         m_impl->initialized = true;
@@ -320,6 +343,7 @@ namespace hybrid::renderer
         m_impl->scene_framebuffer.Destroy();
         m_impl->gbuffer_rt0.Destroy();
         m_impl->gbuffer_rt1.Destroy();
+        m_impl->gbuffer_entity_id.Destroy();
         m_impl->gbuffer_depth.Destroy();
         m_impl->gbuffer_framebuffer.Destroy();
         m_impl->current_extent = {};
@@ -349,6 +373,7 @@ namespace hybrid::renderer
                                     m_impl->gbuffer_framebuffer,
                                     m_impl->gbuffer_rt0,
                                     m_impl->gbuffer_rt1,
+                                    m_impl->gbuffer_entity_id,
                                     m_impl->gbuffer_depth))
         {
             return;
@@ -358,6 +383,7 @@ namespace hybrid::renderer
         m_impl->outputs.depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
         m_impl->outputs.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
         m_impl->outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+        m_impl->outputs.gbuffer_entity_id = ToOutputHandle(m_impl->gbuffer_entity_id.Id());
     }
 
     bool Renderer::BeginFrame(const FrameContext &frame)
@@ -394,6 +420,7 @@ namespace hybrid::renderer
                                     m_impl->gbuffer_framebuffer,
                                     m_impl->gbuffer_rt0,
                                     m_impl->gbuffer_rt1,
+                                    m_impl->gbuffer_entity_id,
                                     m_impl->gbuffer_depth))
         {
             return false;
@@ -403,10 +430,12 @@ namespace hybrid::renderer
         const RendererOutputHandle depth_handle = ToOutputHandle(m_impl->gbuffer_depth.Id());
         const RendererOutputHandle gbuffer_rt0_handle = ToOutputHandle(m_impl->gbuffer_rt0.Id());
         const RendererOutputHandle gbuffer_rt1_handle = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+        const RendererOutputHandle gbuffer_entity_id_handle = ToOutputHandle(m_impl->gbuffer_entity_id.Id());
         m_impl->outputs.color = color_handle;
         m_impl->outputs.depth = depth_handle;
         m_impl->outputs.gbuffer_rt0 = gbuffer_rt0_handle;
         m_impl->outputs.gbuffer_rt1 = gbuffer_rt1_handle;
+        m_impl->outputs.gbuffer_entity_id = gbuffer_entity_id_handle;
 
         m_impl->scene_framebuffer.Bind(GL_FRAMEBUFFER);
         glViewport(0, 0,
@@ -468,6 +497,7 @@ namespace hybrid::renderer
         pass_context.targets.scene_depth = ToOutputHandle(m_impl->scene_depth.Id());
         pass_context.targets.gbuffer_rt0 = ToOutputHandle(m_impl->gbuffer_rt0.Id());
         pass_context.targets.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+        pass_context.targets.gbuffer_entity_id = ToOutputHandle(m_impl->gbuffer_entity_id.Id());
         pass_context.targets.gbuffer_depth = ToOutputHandle(m_impl->gbuffer_depth.Id());
         pass_context.outputs = &pass_outputs;
 
@@ -491,6 +521,10 @@ namespace hybrid::renderer
         if (!pass_outputs.gbuffer_rt1.IsValid())
         {
             pass_outputs.gbuffer_rt1 = ToOutputHandle(m_impl->gbuffer_rt1.Id());
+        }
+        if (!pass_outputs.gbuffer_entity_id.IsValid())
+        {
+            pass_outputs.gbuffer_entity_id = ToOutputHandle(m_impl->gbuffer_entity_id.Id());
         }
         m_impl->outputs = pass_outputs;
 

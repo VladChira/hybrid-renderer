@@ -1,5 +1,7 @@
 out/
 
+imgui.ini
+
 CMakeUserPresets.json
 
 .vscode/
