@@ -36,8 +36,6 @@ namespace hybrid::ui
         float horizontal_fov_radians = 1.0471976f;
         float near_plane = 0.1f;
         float far_plane = 1000.0f;
-        bool override_aspect_ratio = false;
-        float aspect_ratio = 16.0f / 9.0f;
     };
 
     struct CameraSetTargetCommand

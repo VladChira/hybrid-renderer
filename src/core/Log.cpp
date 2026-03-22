@@ -23,7 +23,7 @@ namespace hybrid::core
 
             std::vector<std::string> Snapshot()
             {
-                std::lock_guard<std::mutex> lock(spdlog::sinks::base_sink<std::mutex>::mutex_);
+                std::lock_guard lock(spdlog::sinks::base_sink<std::mutex>::mutex_);
                 return std::vector<std::string>(buffer_.begin(), buffer_.end());
             }
 

@@ -61,7 +61,6 @@ namespace hybrid::core::scene
 
             auto &camera = registry.emplace<CameraComponent>(camera_entity);
             camera.horizontal_fov_radians = glm::radians(60.0f);
-            camera.aspect_ratio = 16.0f / 9.0f;
             camera.near_plane = 0.1f;
             camera.far_plane = 1000.0f;
 
@@ -80,8 +79,7 @@ namespace hybrid::core::scene
                 return view;
             }
 
-            const float resolved_aspect = ResolveAspect(aspect_ratio, camera->aspect_ratio);
-            const float vertical_fov = HorizontalToVerticalFov(camera->horizontal_fov_radians, resolved_aspect);
+            const float vertical_fov = HorizontalToVerticalFov(camera->horizontal_fov_radians, aspect_ratio);
 
             const auto position = glm::vec3(transform->world[3]);
             glm::vec3 forward = glm::normalize(glm::vec3(transform->world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
@@ -105,7 +103,7 @@ namespace hybrid::core::scene
             view.near_plane = camera->near_plane;
             view.far_plane = camera->far_plane;
             view.view = glm::lookAt(position, position + forward, up);
-            view.projection = glm::perspective(vertical_fov, resolved_aspect, view.near_plane, view.far_plane);
+            view.projection = glm::perspective(vertical_fov, aspect_ratio, view.near_plane, view.far_plane);
             view.valid = true;
             return view;
         }

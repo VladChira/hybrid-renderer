@@ -205,10 +205,6 @@ namespace hybrid::assets
                 {
                     camera_component.horizontal_fov_radians = camera.mHorizontalFOV;
                 }
-                if (camera.mAspect > 0.0f)
-                {
-                    camera_component.aspect_ratio = camera.mAspect;
-                }
                 if (camera.mClipPlaneNear > 0.0f)
                 {
                     camera_component.near_plane = camera.mClipPlaneNear;

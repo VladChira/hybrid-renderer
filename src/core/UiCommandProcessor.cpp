@@ -78,10 +78,6 @@ namespace hybrid::core
                             camera->horizontal_fov_radians = std::max(0.0174533f, typed_command.horizontal_fov_radians);
                             camera->near_plane = std::max(0.001f, typed_command.near_plane);
                             camera->far_plane = std::max(camera->near_plane + 0.001f, typed_command.far_plane);
-                            if (typed_command.override_aspect_ratio)
-                            {
-                                camera->aspect_ratio = std::max(0.001f, typed_command.aspect_ratio);
-                            }
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetTargetCommand>)

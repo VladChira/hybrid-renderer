@@ -40,7 +40,6 @@ namespace hybrid::core::scene
     struct CameraComponent
     {
         float horizontal_fov_radians = 1.0471976f; // 60 degrees
-        float aspect_ratio = 16.0f / 9.0f;
         float near_plane = 0.1f;
         float far_plane = 1000.0f;
     };
