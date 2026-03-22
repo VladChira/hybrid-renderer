@@ -166,6 +166,7 @@ target_sources(hybrid_engine PRIVATE
   src/assets/AssimpSceneLoader.cpp
   src/assets/AssimpTextureCache.cpp
   src/assets/StbImageLoader.cpp
+  src/assets/AssetUtils.cpp
 
   src/renderer/Renderer.cpp
   src/renderer/passes/ForwardLitPass.cpp

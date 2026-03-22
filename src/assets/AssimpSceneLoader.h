@@ -3,6 +3,8 @@
 #include "assets/AssetManager.h"
 #include "core/scene/SceneTypes.h"
 
+#include <assimp/scene.h>
+
 namespace hybrid::assets
 {
 
@@ -16,6 +18,8 @@ namespace hybrid::assets
         std::shared_ptr<void> Load(const AssetLoadRequest &request, IAssetDataSource *data_source) override;
 
     private:
+        void LogSceneSummary(const aiScene *scene) const;
+
         AssetManager *m_assets = nullptr;
     };
 

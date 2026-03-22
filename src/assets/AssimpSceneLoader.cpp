@@ -1,9 +1,9 @@
 #include "assets/AssimpSceneLoader.h"
-#include "assets/AssimpTextureCache.h"
 #include "assets/DiskAssetDataSource.h"
+#include "assets/AssetUtils.h"
 
 #include "core/Log.h"
-#include "core/scene/SceneWorld.h"
+
 
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
@@ -26,147 +26,8 @@
 
 namespace hybrid::assets
 {
-
-    void LogSceneSummary(const aiScene *scene);
-
     namespace
     {
-        bool EqualsIgnoreCase(std::string_view lhs, std::string_view rhs)
-        {
-            if (lhs.size() != rhs.size())
-            {
-                return false;
-            }
-            for (size_t i = 0; i < lhs.size(); ++i)
-            {
-                char a = lhs[i];
-                char b = rhs[i];
-                if (a == b)
-                {
-                    continue;
-                }
-                if (a >= 'A' && a <= 'Z')
-                {
-                    a = static_cast<char>(a - 'A' + 'a');
-                }
-                if (b >= 'A' && b <= 'Z')
-                {
-                    b = static_cast<char>(b - 'A' + 'a');
-                }
-                if (a != b)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        hybrid::core::scene::TextureWrap ToWrap(aiTextureMapMode mode)
-        {
-            switch (mode)
-            {
-            case aiTextureMapMode_Clamp:
-                return hybrid::core::scene::TextureWrap::ClampToEdge;
-            case aiTextureMapMode_Mirror:
-                return hybrid::core::scene::TextureWrap::MirroredRepeat;
-            case aiTextureMapMode_Wrap:
-            default:
-                return hybrid::core::scene::TextureWrap::Repeat;
-            }
-        }
-
-        bool FillMaterialTexture(const aiMaterial &material,
-                                 aiTextureType type,
-                                 hybrid::core::scene::TextureColorSpace color_space,
-                                 AssimpTextureCache &texture_cache,
-                                 hybrid::core::scene::MaterialTexture &out_texture)
-        {
-            if (material.GetTextureCount(type) == 0)
-            {
-                return false;
-            }
-
-            aiString path;
-            aiTextureMapping mapping = aiTextureMapping_UV;
-            unsigned int uv_index = 0;
-            float blend = 1.0f;
-            aiTextureOp op = aiTextureOp_Multiply;
-            std::array<aiTextureMapMode, 2> map_modes = {aiTextureMapMode_Wrap, aiTextureMapMode_Wrap};
-            if (material.GetTexture(type, 0, &path, &mapping, &uv_index, &blend, &op, map_modes.data()) != AI_SUCCESS)
-            {
-                return false;
-            }
-
-            const std::string raw_path = path.C_Str();
-            if (raw_path.empty())
-            {
-                return false;
-            }
-
-            if (!raw_path.empty() && raw_path[0] == '*')
-            {
-                return false;
-            }
-
-            out_texture.name = raw_path;
-            out_texture.image = texture_cache.GetOrLoad(raw_path);
-            out_texture.texcoord = static_cast<int>(uv_index);
-            out_texture.color_space = color_space;
-            out_texture.sampler.wrap_s = ToWrap(map_modes[0]);
-            out_texture.sampler.wrap_t = ToWrap(map_modes[1]);
-
-#ifdef AI_MATKEY_UVTRANSFORM
-            if (aiUVTransform uv_transform; material.Get(AI_MATKEY_UVTRANSFORM(type, 0), uv_transform) == AI_SUCCESS)
-            {
-                if (uv_transform.mScaling.x != 1.0f || uv_transform.mScaling.y != 1.0f ||
-                    uv_transform.mTranslation.x != 0.0f || uv_transform.mTranslation.y != 0.0f ||
-                    uv_transform.mRotation != 0.0f)
-                {
-                    out_texture.has_transform = true;
-                    out_texture.scale = {uv_transform.mScaling.x, uv_transform.mScaling.y};
-                    out_texture.offset = {uv_transform.mTranslation.x, uv_transform.mTranslation.y};
-                    out_texture.rotation = uv_transform.mRotation;
-                }
-            }
-#endif
-
-            return out_texture.image.IsValid();
-        }
-
-        hybrid::core::scene::Transform ToTransform(const aiMatrix4x4 &matrix)
-        {
-            aiVector3D scaling;
-            aiQuaternion rotation;
-            aiVector3D translation;
-            matrix.Decompose(scaling, rotation, translation);
-
-            hybrid::core::scene::Transform result{};
-            result.translation = {translation.x, translation.y, translation.z};
-            result.rotation = {rotation.w, rotation.x, rotation.y, rotation.z};
-            result.scale = {scaling.x, scaling.y, scaling.z};
-            return result;
-        }
-
-        glm::vec3 ToVec3(const aiColor3D &color)
-        {
-            return {color.r, color.g, color.b};
-        }
-
-        glm::vec3 ToVec3(const aiVector3D &value)
-        {
-            return {value.x, value.y, value.z};
-        }
-
-        glm::vec3 NormalizeOrDefault(const glm::vec3 &value, const glm::vec3 &fallback)
-        {
-            const float len2 = glm::dot(value, value);
-            if (len2 <= 1e-8f)
-            {
-                return fallback;
-            }
-            return value / std::sqrt(len2);
-        }
-
         void AppendNode(const aiNode &node,
                         entt::entity parent_entity,
                         const std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> &mesh_handles,
@@ -178,12 +39,9 @@ namespace hybrid::assets
             entt::entity entity = scene.CreateEntity(node_name);
             auto &registry = scene.Registry();
 
-            if (!node_name.empty())
+            if (!node_name.empty() && !entities_by_name.try_emplace(node_name, entity).second)
             {
-                if (!entities_by_name.try_emplace(node_name, entity).second)
-                {
-                    LOG_WARN("[AssimpSceneLoader] Duplicate node name for entity lookup: '" + node_name + "', keeping first instance");
-                }
+                LOG_WARN("[AssimpSceneLoader] Duplicate node name for entity lookup: '" + node_name + "', keeping first instance");
             }
 
             if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(entity))
@@ -346,7 +204,8 @@ namespace hybrid::assets
                 }
                 case aiLightSource_AMBIENT:
                 {
-                    auto const &ambient = registry.get_or_emplace<hybrid::core::scene::HdriLightComponent>(light_entity);
+                    auto &ambient = registry.get_or_emplace<hybrid::core::scene::HdriLightComponent>(light_entity);
+                    ambient.yaw_radians = 0.0f;
                     break;
                 }
                 default:
@@ -543,8 +402,7 @@ namespace hybrid::assets
                                                              for (unsigned int i = worker; i < material_count; i += material_worker_count)
                                                              {
                                                                  material_handles[i] = load_material(i);
-                                                             }
-                                                         }));
+                                                             } }));
             }
 
             for (auto &worker : material_workers)
@@ -692,8 +550,7 @@ namespace hybrid::assets
                                                     for (unsigned int i = worker; i < mesh_count; i += worker_count)
                                                     {
                                                         mesh_handles[i] = load_mesh(i);
-                                                    }
-                                                }));
+                                                    } }));
             }
 
             for (auto &worker : workers)
@@ -739,7 +596,7 @@ namespace hybrid::assets
         return result;
     }
 
-    void LogSceneSummary(const aiScene *scene)
+    void AssimpSceneLoader::LogSceneSummary(const aiScene *scene) const
     {
         if (!scene)
         {
