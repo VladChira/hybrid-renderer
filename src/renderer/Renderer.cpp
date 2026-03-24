@@ -99,9 +99,9 @@ namespace hybrid::renderer
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
         m_impl->forward_pass = std::make_unique<ForwardLitPass>(&m_impl->forward_shader);
 
-        LOG_INFO("Current rendering passes:");
-        LOG_INFO("\t - GBuffer Pass [OpenGL Raster]");
-        LOG_INFO("\t - Forward Debug Pass [OpenGL Raster]");
+        LOG_INFO("[Renderer] Current rendering passes:");
+        LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
+        LOG_INFO("[Renderer] \t - Forward Debug Pass [OpenGL Raster]");
 
         if (m_impl->current_extent.IsValid())
         {
