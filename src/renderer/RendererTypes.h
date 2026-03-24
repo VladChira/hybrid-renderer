@@ -58,17 +58,67 @@ namespace hybrid::renderer
         core::scene::Aabb world_bounds{};
     };
 
+    struct RenderDirectionalLight
+    {
+        uint64_t instance_id = 0;
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        glm::vec3 color{1.0f};
+        float intensity = 1.0f;
+        bool cast_shadows = true;
+    };
+
+    struct RenderPointLight
+    {
+        uint64_t instance_id = 0;
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float intensity = 1.0f;
+        float range = 0.0f;
+        float attenuation_constant = 1.0f;
+        float attenuation_linear = 0.0f;
+        float attenuation_quadratic = 1.0f;
+        bool cast_shadows = true;
+    };
+
+    struct RenderAreaLight
+    {
+        uint64_t instance_id = 0;
+        glm::vec3 position{0.0f};
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        glm::vec2 size{1.0f, 1.0f};
+        glm::vec3 color{1.0f};
+        float intensity = 1.0f;
+        bool two_sided = false;
+        bool cast_shadows = true;
+    };
+
+    struct RenderHdriLight
+    {
+        uint64_t instance_id = 0;
+        float intensity = 1.0f;
+        float yaw_radians = 0.0f;
+        bool cast_shadows = false;
+    };
+
     struct FrameSceneData
     {
         std::vector<RenderMeshInstance> opaque_mesh_instances;
         std::vector<RenderMeshInstance> masked_mesh_instances;
         std::vector<RenderMeshInstance> blended_mesh_instances;
+        std::vector<RenderDirectionalLight> directional_lights;
+        std::vector<RenderPointLight> point_lights;
+        std::vector<RenderAreaLight> area_lights;
+        std::vector<RenderHdriLight> hdri_lights;
         core::scene::Aabb scene_bounds{};
     };
 
     struct RenderSceneSnapshot
     {
         std::vector<RenderMeshInstance> mesh_instances;
+        std::vector<RenderDirectionalLight> directional_lights;
+        std::vector<RenderPointLight> point_lights;
+        std::vector<RenderAreaLight> area_lights;
+        std::vector<RenderHdriLight> hdri_lights;
     };
 
     struct RendererStats

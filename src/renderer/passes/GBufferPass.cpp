@@ -478,8 +478,7 @@ namespace hybrid::renderer
                 m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
 
                 bool has_base_color_texture = false;
-                const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive);
-                if (base_color_texture != nullptr)
+                if (const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive); base_color_texture != nullptr)
                 {
                     const uint64_t image_id = base_color_texture->image.Id().value;
                     if (image_id != 0)

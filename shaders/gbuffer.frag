@@ -37,6 +37,6 @@ void main()
     }
 
     o_rt0 = vec4(base_color, clamp(u_metallic, 0.0, 1.0));
-    o_rt1 = vec4(normal, clamp(u_roughness, 0.0, 1.0));
+    o_rt1 = vec4(normal * 0.5 + 0.5, clamp(u_roughness, 0.0, 1.0));
     o_entity_id = u_instance_id;
 }

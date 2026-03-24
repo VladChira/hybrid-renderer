@@ -7,6 +7,7 @@
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/ShaderManager.h"
 #include "renderer/opengl/GLShaderProgram.h"
+#include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/ForwardLitPass.h"
 #include "renderer/passes/GBufferPass.h"
 
@@ -38,11 +39,13 @@ namespace hybrid::renderer
         RendererOutputs outputs{};
         ShaderManager shader_manager{};
         GLShaderProgram gbuffer_shader{};
+        GLShaderProgram deferred_lighting_shader{};
         GLShaderProgram forward_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
+        std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<ForwardLitPass> forward_pass{};
 
         FrameContext frame_context{};
@@ -96,11 +99,21 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("deferred_lighting.vert",
+                                                            "deferred_lighting.frag",
+                                                            m_impl->deferred_lighting_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: deferred lighting shader program build failed");
+            return false;
+        }
+
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
+        m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
         m_impl->forward_pass = std::make_unique<ForwardLitPass>(&m_impl->forward_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
+        LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Fullscreen]");
         LOG_INFO("[Renderer] \t - Forward Debug Pass [OpenGL Raster]");
 
         if (m_impl->current_extent.IsValid())
@@ -129,8 +142,10 @@ namespace hybrid::renderer
         m_impl->scene_data = {};
         m_impl->effective_view = {};
         m_impl->gbuffer_pass.reset();
+        m_impl->deferred_lighting_pass.reset();
         m_impl->forward_pass.reset();
         m_impl->gbuffer_shader.Destroy();
+        m_impl->deferred_lighting_shader.Destroy();
         m_impl->forward_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
@@ -255,7 +270,30 @@ namespace hybrid::renderer
             }
         }
 
-        if (m_impl->forward_pass)
+        if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
+        {
+            DeferredLightingPassInput deferred_input{};
+            deferred_input.settings = &m_impl->submitted_settings;
+            deferred_input.effective_view = &m_impl->effective_view;
+            deferred_input.scene_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene);
+            deferred_input.scene_color = m_impl->frame_resources.Get(FrameTarget::SceneColor);
+            deferred_input.gbuffer_rt0 = m_impl->outputs.gbuffer_rt0;
+            deferred_input.gbuffer_rt1 = m_impl->outputs.gbuffer_rt1;
+            deferred_input.gbuffer_depth = m_impl->outputs.depth;
+
+            DeferredLightingPassOutput deferred_output{};
+            if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->deferred_lighting_pass->Name());
+            }
+            else
+            {
+                m_impl->outputs.color = deferred_output.color;
+                m_impl->outputs.depth = deferred_output.depth;
+            }
+        }
+
+        if (m_impl->submitted_settings.mode != RenderMode::Lit && m_impl->forward_pass)
         {
             ForwardPassInput forward_input{};
             forward_input.settings = &m_impl->submitted_settings;

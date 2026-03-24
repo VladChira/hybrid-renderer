@@ -14,7 +14,7 @@ namespace hybrid::core::scene
 
     namespace
     {
-        constexpr glm::vec3 kDefaultCameraPosition(-3.0f, 2.76f, 0.24f);
+        constexpr glm::vec3 kDefaultCameraPosition(-8.43f, 3.29f, -1.23f);
 
         float ResolveAspect(float requested_aspect, float fallback_aspect)
         {
@@ -55,7 +55,7 @@ namespace hybrid::core::scene
             auto &transform = registry.get<TransformComponent>(camera_entity);
             transform.local.translation = kDefaultCameraPosition;
             transform.local.rotation = glm::quatLookAt(glm::normalize(-kDefaultCameraPosition),
-                                                       glm::vec3(0.0f, 1.0f, 0.0f));
+                                                       glm::vec3(0.0f, 2.2f, 0.0f));
             transform.local.scale = glm::vec3(1.0f);
             transform.dirty = true;
 

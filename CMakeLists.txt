@@ -171,6 +171,7 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/Renderer.cpp
   src/renderer/FrameResources.cpp
   src/renderer/OpenGLRenderBackend.cpp
+  src/renderer/passes/DeferredLightingPass.cpp
   src/renderer/passes/ForwardLitPass.cpp
   src/renderer/passes/GBufferPass.cpp
   src/renderer/ShaderManager.cpp
