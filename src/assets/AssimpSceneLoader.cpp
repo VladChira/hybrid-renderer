@@ -12,6 +12,7 @@
 #include <assimp/scene.h>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <future>
@@ -265,9 +266,10 @@ namespace hybrid::assets
 
         const std::filesystem::path base_path(resolved_path);
         const std::string base_dir = base_path.parent_path().make_preferred().string();
-        const unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
-                                   aiProcess_ImproveCacheLocality | aiProcess_GenNormals |
-                                   aiProcess_CalcTangentSpace;
+
+        // Possible other values: aiProcess_JoinIdenticalVertices, aiProcess_ImproveCacheLocality,
+        // aiProcess_GenNormals, aiProcess_CalcTangentSpace. Unlikely to be needed.
+        const unsigned int flags = aiProcess_Triangulate;
         const aiScene *scene = importer.ReadFile(resolved_path.c_str(), flags);
         if (!scene)
         {
@@ -412,6 +414,8 @@ namespace hybrid::assets
         }
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> mesh_handles(scene->mNumMeshes);
+        std::atomic<unsigned int> meshes_missing_normals{0};
+        std::atomic<unsigned int> meshes_missing_tangents{0};
 
         LOG_INFO("[AssimpSceneLoader] \t Loading meshes...");
 
@@ -433,6 +437,15 @@ namespace hybrid::assets
             const bool has_uv0 = mesh->HasTextureCoords(0);
             const bool has_uv1 = mesh->HasTextureCoords(1);
             const bool has_color0 = mesh->HasVertexColors(0);
+
+            if (!has_normals)
+            {
+                meshes_missing_normals.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (!has_tangents)
+            {
+                meshes_missing_tangents.fetch_add(1, std::memory_order_relaxed);
+            }
 
             for (unsigned int v = 0; v < mesh->mNumVertices; ++v)
             {
@@ -557,6 +570,21 @@ namespace hybrid::assets
             {
                 worker.get();
             }
+        }
+
+        const unsigned int missing_normals = meshes_missing_normals.load(std::memory_order_relaxed);
+        const unsigned int missing_tangents = meshes_missing_tangents.load(std::memory_order_relaxed);
+        if (missing_normals > 0)
+        {
+            LOG_CRITICAL("[AssimpSceneLoader] Meshes without normals: " +
+                     std::to_string(missing_normals) + "/" + std::to_string(mesh_count) +
+                     " . Enable aiProcess_GenNormals for this scene.");
+        }
+        if (missing_tangents > 0)
+        {
+            LOG_ERROR("[AssimpSceneLoader] Meshes without tangents: " +
+                     std::to_string(missing_tangents) + "/" + std::to_string(mesh_count) +
+                     " (enable aiProcess_CalcTangentSpace if normal mapping looks wrong)");
         }
 
         LOG_INFO("[AssimpSceneLoader] \t Building scene...");
