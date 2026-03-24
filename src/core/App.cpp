@@ -76,7 +76,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/sponza/Sponza.gltf");
+        RequestSceneLoad("scenes/sponza_low/Sponza.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
