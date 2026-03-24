@@ -80,19 +80,15 @@ namespace hybrid::renderer
         double cpu_frame_ms = 0.0;
     };
 
-    struct RendererOutputHandle
-    {
-        uint64_t value = 0;
-        bool IsValid() const { return value != 0; }
-    };
+    using GlTextureId = uint32_t;
 
     struct RendererOutputs
     {
-        RendererOutputHandle color;
-        RendererOutputHandle depth;
-        RendererOutputHandle gbuffer_rt0;
-        RendererOutputHandle gbuffer_rt1;
-        RendererOutputHandle gbuffer_entity_id;
+        GlTextureId color = 0;
+        GlTextureId depth = 0;
+        GlTextureId gbuffer_rt0 = 0;
+        GlTextureId gbuffer_rt1 = 0;
+        GlTextureId gbuffer_entity_id = 0;
     };
 
 } // namespace hybrid::renderer

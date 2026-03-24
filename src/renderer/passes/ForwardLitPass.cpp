@@ -140,25 +140,24 @@ namespace hybrid::renderer
         return "ForwardLit";
     }
 
-    bool ForwardLitPass::Execute(PassContext &context)
+    bool ForwardLitPass::Execute(const ForwardPassInput &input, ForwardPassOutput &output)
     {
         if (m_forward_shader == nullptr ||
             m_impl == nullptr ||
-            context.scene_data == nullptr ||
-            context.effective_view == nullptr ||
-            context.inputs.settings == nullptr ||
-            context.stats == nullptr ||
-            context.outputs == nullptr ||
-            context.targets.scene_framebuffer_id == 0)
+            input.scene_data == nullptr ||
+            input.effective_view == nullptr ||
+            input.settings == nullptr ||
+            input.stats == nullptr ||
+            input.scene_framebuffer_id == 0)
         {
             return false;
         }
 
-        const FrameSceneData &scene = *context.scene_data;
-        const RenderView &effective_view = *context.effective_view;
-        const RenderSettings &settings = *context.inputs.settings;
+        const FrameSceneData &scene = *input.scene_data;
+        const RenderView &effective_view = *input.effective_view;
+        const RenderSettings &settings = *input.settings;
 
-        glBindFramebuffer(GL_FRAMEBUFFER, context.targets.scene_framebuffer_id);
+        glBindFramebuffer(GL_FRAMEBUFFER, input.scene_framebuffer_id);
         glViewport(0, 0,
                    static_cast<GLsizei>(settings.render_extent.width),
                    static_cast<GLsizei>(settings.render_extent.height));
@@ -185,9 +184,9 @@ namespace hybrid::renderer
             for (size_t primitive_index = 0; primitive_index < mesh->primitives.size(); ++primitive_index)
             {
                 const core::scene::MeshPrimitive &primitive = mesh->primitives[primitive_index];
-                context.stats->submitted_primitives++;
-                context.stats->submitted_vertices += primitive.vertices.size();
-                context.stats->submitted_triangles += primitive.indices.size() / 3;
+                input.stats->submitted_primitives++;
+                input.stats->submitted_vertices += primitive.vertices.size();
+                input.stats->submitted_triangles += primitive.indices.size() / 3;
 
                 PrimitiveCacheKey key{};
                 key.mesh_id = instance.mesh.Id().value;
@@ -224,11 +223,11 @@ namespace hybrid::renderer
         GLShaderProgram::Unuse();
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        context.outputs->color = context.targets.scene_color;
-        context.outputs->depth = context.targets.gbuffer_depth;
-        context.outputs->gbuffer_rt0 = context.targets.gbuffer_rt0;
-        context.outputs->gbuffer_rt1 = context.targets.gbuffer_rt1;
-        context.outputs->gbuffer_entity_id = context.targets.gbuffer_entity_id;
+        output.color = input.scene_color;
+        output.depth = input.gbuffer_depth;
+        output.gbuffer_rt0 = input.gbuffer_rt0;
+        output.gbuffer_rt1 = input.gbuffer_rt1;
+        output.gbuffer_entity_id = input.gbuffer_entity_id;
         return true;
     }
 

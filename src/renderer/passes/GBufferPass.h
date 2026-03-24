@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/RenderPass.h"
+#include "renderer/RendererTypes.h"
 
 #include <memory>
 
@@ -8,14 +8,34 @@ namespace hybrid::renderer
 {
     class GLShaderProgram;
 
-    class GBufferPass final : public IRenderPass
+    struct GBufferPassInput
+    {
+        const RenderSettings *settings = nullptr;
+        const FrameSceneData *scene_data = nullptr;
+        const RenderView *effective_view = nullptr;
+        uint32_t gbuffer_framebuffer_id = 0;
+        GlTextureId gbuffer_rt0 = 0;
+        GlTextureId gbuffer_rt1 = 0;
+        GlTextureId gbuffer_entity_id = 0;
+        GlTextureId gbuffer_depth = 0;
+    };
+
+    struct GBufferPassOutput
+    {
+        GlTextureId gbuffer_rt0 = 0;
+        GlTextureId gbuffer_rt1 = 0;
+        GlTextureId gbuffer_entity_id = 0;
+        GlTextureId depth = 0;
+    };
+
+    class GBufferPass final
     {
     public:
         explicit GBufferPass(GLShaderProgram *gbuffer_shader);
-        ~GBufferPass() override;
+        ~GBufferPass();
 
-        const char *Name() const override;
-        bool Execute(PassContext &context) override;
+        const char *Name() const;
+        bool Execute(const GBufferPassInput &input, GBufferPassOutput &output);
 
     private:
         struct Impl;

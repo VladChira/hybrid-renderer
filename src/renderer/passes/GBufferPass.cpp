@@ -154,24 +154,23 @@ namespace hybrid::renderer
         return "GBuffer";
     }
 
-    bool GBufferPass::Execute(PassContext &context)
+    bool GBufferPass::Execute(const GBufferPassInput &input, GBufferPassOutput &output)
     {
         if (m_gbuffer_shader == nullptr ||
             m_impl == nullptr ||
-            context.scene_data == nullptr ||
-            context.effective_view == nullptr ||
-            context.inputs.settings == nullptr ||
-            context.outputs == nullptr ||
-            context.targets.gbuffer_framebuffer_id == 0)
+            input.scene_data == nullptr ||
+            input.effective_view == nullptr ||
+            input.settings == nullptr ||
+            input.gbuffer_framebuffer_id == 0)
         {
             return false;
         }
 
-        const FrameSceneData &scene = *context.scene_data;
-        const RenderView &effective_view = *context.effective_view;
-        const RenderSettings &settings = *context.inputs.settings;
+        const FrameSceneData &scene = *input.scene_data;
+        const RenderView &effective_view = *input.effective_view;
+        const RenderSettings &settings = *input.settings;
 
-        glBindFramebuffer(GL_FRAMEBUFFER, context.targets.gbuffer_framebuffer_id);
+        glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
         glViewport(0, 0,
                    static_cast<GLsizei>(settings.render_extent.width),
                    static_cast<GLsizei>(settings.render_extent.height));
@@ -241,10 +240,10 @@ namespace hybrid::renderer
         GLShaderProgram::Unuse();
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        context.outputs->gbuffer_rt0 = context.targets.gbuffer_rt0;
-        context.outputs->gbuffer_rt1 = context.targets.gbuffer_rt1;
-        context.outputs->gbuffer_entity_id = context.targets.gbuffer_entity_id;
-        context.outputs->depth = context.targets.gbuffer_depth;
+        output.gbuffer_rt0 = input.gbuffer_rt0;
+        output.gbuffer_rt1 = input.gbuffer_rt1;
+        output.gbuffer_entity_id = input.gbuffer_entity_id;
+        output.depth = input.gbuffer_depth;
         return true;
     }
 
