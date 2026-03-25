@@ -60,7 +60,7 @@ namespace hybrid::core::scene
             transform.dirty = true;
 
             auto &camera = registry.emplace<CameraComponent>(camera_entity);
-            camera.horizontal_fov_radians = glm::radians(60.0f);
+            camera.horizontal_fov_radians = glm::radians(75.0f);
             camera.near_plane = 0.1f;
             camera.far_plane = 1000.0f;
 

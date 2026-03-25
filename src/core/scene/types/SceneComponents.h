@@ -39,7 +39,7 @@ namespace hybrid::core::scene
 
     struct CameraComponent
     {
-        float horizontal_fov_radians = 1.0471976f; // 60 degrees
+        float horizontal_fov_radians = 1.308996939f; // 75 degrees
         float near_plane = 0.1f;
         float far_plane = 1000.0f;
     };
@@ -53,7 +53,7 @@ namespace hybrid::core::scene
     struct LightCommonComponent
     {
         glm::vec3 color{1.0f};
-        float intensity = 1.0f;
+        float intensity = 30.0f;
         bool cast_shadows = true;
     };
 

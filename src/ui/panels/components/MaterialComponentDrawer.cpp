@@ -44,7 +44,7 @@ namespace hybrid::ui
         float metallic_factor = material.metallic_factor;
         float roughness_factor = material.roughness_factor;
 
-        if (ImGui::ColorPicker4("Base Color", base_color))
+        if (ImGui::ColorEdit4("Base Color", base_color))
         {
             EnqueueCommand(*commands, MaterialSetVec4Command{material_id, MaterialVec4Property::BaseColorFactor,
                                                              glm::vec4(base_color[0], base_color[1],

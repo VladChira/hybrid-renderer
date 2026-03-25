@@ -105,7 +105,8 @@ void main()
 
         if (light.range > 0.0 && light_distance > light.range)
         {
-            continue;
+            // Any range > 0 is not physically based, but it still looks cool, so let's just add a nice falloff
+            light.intensity *= smoothstep(1.75 * light.range, light.range, light_distance);
         }
 
         vec3 L = light_vector / light_distance;
