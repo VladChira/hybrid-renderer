@@ -10,6 +10,20 @@ uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
 uniform float u_exposure;
 
+const int MAX_POINT_LIGHTS = 64;
+struct PointLight
+{
+    vec3 position;
+    vec3 color;
+    float intensity;
+    float range;
+    float attenuation_constant;
+    float attenuation_linear;
+    float attenuation_quadratic;
+};
+uniform int u_point_light_count;
+uniform PointLight u_point_lights[MAX_POINT_LIGHTS];
+
 out vec4 o_color;
 
 const float PI = 3.14159265359;
@@ -74,28 +88,51 @@ void main()
 
     vec3 world_position = ReconstructWorldPosition(v_uv, depth);
     vec3 V = normalize(u_camera_position - world_position);
-    vec3 L = normalize(vec3(-0.35, -0.43, 0.25));
-    vec3 H = normalize(V + L);
-
-    vec3 radiance = vec3(4.0);
-    float ndotl = max(dot(normal, L), 0.0);
     float ndotv = max(dot(normal, V), 0.0);
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-    float D = DistributionGGX(normal, H, roughness);
-    float G = GeometrySmith(normal, V, L, roughness);
+    vec3 Lo = vec3(0.0);
 
-    vec3 numerator = D * G * F;
-    float denominator = max(4.0 * ndotv * ndotl, 1e-5);
-    vec3 specular = numerator / denominator;
+    for (int light_index = 0; light_index < u_point_light_count; ++light_index)
+    {
+        PointLight light = u_point_lights[light_index];
+        vec3 light_vector = light.position - world_position;
+        float light_distance = length(light_vector);
+        if (light_distance <= 1e-5)
+        {
+            continue;
+        }
 
-    vec3 kS = F;
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-    vec3 diffuse = kD * albedo / PI;
+        if (light.range > 0.0 && light_distance > light.range)
+        {
+            continue;
+        }
 
-    vec3 Lo = (diffuse + specular) * radiance * ndotl;
-    vec3 ambient = 0.03 * albedo;
+        vec3 L = light_vector / light_distance;
+        float ndotl = max(dot(normal, L), 0.0);
+        if (ndotl <= 0.0)
+        {
+            continue;
+        }
+
+        float attenuation = light.attenuation_constant +
+                            light.attenuation_linear * light_distance +
+                            light.attenuation_quadratic * light_distance * light_distance;
+        vec3 radiance = light.color * max(light.intensity, 0.0) / max(attenuation, 1e-5);
+        vec3 H = normalize(V + L);
+        vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+        float D = DistributionGGX(normal, H, roughness);
+        float G = GeometrySmith(normal, V, L, roughness);
+        vec3 numerator = D * G * F;
+        float denominator = max(4.0 * ndotv * ndotl, 1e-5);
+        vec3 specular = numerator / denominator;
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        vec3 diffuse = kD * albedo / PI;
+        Lo += (diffuse + specular) * radiance * ndotl;
+    }
+
+    vec3 ambient = 0.00 * albedo;
     vec3 color = ambient + Lo;
 
     color = vec3(1.0) - exp(-color * max(u_exposure, 0.0001));

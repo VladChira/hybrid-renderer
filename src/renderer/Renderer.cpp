@@ -274,6 +274,7 @@ namespace hybrid::renderer
         {
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
+            deferred_input.scene_data = &m_impl->scene_data;
             deferred_input.effective_view = &m_impl->effective_view;
             deferred_input.scene_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene);
             deferred_input.scene_color = m_impl->frame_resources.Get(FrameTarget::SceneColor);

@@ -20,6 +20,16 @@ namespace hybrid::core
             }
             return assets.Get<scene::SceneWorld>(active_scene);
         }
+
+        glm::vec3 NormalizeOrFallback(const glm::vec3 &vector, const glm::vec3 &fallback)
+        {
+            const float magnitude_squared = glm::dot(vector, vector);
+            if (magnitude_squared <= 1e-8f)
+            {
+                return fallback;
+            }
+            return glm::normalize(vector);
+        }
     } // namespace
 
     void ProcessUiCommands(const ui::CommandBuffer &commands,
@@ -96,6 +106,114 @@ namespace hybrid::core
                             {
                                 camera_target->target = entt::null;
                             }
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::AddPointLightCommand>)
+                    {
+                        if (active_scene_world == nullptr)
+                        {
+                            return;
+                        }
+
+                        const entt::entity entity = active_scene_world->CreateEntity("Point Light");
+                        auto &registry = active_scene_world->Registry();
+                        registry.emplace<scene::LightCommonComponent>(entity);
+                        registry.emplace<scene::PointLightComponent>(entity);
+                    }
+                    else if constexpr (std::is_same_v<T, ui::AddAreaLightCommand>)
+                    {
+                        if (active_scene_world == nullptr)
+                        {
+                            return;
+                        }
+
+                        const entt::entity entity = active_scene_world->CreateEntity("Area Light");
+                        auto &registry = active_scene_world->Registry();
+                        registry.emplace<scene::LightCommonComponent>(entity);
+                        registry.emplace<scene::AreaLightComponent>(entity);
+                    }
+                    else if constexpr (std::is_same_v<T, ui::AddDirectionalLightCommand>)
+                    {
+                        if (active_scene_world == nullptr)
+                        {
+                            return;
+                        }
+
+                        const entt::entity entity = active_scene_world->CreateEntity("Directional Light");
+                        auto &registry = active_scene_world->Registry();
+                        registry.emplace<scene::LightCommonComponent>(entity);
+                        registry.emplace<scene::DirectionalLightComponent>(entity);
+                    }
+                    else if constexpr (std::is_same_v<T, ui::EditLightCommonCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        if (auto *light = registry.try_get<scene::LightCommonComponent>(typed_command.entity))
+                        {
+                            light->color = glm::max(typed_command.color, glm::vec3(0.0f));
+                            light->intensity = std::max(0.0f, typed_command.intensity);
+                            light->cast_shadows = typed_command.cast_shadows;
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::EditPointLightCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        if (auto *light = registry.try_get<scene::PointLightComponent>(typed_command.entity))
+                        {
+                            light->range = std::max(0.0f, typed_command.range);
+                            light->attenuation_constant = std::max(0.0f, typed_command.attenuation_constant);
+                            light->attenuation_linear = std::max(0.0f, typed_command.attenuation_linear);
+                            light->attenuation_quadratic = std::max(0.0f, typed_command.attenuation_quadratic);
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::EditDirectionalLightCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        if (auto *light = registry.try_get<scene::DirectionalLightComponent>(typed_command.entity))
+                        {
+                            light->direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::EditAreaLightCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        if (auto *light = registry.try_get<scene::AreaLightComponent>(typed_command.entity))
+                        {
+                            light->size = glm::max(typed_command.size, glm::vec2(0.0f));
+                            light->direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
+                            light->two_sided = typed_command.two_sided;
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::EditHdriLightCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        if (auto *light = registry.try_get<scene::HdriLightComponent>(typed_command.entity))
+                        {
+                            light->yaw_radians = typed_command.yaw_radians;
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::MaterialSetScalarCommand>)

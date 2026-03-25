@@ -117,31 +117,31 @@ namespace hybrid::ui
 
         if (const auto *light_common = registry.try_get<core::scene::LightCommonComponent>(entity))
         {
-            DrawLightCommonComponent(*light_common);
+            DrawLightCommonComponent(entity, *light_common, context.commands);
             drew_any = true;
         }
 
         if (const auto *point_light = registry.try_get<core::scene::PointLightComponent>(entity))
         {
-            DrawPointLightComponent(*point_light);
+            DrawPointLightComponent(entity, *point_light, context.commands);
             drew_any = true;
         }
 
         if (const auto *directional_light = registry.try_get<core::scene::DirectionalLightComponent>(entity))
         {
-            DrawDirectionalLightComponent(*directional_light);
+            DrawDirectionalLightComponent(entity, *directional_light, context.commands);
             drew_any = true;
         }
 
         if (const auto *area_light = registry.try_get<core::scene::AreaLightComponent>(entity))
         {
-            DrawAreaLightComponent(*area_light);
+            DrawAreaLightComponent(entity, *area_light, context.commands);
             drew_any = true;
         }
 
         if (const auto *hdri_light = registry.try_get<core::scene::HdriLightComponent>(entity))
         {
-            DrawHdriLightComponent(*hdri_light);
+            DrawHdriLightComponent(entity, *hdri_light, context.commands);
             drew_any = true;
         }
 

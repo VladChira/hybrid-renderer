@@ -382,7 +382,7 @@ namespace hybrid::assets
         };
 
         const unsigned int material_count = scene->mNumMaterials;
-        const unsigned int material_hw_threads = std::max(1u, std::thread::hardware_concurrency());
+        const unsigned int material_hw_threads = std::min(4u, std::max(1u, std::thread::hardware_concurrency()));
         if (const unsigned int material_worker_count = std::min(material_count, material_hw_threads); material_worker_count <= 1)
         {
             for (unsigned int i = 0; i < material_count; ++i)
@@ -541,7 +541,7 @@ namespace hybrid::assets
         };
 
         const unsigned int mesh_count = scene->mNumMeshes;
-        const unsigned int hw_threads = std::max(1u, std::thread::hardware_concurrency());
+        const unsigned int hw_threads = std::min(4u, std::max(1u, std::thread::hardware_concurrency()));
         if (const unsigned int worker_count = std::min(mesh_count, hw_threads); worker_count <= 1)
         {
             for (unsigned int i = 0; i < mesh_count; ++i)

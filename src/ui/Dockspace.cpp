@@ -1,5 +1,7 @@
 #include "ui/Dockspace.h"
 
+#include <algorithm>
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -34,6 +36,16 @@ namespace hybrid::ui
         ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
         ImGuiID dock_main_id = dockspace_id;
+        ImGuiID dock_top_id = 0;
+        const bool has_top_assignment = std::any_of(layout.assignments.begin(),
+                                                    layout.assignments.end(),
+                                                    [](const DockAssignment &assignment)
+                                                    { return assignment.target == DockTarget::Top; });
+        if (has_top_assignment)
+        {
+            dock_top_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, layout.top_ratio, nullptr, &dock_main_id);
+        }
+
         ImGuiID dock_left_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, layout.left_ratio, nullptr, &dock_main_id);
 
         ImGuiID dock_right_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, layout.right_ratio, nullptr, &dock_main_id);
@@ -55,6 +67,9 @@ namespace hybrid::ui
             ImGuiID target = 0;
             switch (assignment.target)
             {
+            case DockTarget::Top:
+                target = dock_top_id;
+                break;
             case DockTarget::Main:
                 target = dock_main_id;
                 break;

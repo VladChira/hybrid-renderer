@@ -11,6 +11,7 @@ namespace hybrid::renderer
     struct DeferredLightingPassInput
     {
         const RenderSettings *settings = nullptr;
+        const FrameSceneData *scene_data = nullptr;
         const RenderView *effective_view = nullptr;
         uint32_t scene_framebuffer_id = 0;
         GlTextureId scene_color = 0;

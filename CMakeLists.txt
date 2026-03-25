@@ -144,6 +144,7 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/PropertiesPanel.cpp
   src/ui/panels/PerformancePanel.cpp
   src/ui/panels/SettingsPanel.cpp
+  src/ui/panels/ToolbarPanel.cpp
   src/ui/panels/Panel.cpp
   src/ui/panels/SceneHierarchyPanel.cpp
   src/ui/panels/ViewportPanel.cpp

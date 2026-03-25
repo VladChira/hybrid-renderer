@@ -45,6 +45,55 @@ namespace hybrid::ui
         entt::entity target = entt::null;
     };
 
+    struct AddPointLightCommand
+    {
+    };
+
+    struct AddAreaLightCommand
+    {
+    };
+
+    struct AddDirectionalLightCommand
+    {
+    };
+
+    struct EditLightCommonCommand
+    {
+        entt::entity entity = entt::null;
+        glm::vec3 color{1.0f};
+        float intensity = 1.0f;
+        bool cast_shadows = true;
+    };
+
+    struct EditPointLightCommand
+    {
+        entt::entity entity = entt::null;
+        float range = 0.0f;
+        float attenuation_constant = 1.0f;
+        float attenuation_linear = 0.0f;
+        float attenuation_quadratic = 1.0f;
+    };
+
+    struct EditDirectionalLightCommand
+    {
+        entt::entity entity = entt::null;
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+    };
+
+    struct EditAreaLightCommand
+    {
+        entt::entity entity = entt::null;
+        glm::vec2 size{1.0f, 1.0f};
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        bool two_sided = false;
+    };
+
+    struct EditHdriLightCommand
+    {
+        entt::entity entity = entt::null;
+        float yaw_radians = 0.0f;
+    };
+
     enum class MaterialScalarProperty
     {
         MetallicFactor,
@@ -104,6 +153,14 @@ namespace hybrid::ui
                                    EntitySetLocalTransformCommand,
                                    CameraSetLensCommand,
                                    CameraSetTargetCommand,
+                                   AddPointLightCommand,
+                                   AddAreaLightCommand,
+                                   AddDirectionalLightCommand,
+                                   EditLightCommonCommand,
+                                   EditPointLightCommand,
+                                   EditDirectionalLightCommand,
+                                   EditAreaLightCommand,
+                                   EditHdriLightCommand,
                                    MaterialSetScalarCommand,
                                    MaterialSetVec4Command,
                                    MaterialSetVec3Command,

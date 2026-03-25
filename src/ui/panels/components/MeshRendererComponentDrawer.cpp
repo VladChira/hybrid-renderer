@@ -28,6 +28,7 @@ namespace hybrid::ui
         }
 
         ImGui::Text("Mesh: %s", mesh->name.c_str());
+        ImGui::Text("Material: %s", component.mesh.Get()->primitives[0].material.Get()->name.c_str());
     }
 
 } // namespace hybrid::ui

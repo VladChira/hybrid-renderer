@@ -8,6 +8,7 @@ namespace hybrid::ui
 
     enum class DockTarget
     {
+        Top,
         Main,
 
         LeftTop,
@@ -28,6 +29,7 @@ namespace hybrid::ui
 
     struct DockspaceLayout
     {
+        float top_ratio = 0.05f;
         float left_ratio = 0.15f;
         float left_split_ratio = 0.5f;
 

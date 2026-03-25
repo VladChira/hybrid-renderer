@@ -11,6 +11,7 @@
 #include "panels/PerformancePanel.h"
 #include "panels/SceneHierarchyPanel.h"
 #include "panels/SettingsPanel.h"
+#include "panels/ToolbarPanel.h"
 #include "panels/ViewportPanel.h"
 
 #include <glad.h>
@@ -91,6 +92,7 @@ namespace hybrid::ui
         core::ResourceMonitor::Init();
         if (m_panels.Empty())
         {
+            RegisterPanel(std::make_unique<ToolbarPanel>(), DockTarget::Top);
             RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
             RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
             RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);

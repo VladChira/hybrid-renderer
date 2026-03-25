@@ -3,10 +3,19 @@
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLVertexArray.h"
 
+#include <algorithm>
+#include <array>
+#include <cstdio>
+
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace hybrid::renderer
 {
+
+    namespace
+    {
+        constexpr int kMaxDeferredPointLights = 64;
+    }
 
     struct DeferredLightingPass::Impl
     {
@@ -31,6 +40,7 @@ namespace hybrid::renderer
         if (m_deferred_shader == nullptr ||
             m_impl == nullptr ||
             input.settings == nullptr ||
+            input.scene_data == nullptr ||
             input.effective_view == nullptr ||
             input.scene_framebuffer_id == 0 ||
             input.scene_color == 0 ||
@@ -42,6 +52,7 @@ namespace hybrid::renderer
         }
 
         const RenderSettings &settings = *input.settings;
+        const FrameSceneData &scene = *input.scene_data;
         const RenderView &effective_view = *input.effective_view;
 
         if (!m_impl->fullscreen_vao.IsValid() && !m_impl->fullscreen_vao.Create())
@@ -65,6 +76,58 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
         m_deferred_shader->SetUniform1f("u_exposure", settings.exposure);
+
+        const int point_light_count = static_cast<int>(std::min<size_t>(scene.point_lights.size(),
+                                                                         static_cast<size_t>(kMaxDeferredPointLights)));
+        m_deferred_shader->SetUniform1i("u_point_light_count", point_light_count);
+
+        std::array<char, 96> uniform_name{};
+        for (int light_index = 0; light_index < point_light_count; ++light_index)
+        {
+            const RenderPointLight &light = scene.point_lights[static_cast<size_t>(light_index)];
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].position",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.position);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].color",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].intensity",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].range",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.range);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].attenuation_constant",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_constant);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].attenuation_linear",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_linear);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_point_lights[%d].attenuation_quadratic",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_quadratic);
+        }
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_rt0);
