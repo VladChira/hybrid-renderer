@@ -16,7 +16,6 @@ namespace hybrid::ui
     struct ThemePalette;
     struct UiState;
     struct UiSelection;
-    struct UiViewportChannelMask;
     enum class UiViewportVisualization : uint8_t;
 
     struct PanelContext
@@ -27,7 +26,6 @@ namespace hybrid::ui
         const UiState *state = nullptr;
         UiSelection *selection = nullptr;
         UiViewportVisualization *viewport_visualization = nullptr;
-        UiViewportChannelMask *viewport_channel_mask = nullptr;
     };
 
     class Panel

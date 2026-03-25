@@ -48,7 +48,6 @@ namespace hybrid::ui
         ThemePalette m_theme_palette{};
         UiSelection m_selection{};
         UiViewportVisualization m_viewport_visualization = UiViewportVisualization::FinalColor;
-        UiViewportChannelMask m_viewport_channel_mask{};
 
         ImGuiIO *io;
     };

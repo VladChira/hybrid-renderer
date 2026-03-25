@@ -24,14 +24,6 @@ namespace hybrid::ui
         GBufferRt1 = 2
     };
 
-    struct UiViewportChannelMask
-    {
-        bool show_r = true;
-        bool show_g = true;
-        bool show_b = true;
-        bool show_a = false;
-    };
-
     struct UiMaterialEntry
     {
         uint64_t asset_id = 0;
@@ -69,7 +61,6 @@ namespace hybrid::ui
         uint64_t viewport_gbuffer_rt1_texture = 0;
         uint64_t viewport_entity_id_texture = 0;
         UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
-        UiViewportChannelMask viewport_channel_mask{};
         renderer::RenderExtent viewport_render_extent{};
         renderer::RenderView viewport_render_view{};
         bool viewport_render_view_valid = false;

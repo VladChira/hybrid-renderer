@@ -142,7 +142,6 @@ namespace hybrid::ui
 
         UiState frame_state = state;
         frame_state.viewport_visualization = m_viewport_visualization;
-        frame_state.viewport_channel_mask = m_viewport_channel_mask;
 
         PanelContext context{};
         context.delta_seconds = delta_seconds;
@@ -151,7 +150,6 @@ namespace hybrid::ui
         context.state = &frame_state;
         context.selection = &m_selection;
         context.viewport_visualization = &m_viewport_visualization;
-        context.viewport_channel_mask = &m_viewport_channel_mask;
         m_panels.DrawAll(context);
 
         ImGui::Render();
