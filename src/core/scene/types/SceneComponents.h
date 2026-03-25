@@ -61,7 +61,7 @@ namespace hybrid::core::scene
     {
         // 0.0 means unspecified/infinite range.
         float range = 0.0f;
-        float attenuation_constant = 1.0f;
+        float attenuation_constant = 0.0f;
         float attenuation_linear = 0.0f;
         float attenuation_quadratic = 1.0f;
     };
