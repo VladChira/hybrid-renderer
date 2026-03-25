@@ -13,6 +13,9 @@ uniform int u_alpha_masked;
 uniform float u_alpha_cutoff;
 uniform float u_metallic;
 uniform float u_roughness;
+uniform sampler2D u_metallic_roughness_texture;
+uniform int u_has_metallic_roughness_texture;
+uniform int u_metallic_roughness_texcoord;
 uniform uint u_instance_id;
 
 layout (location = 0) out vec4 o_rt0;
@@ -30,13 +33,18 @@ void main()
         discard;
     }
 
+    vec2 mr_uv = (u_metallic_roughness_texcoord == 1) ? v_uv1 : v_uv0;
+    vec4 mr_sample = (u_has_metallic_roughness_texture != 0) ? texture(u_metallic_roughness_texture, mr_uv) : vec4(1.0);
+    float metallic = clamp(u_metallic * mr_sample.b, 0.0, 1.0);
+    float roughness = clamp(u_roughness * mr_sample.g, 0.0, 1.0);
+
     vec3 normal = normalize(v_world_normal);
     if (dot(normal, normal) < 0.00001)
     {
         normal = vec3(0.0, 1.0, 0.0);
     }
 
-    o_rt0 = vec4(base_color, clamp(u_metallic, 0.0, 1.0));
-    o_rt1 = vec4(normal * 0.5 + 0.5, clamp(u_roughness, 0.0, 1.0));
+    o_rt0 = vec4(base_color, metallic);
+    o_rt1 = vec4(normal * 0.5 + 0.5, roughness);
     o_entity_id = u_instance_id;
 }

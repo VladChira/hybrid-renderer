@@ -1,5 +1,6 @@
 #include "ViewportPanel.h"
 
+#include "core/Log.h"
 #include "core/scene/SceneWorld.h"
 #include "core/scene/types/SceneComponents.h"
 #include "ui/UiCommands.h"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <string>
 
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -21,6 +23,284 @@ namespace hybrid::ui
     namespace
     {
         constexpr uint32_t kNoEntityId = std::numeric_limits<uint32_t>::max();
+
+        struct ChannelPreviewResources
+        {
+            GLuint framebuffer = 0;
+            GLuint texture = 0;
+            GLuint program = 0;
+            GLuint vao = 0;
+            uint32_t width = 0;
+            uint32_t height = 0;
+            bool shader_failed = false;
+        };
+
+        ChannelPreviewResources &GetChannelPreviewResources()
+        {
+            static ChannelPreviewResources resources{};
+            return resources;
+        }
+
+        GLuint CompileShader(GLenum stage, const char *source)
+        {
+            const GLuint shader = glCreateShader(stage);
+            if (shader == 0)
+            {
+                return 0;
+            }
+
+            glShaderSource(shader, 1, &source, nullptr);
+            glCompileShader(shader);
+
+            GLint status = GL_FALSE;
+            glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+            if (status == GL_TRUE)
+            {
+                return shader;
+            }
+
+            GLint log_length = 0;
+            glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+            std::string log(static_cast<size_t>(std::max(log_length, 1)), '\0');
+            GLsizei written = 0;
+            glGetShaderInfoLog(shader, static_cast<GLsizei>(log.size()), &written, log.data());
+            log.resize(static_cast<size_t>(std::max(written, 0)));
+            LOG_ERROR("Viewport channel shader compile failed: " + log);
+            glDeleteShader(shader);
+            return 0;
+        }
+
+        bool EnsureChannelPreviewProgram(ChannelPreviewResources &resources)
+        {
+            if (resources.program != 0)
+            {
+                return true;
+            }
+
+            if (resources.shader_failed)
+            {
+                return false;
+            }
+
+            static constexpr const char *kVertexShader = R"(
+                #version 330 core
+
+                out vec2 v_uv;
+
+                void main()
+                {
+                    vec2 positions[3] = vec2[](
+                        vec2(-1.0, -1.0),
+                        vec2(3.0, -1.0),
+                        vec2(-1.0, 3.0));
+                    vec2 pos = positions[gl_VertexID];
+                    v_uv = pos * 0.5 + 0.5;
+                    gl_Position = vec4(pos, 0.0, 1.0);
+                }
+            )";
+
+            static constexpr const char *kFragmentShader = R"(
+                #version 330 core
+
+                in vec2 v_uv;
+                out vec4 out_color;
+
+                uniform sampler2D u_source_texture;
+                uniform vec4 u_channel_mask;
+
+                void main()
+                {
+                    vec4 source = texture(u_source_texture, v_uv);
+                    vec3 color = source.rgb * u_channel_mask.rgb;
+                    color += vec3(source.a * u_channel_mask.a);
+                    out_color = vec4(color, 1.0);
+                }
+            )";
+
+            const GLuint vertex_shader = CompileShader(GL_VERTEX_SHADER, kVertexShader);
+            const GLuint fragment_shader = CompileShader(GL_FRAGMENT_SHADER, kFragmentShader);
+            if (vertex_shader == 0 || fragment_shader == 0)
+            {
+                if (vertex_shader != 0)
+                {
+                    glDeleteShader(vertex_shader);
+                }
+                if (fragment_shader != 0)
+                {
+                    glDeleteShader(fragment_shader);
+                }
+                resources.shader_failed = true;
+                return false;
+            }
+
+            const GLuint program = glCreateProgram();
+            glAttachShader(program, vertex_shader);
+            glAttachShader(program, fragment_shader);
+            glLinkProgram(program);
+
+            glDeleteShader(vertex_shader);
+            glDeleteShader(fragment_shader);
+
+            GLint status = GL_FALSE;
+            glGetProgramiv(program, GL_LINK_STATUS, &status);
+            if (status != GL_TRUE)
+            {
+                GLint log_length = 0;
+                glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_length);
+                std::string log(static_cast<size_t>(std::max(log_length, 1)), '\0');
+                GLsizei written = 0;
+                glGetProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written, log.data());
+                log.resize(static_cast<size_t>(std::max(written, 0)));
+                LOG_ERROR("Viewport channel shader link failed: " + log);
+                glDeleteProgram(program);
+                resources.shader_failed = true;
+                return false;
+            }
+
+            resources.program = program;
+            glGenVertexArrays(1, &resources.vao);
+            return resources.program != 0 && resources.vao != 0;
+        }
+
+        bool EnsureChannelPreviewTarget(ChannelPreviewResources &resources, uint32_t width, uint32_t height)
+        {
+            if (width == 0 || height == 0)
+            {
+                return false;
+            }
+
+            if (resources.framebuffer == 0)
+            {
+                glGenFramebuffers(1, &resources.framebuffer);
+            }
+            if (resources.texture == 0)
+            {
+                glGenTextures(1, &resources.texture);
+            }
+            if (resources.framebuffer == 0 || resources.texture == 0)
+            {
+                return false;
+            }
+
+            if (resources.width != width || resources.height != height)
+            {
+                glBindTexture(GL_TEXTURE_2D, resources.texture);
+                glTexImage2D(GL_TEXTURE_2D,
+                             0,
+                             GL_RGBA8,
+                             static_cast<GLsizei>(width),
+                             static_cast<GLsizei>(height),
+                             0,
+                             GL_RGBA,
+                             GL_UNSIGNED_BYTE,
+                             nullptr);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                resources.width = width;
+                resources.height = height;
+            }
+
+            glBindFramebuffer(GL_FRAMEBUFFER, resources.framebuffer);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   resources.texture,
+                                   0);
+
+            const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+            return complete;
+        }
+
+        bool IsIdentityChannelMask(const UiViewportChannelMask &mask)
+        {
+            return mask.show_r && mask.show_g && mask.show_b && !mask.show_a;
+        }
+
+        uint64_t BuildChannelPreviewTexture(uint64_t source_texture,
+                                            const renderer::RenderExtent &extent,
+                                            const UiViewportChannelMask &mask)
+        {
+            if (source_texture == 0 || IsIdentityChannelMask(mask))
+            {
+                return source_texture;
+            }
+
+            GLint previous_framebuffer = 0;
+            GLint previous_viewport[4]{0, 0, 0, 0};
+            GLint previous_program = 0;
+            GLint previous_vertex_array = 0;
+            GLint previous_active_texture = 0;
+            const GLboolean blend_enabled = glIsEnabled(GL_BLEND);
+            const GLboolean depth_enabled = glIsEnabled(GL_DEPTH_TEST);
+            const GLboolean cull_enabled = glIsEnabled(GL_CULL_FACE);
+
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_framebuffer);
+            glGetIntegerv(GL_VIEWPORT, previous_viewport);
+            glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previous_vertex_array);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &previous_active_texture);
+
+            ChannelPreviewResources &resources = GetChannelPreviewResources();
+            if (!EnsureChannelPreviewProgram(resources) ||
+                !EnsureChannelPreviewTarget(resources, extent.width, extent.height))
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous_framebuffer));
+                return source_texture;
+            }
+
+            glBindFramebuffer(GL_FRAMEBUFFER, resources.framebuffer);
+            glViewport(0, 0, static_cast<GLsizei>(extent.width), static_cast<GLsizei>(extent.height));
+            glDisable(GL_BLEND);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_CULL_FACE);
+
+            glUseProgram(resources.program);
+            glBindVertexArray(resources.vao);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(source_texture));
+            glUniform1i(glGetUniformLocation(resources.program, "u_source_texture"), 0);
+            glUniform4f(glGetUniformLocation(resources.program, "u_channel_mask"),
+                        mask.show_r ? 1.0f : 0.0f,
+                        mask.show_g ? 1.0f : 0.0f,
+                        mask.show_b ? 1.0f : 0.0f,
+                        mask.show_a ? 1.0f : 0.0f);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous_framebuffer));
+            glViewport(previous_viewport[0], previous_viewport[1], previous_viewport[2], previous_viewport[3]);
+            glUseProgram(static_cast<GLuint>(previous_program));
+            glBindVertexArray(static_cast<GLuint>(previous_vertex_array));
+            glActiveTexture(static_cast<GLenum>(previous_active_texture));
+            if (blend_enabled == GL_TRUE)
+            {
+                glEnable(GL_BLEND);
+            }
+            else
+            {
+                glDisable(GL_BLEND);
+            }
+            if (depth_enabled == GL_TRUE)
+            {
+                glEnable(GL_DEPTH_TEST);
+            }
+            else
+            {
+                glDisable(GL_DEPTH_TEST);
+            }
+            if (cull_enabled == GL_TRUE)
+            {
+                glEnable(GL_CULL_FACE);
+            }
+            else
+            {
+                glDisable(GL_CULL_FACE);
+            }
+
+            return static_cast<uint64_t>(resources.texture);
+        }
 
         uint64_t ResolveViewportTexture(const UiState &state)
         {
@@ -98,7 +378,13 @@ namespace hybrid::ui
         const ImVec2 current_size = ImGui::GetContentRegionAvail();
         if (context.state != nullptr)
         {
-            const uint64_t viewport_texture = ResolveViewportTexture(*context.state);
+            uint64_t viewport_texture = ResolveViewportTexture(*context.state);
+            if (context.viewport_channel_mask != nullptr)
+            {
+                viewport_texture = BuildChannelPreviewTexture(viewport_texture,
+                                                              context.state->viewport_render_extent,
+                                                              *context.viewport_channel_mask);
+            }
             if (viewport_texture == 0)
             {
                 m_last_content_size = current_size;

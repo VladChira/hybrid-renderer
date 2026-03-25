@@ -143,6 +143,30 @@ namespace hybrid::renderer
             return base_color_texture->texcoord == 1 ? 1 : 0;
         }
 
+        const core::scene::MaterialTexture *ResolvePrimitiveMetallicRoughnessTexture(const core::scene::MeshPrimitive &primitive)
+        {
+            const auto *material = primitive.material.Get();
+            if (material == nullptr)
+            {
+                return nullptr;
+            }
+            if (!material->metallic_roughness_texture.image.IsValid())
+            {
+                return nullptr;
+            }
+            return &material->metallic_roughness_texture;
+        }
+
+        int ResolvePrimitiveMetallicRoughnessTexcoord(const core::scene::MeshPrimitive &primitive)
+        {
+            const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
+            if (metallic_roughness_texture == nullptr)
+            {
+                return 0;
+            }
+            return metallic_roughness_texture->texcoord == 1 ? 1 : 0;
+        }
+
         GLint ToGlWrap(const core::scene::TextureWrap wrap)
         {
             switch (wrap)
@@ -410,7 +434,7 @@ namespace hybrid::renderer
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
         glClearBufferfv(GL_COLOR, 0, clear_rt0);
         glClearBufferfv(GL_COLOR, 1, clear_rt1);
@@ -421,6 +445,7 @@ namespace hybrid::renderer
         m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
         m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
         m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
+        m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
 
         if (!m_impl->white_texture_initialized)
         {
@@ -475,6 +500,7 @@ namespace hybrid::renderer
                 m_gbuffer_shader->SetUniform1i("u_alpha_masked", ResolvePrimitiveAlphaMasked(primitive) ? 1 : 0);
                 m_gbuffer_shader->SetUniform1f("u_alpha_cutoff", ResolvePrimitiveAlphaCutoff(primitive));
                 m_gbuffer_shader->SetUniform1i("u_base_color_texcoord", ResolvePrimitiveBaseColorTexcoord(primitive));
+                m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texcoord", ResolvePrimitiveMetallicRoughnessTexcoord(primitive));
                 m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
 
                 bool has_base_color_texture = false;
@@ -506,6 +532,37 @@ namespace hybrid::renderer
                     m_impl->white_texture.BindToUnit(0);
                 }
                 m_gbuffer_shader->SetUniform1i("u_has_base_color_texture", has_base_color_texture ? 1 : 0);
+
+                bool has_metallic_roughness_texture = false;
+                if (const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
+                    metallic_roughness_texture != nullptr)
+                {
+                    const uint64_t image_id = metallic_roughness_texture->image.Id().value;
+                    if (image_id != 0)
+                    {
+                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
+                        if (cached_texture_it == m_impl->texture_cache.end())
+                        {
+                            CachedTextureGpu texture_gpu{};
+                            if (UploadTextureToGpu(*metallic_roughness_texture, texture_gpu))
+                            {
+                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
+                            }
+                        }
+
+                        if (cached_texture_it != m_impl->texture_cache.end())
+                        {
+                            cached_texture_it->second.texture.BindToUnit(1);
+                            has_metallic_roughness_texture = true;
+                        }
+                    }
+                }
+
+                if (!has_metallic_roughness_texture)
+                {
+                    m_impl->white_texture.BindToUnit(1);
+                }
+                m_gbuffer_shader->SetUniform1i("u_has_metallic_roughness_texture", has_metallic_roughness_texture ? 1 : 0);
 
                 gpu.vao.Bind();
                 glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);

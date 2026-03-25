@@ -56,6 +56,21 @@ namespace hybrid::ui
         ImGui::TextUnformatted("Current:");
         ImGui::SameLine();
         ImGui::TextUnformatted(VisualizationLabel(*context.viewport_visualization));
+
+        if (context.viewport_channel_mask != nullptr)
+        {
+            ImGui::Spacing();
+            ImGui::SeparatorText("Channel View");
+
+            UiViewportChannelMask &mask = *context.viewport_channel_mask;
+            ImGui::Checkbox("R", &mask.show_r);
+            ImGui::SameLine();
+            ImGui::Checkbox("G", &mask.show_g);
+            ImGui::SameLine();
+            ImGui::Checkbox("B", &mask.show_b);
+            ImGui::SameLine();
+            ImGui::Checkbox("A", &mask.show_a);
+        }
     }
 
 } // namespace hybrid::ui
