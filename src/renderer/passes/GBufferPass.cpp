@@ -157,6 +157,20 @@ namespace hybrid::renderer
             return &material->metallic_roughness_texture;
         }
 
+        const core::scene::MaterialTexture *ResolvePrimitiveNormalTexture(const core::scene::MeshPrimitive &primitive)
+        {
+            const auto *material = primitive.material.Get();
+            if (material == nullptr)
+            {
+                return nullptr;
+            }
+            if (!material->normal_texture.image.IsValid())
+            {
+                return nullptr;
+            }
+            return &material->normal_texture;
+        }
+
         int ResolvePrimitiveMetallicRoughnessTexcoord(const core::scene::MeshPrimitive &primitive)
         {
             const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
@@ -165,6 +179,25 @@ namespace hybrid::renderer
                 return 0;
             }
             return metallic_roughness_texture->texcoord == 1 ? 1 : 0;
+        }
+
+        int ResolvePrimitiveNormalTexcoord(const core::scene::MeshPrimitive &primitive)
+        {
+            const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive);
+            if (normal_texture == nullptr)
+            {
+                return 0;
+            }
+            return normal_texture->texcoord == 1 ? 1 : 0;
+        }
+
+        float ResolvePrimitiveNormalScale(const core::scene::MeshPrimitive &primitive)
+        {
+            if (const auto *material = primitive.material.Get())
+            {
+                return material->normal_scale;
+            }
+            return 1.0f;
         }
 
         GLint ToGlWrap(const core::scene::TextureWrap wrap)
@@ -379,6 +412,10 @@ namespace hybrid::renderer
             out_gpu.vao.SetAttribPointer(
                 3, 2, GL_FLOAT, false, sizeof(core::scene::Vertex), offsetof(core::scene::Vertex, uv1));
 
+            out_gpu.vao.EnableAttrib(4);
+            out_gpu.vao.SetAttribPointer(
+                4, 4, GL_FLOAT, false, sizeof(core::scene::Vertex), offsetof(core::scene::Vertex, tangent));
+
             GLVertexArray::Unbind();
             GLBuffer::Unbind(GL_ARRAY_BUFFER);
             GLBuffer::Unbind(GL_ELEMENT_ARRAY_BUFFER);
@@ -393,7 +430,9 @@ namespace hybrid::renderer
         std::unordered_map<PrimitiveCacheKey, CachedPrimitiveGpu, PrimitiveCacheKeyHash> primitive_cache;
         std::unordered_map<uint64_t, CachedTextureGpu> texture_cache;
         GLTexture white_texture{GL_TEXTURE_2D};
+        GLTexture flat_normal_texture{GL_TEXTURE_2D};
         bool white_texture_initialized = false;
+        bool flat_normal_texture_initialized = false;
     };
 
     GBufferPass::GBufferPass(GLShaderProgram *gbuffer_shader)
@@ -446,6 +485,7 @@ namespace hybrid::renderer
         m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
         m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
         m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
+        m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
 
         if (!m_impl->white_texture_initialized)
         {
@@ -457,6 +497,19 @@ namespace hybrid::renderer
             m_impl->white_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             m_impl->white_texture.SetImage2D(0, GL_RGBA8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kWhiteRgba);
             m_impl->white_texture_initialized = true;
+        }
+
+        if (!m_impl->flat_normal_texture_initialized)
+        {
+            // Tangent-space (0,0,1) encoded to [0,1] range.
+            constexpr uint8_t kFlatNormalRgba[4] = {128, 128, 255, 255};
+            m_impl->flat_normal_texture.Bind();
+            m_impl->flat_normal_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_REPEAT);
+            m_impl->flat_normal_texture.SetParameter(GL_TEXTURE_WRAP_T, GL_REPEAT);
+            m_impl->flat_normal_texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            m_impl->flat_normal_texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            m_impl->flat_normal_texture.SetImage2D(0, GL_RGBA8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kFlatNormalRgba);
+            m_impl->flat_normal_texture_initialized = true;
         }
 
         auto draw_instance = [&](const RenderMeshInstance &instance)
@@ -501,6 +554,8 @@ namespace hybrid::renderer
                 m_gbuffer_shader->SetUniform1f("u_alpha_cutoff", ResolvePrimitiveAlphaCutoff(primitive));
                 m_gbuffer_shader->SetUniform1i("u_base_color_texcoord", ResolvePrimitiveBaseColorTexcoord(primitive));
                 m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texcoord", ResolvePrimitiveMetallicRoughnessTexcoord(primitive));
+                m_gbuffer_shader->SetUniform1i("u_normal_texcoord", ResolvePrimitiveNormalTexcoord(primitive));
+                m_gbuffer_shader->SetUniform1f("u_normal_scale", ResolvePrimitiveNormalScale(primitive));
                 m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
 
                 bool has_base_color_texture = false;
@@ -563,6 +618,36 @@ namespace hybrid::renderer
                     m_impl->white_texture.BindToUnit(1);
                 }
                 m_gbuffer_shader->SetUniform1i("u_has_metallic_roughness_texture", has_metallic_roughness_texture ? 1 : 0);
+
+                bool has_normal_texture = false;
+                if (const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive); normal_texture != nullptr)
+                {
+                    const uint64_t image_id = normal_texture->image.Id().value;
+                    if (image_id != 0)
+                    {
+                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
+                        if (cached_texture_it == m_impl->texture_cache.end())
+                        {
+                            CachedTextureGpu texture_gpu{};
+                            if (UploadTextureToGpu(*normal_texture, texture_gpu))
+                            {
+                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
+                            }
+                        }
+
+                        if (cached_texture_it != m_impl->texture_cache.end())
+                        {
+                            cached_texture_it->second.texture.BindToUnit(2);
+                            has_normal_texture = true;
+                        }
+                    }
+                }
+
+                if (!has_normal_texture)
+                {
+                    m_impl->flat_normal_texture.BindToUnit(2);
+                }
+                m_gbuffer_shader->SetUniform1i("u_has_normal_texture", has_normal_texture ? 1 : 0);
 
                 gpu.vao.Bind();
                 glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);

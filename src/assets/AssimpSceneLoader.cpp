@@ -267,9 +267,7 @@ namespace hybrid::assets
         const std::filesystem::path base_path(resolved_path);
         const std::string base_dir = base_path.parent_path().make_preferred().string();
 
-        // Possible other values: aiProcess_JoinIdenticalVertices, aiProcess_ImproveCacheLocality,
-        // aiProcess_GenNormals, aiProcess_CalcTangentSpace. Unlikely to be needed.
-        const unsigned int flags = aiProcess_Triangulate;
+        const unsigned int flags = aiProcess_Triangulate | aiProcess_CalcTangentSpace;
         const aiScene *scene = importer.ReadFile(resolved_path.c_str(), flags);
         if (!scene)
         {
@@ -462,7 +460,18 @@ namespace hybrid::assets
                 if (has_tangents)
                 {
                     const aiVector3D &t = mesh->mTangents[v];
-                    vertex.tangent = {t.x, t.y, t.z, 1.0f};
+                    float handedness = 1.0f;
+                    if (mesh->mBitangents != nullptr)
+                    {
+                        const aiVector3D &n = mesh->mNormals[v];
+                        const aiVector3D &b = mesh->mBitangents[v];
+                        const glm::vec3 tangent = {t.x, t.y, t.z};
+                        const glm::vec3 normal = {n.x, n.y, n.z};
+                        const glm::vec3 bitangent = {b.x, b.y, b.z};
+                        handedness = glm::dot(glm::cross(normal, tangent), bitangent) < 0.0f ? -1.0f : 1.0f;
+                    }
+
+                    vertex.tangent = {t.x, t.y, t.z, handedness};
                 }
 
                 if (has_uv0)

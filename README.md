@@ -28,6 +28,9 @@ Use the “x64 Native Tools Command Prompt for VS 2022” (or otherwise ensure t
 
 ## Progress images
 
+<p align="center"><img src="images/snapshot-6.png" width="700"/></p>
+<p align="center">Metallic, roughness and normal mapping</p>
+
 <p align="center"><img src="images/snapshot-5.png" width="700"/></p>
 <p align="center">Deferred shading, UI updates</p>
 

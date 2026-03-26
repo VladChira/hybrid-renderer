@@ -114,7 +114,7 @@ namespace hybrid::core::scene
         MaterialTexture occlusion_texture{};
         MaterialTexture emissive_texture{};
 
-        float normal_scale = 1.0f;
+        float normal_scale = 0.6f;
         float occlusion_strength = 1.0f;
     };
 

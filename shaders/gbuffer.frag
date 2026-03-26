@@ -1,6 +1,8 @@
 #version 330 core
 
 in vec3 v_world_normal;
+in vec3 v_world_tangent;
+in vec3 v_world_bitangent;
 in vec2 v_uv0;
 in vec2 v_uv1;
 
@@ -16,6 +18,10 @@ uniform float u_roughness;
 uniform sampler2D u_metallic_roughness_texture;
 uniform int u_has_metallic_roughness_texture;
 uniform int u_metallic_roughness_texcoord;
+uniform sampler2D u_normal_texture;
+uniform int u_has_normal_texture;
+uniform int u_normal_texcoord;
+uniform float u_normal_scale;
 uniform uint u_instance_id;
 
 layout (location = 0) out vec4 o_rt0;
@@ -42,6 +48,26 @@ void main()
     if (dot(normal, normal) < 0.00001)
     {
         normal = vec3(0.0, 1.0, 0.0);
+    }
+
+    if (u_has_normal_texture != 0)
+    {
+        vec2 normal_uv = (u_normal_texcoord == 1) ? v_uv1 : v_uv0;
+        vec3 tangent_normal = texture(u_normal_texture, normal_uv).xyz * 2.0 - 1.0;
+        tangent_normal.xy *= u_normal_scale;
+        tangent_normal = normalize(tangent_normal);
+
+        vec3 tangent = normalize(v_world_tangent);
+        vec3 bitangent = normalize(v_world_bitangent);
+        if (dot(tangent, tangent) < 0.00001 || dot(bitangent, bitangent) < 0.00001)
+        {
+            vec3 helper_axis = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+            tangent = normalize(cross(helper_axis, normal));
+            bitangent = normalize(cross(normal, tangent));
+        }
+
+        mat3 tbn = mat3(tangent, bitangent, normal);
+        normal = normalize(tbn * tangent_normal);
     }
 
     o_rt0 = vec4(base_color, metallic);
