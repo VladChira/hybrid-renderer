@@ -44,6 +44,10 @@ namespace hybrid::core::scene
         float far_plane = 1000.0f;
     };
 
+    struct PrimaryCameraComponent
+    {
+    };
+
     struct CameraTargetComponent
     {
         bool enabled = false;

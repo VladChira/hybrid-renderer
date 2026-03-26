@@ -60,6 +60,7 @@ namespace hybrid::ui
         : Panel("Toolbar")
     {
         m_light_icon = LoadIconTexture("point_dark.png");
+        m_camera_icon = LoadIconTexture("camera_dark.png");
         m_translate_icon = LoadIconTexture("translate_dark.png");
         m_rotate_icon = LoadIconTexture("rotate_dark.png");
         m_scale_icon = LoadIconTexture("scale_dark.png");
@@ -142,6 +143,14 @@ namespace hybrid::ui
             if (context.commands != nullptr)
             {
                 EnqueueCommand(*context.commands, AddDirectionalLightCommand{});
+            }
+        }
+        ImGui::SameLine();
+        if (DrawIconButton("##toolbar_add_camera", "Add Camera", m_camera_icon.id))
+        {
+            if (context.commands != nullptr)
+            {
+                EnqueueCommand(*context.commands, AddCameraCommand{});
             }
         }
 

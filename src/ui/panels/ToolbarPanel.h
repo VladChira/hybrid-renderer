@@ -36,6 +36,7 @@ namespace hybrid::ui
         void DrawContents(PanelContext &context) override;
 
         IconTexture m_light_icon{};
+        IconTexture m_camera_icon{};
         IconTexture m_translate_icon{};
         IconTexture m_rotate_icon{};
         IconTexture m_scale_icon{};

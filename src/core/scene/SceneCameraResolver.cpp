@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -36,12 +37,40 @@ namespace hybrid::core::scene
             return 2.0f * std::atan(std::tan(half_h) / safe_aspect);
         }
 
-        entt::entity EnsureDefaultCameraEntity(SceneWorld &scene_world)
+        entt::entity EnsurePrimaryCameraEntity(SceneWorld &scene_world)
         {
             auto &registry = scene_world.Registry();
+            entt::entity primary_camera = entt::null;
+
+            auto primary_view = registry.view<PrimaryCameraComponent>();
+            std::vector<entt::entity> invalid_primaries{};
+            for (const entt::entity entity : primary_view)
+            {
+                if (registry.all_of<CameraComponent, TransformComponent>(entity) && primary_camera == entt::null)
+                {
+                    primary_camera = entity;
+                }
+                else
+                {
+                    invalid_primaries.push_back(entity);
+                }
+            }
+
+            for (const entt::entity entity : invalid_primaries)
+            {
+                registry.remove<PrimaryCameraComponent>(entity);
+            }
+
+            if (primary_camera != entt::null)
+            {
+                return primary_camera;
+            }
+
             if (auto camera_view = registry.view<CameraComponent, TransformComponent>(); camera_view.begin() != camera_view.end())
             {
-                return *camera_view.begin();
+                primary_camera = *camera_view.begin();
+                registry.emplace_or_replace<PrimaryCameraComponent>(primary_camera);
+                return primary_camera;
             }
 
             if (static bool warned = false; !warned)
@@ -49,7 +78,6 @@ namespace hybrid::core::scene
                 LOG_WARN("[SceneCameraResolver] No camera found in scene. Using DEFAULT camera.");
                 warned = true;
             }
-            
 
             const entt::entity camera_entity = scene_world.CreateEntity("Default Camera");
             auto &transform = registry.get<TransformComponent>(camera_entity);
@@ -63,6 +91,7 @@ namespace hybrid::core::scene
             camera.horizontal_fov_radians = glm::radians(75.0f);
             camera.near_plane = 0.1f;
             camera.far_plane = 1000.0f;
+            registry.emplace<PrimaryCameraComponent>(camera_entity);
 
             scene_world.UpdateTransforms();
             return camera_entity;
@@ -111,7 +140,7 @@ namespace hybrid::core::scene
 
     SceneCameraView ResolvePrimaryCameraView(SceneWorld &scene_world, float aspect_ratio)
     {
-        const entt::entity primary_camera = EnsureDefaultCameraEntity(scene_world);
+        const entt::entity primary_camera = EnsurePrimaryCameraEntity(scene_world);
         return BuildCameraView(scene_world, primary_camera, aspect_ratio);
     }
 

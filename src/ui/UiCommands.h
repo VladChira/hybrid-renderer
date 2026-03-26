@@ -45,6 +45,15 @@ namespace hybrid::ui
         entt::entity target = entt::null;
     };
 
+    struct CameraSetPrimaryCommand
+    {
+        entt::entity entity = entt::null;
+    };
+
+    struct AddCameraCommand
+    {
+    };
+
     struct AddPointLightCommand
     {
     };
@@ -153,6 +162,8 @@ namespace hybrid::ui
                                    EntitySetLocalTransformCommand,
                                    CameraSetLensCommand,
                                    CameraSetTargetCommand,
+                                   CameraSetPrimaryCommand,
+                                   AddCameraCommand,
                                    AddPointLightCommand,
                                    AddAreaLightCommand,
                                    AddDirectionalLightCommand,

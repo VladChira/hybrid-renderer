@@ -32,17 +32,19 @@ namespace hybrid::ui
 
         void DrawEntityTree(const core::scene::SceneWorld &scene_world,
                             entt::entity entity,
-                            UiSelection *selection)
+                            UiSelection *selection,
+                            CommandBuffer *commands)
         {
             if (!scene_world.IsValid(entity))
             {
                 return;
             }
 
+            const auto &registry = scene_world.Registry();
             const auto &children = scene_world.GetChildren(entity);
             const bool has_children = !children.empty();
 
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
             if (selection &&
                 selection->type == UiSelection::Type::Entity &&
                 selection->entity == entity)
@@ -66,11 +68,40 @@ namespace hybrid::ui
                 selection->material_asset_id = 0;
             }
 
+            const bool is_camera = registry.all_of<core::scene::CameraComponent>(entity);
+            if (is_camera)
+            {
+                const bool is_primary = registry.all_of<core::scene::PrimaryCameraComponent>(entity);
+                const float toggle_size = ImGui::GetFrameHeight();
+                const float toggle_x = ImGui::GetWindowContentRegionMax().x - toggle_size - 4.0f;
+                ImGui::SameLine(toggle_x);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3.0f, 3.0f));
+                if (ImGui::RadioButton("##primary_camera", is_primary))
+                {
+                    if (!is_primary && commands != nullptr)
+                    {
+                        EnqueueCommand(*commands, CameraSetPrimaryCommand{entity});
+                    }
+                    if (selection)
+                    {
+                        selection->type = UiSelection::Type::Entity;
+                        selection->entity = entity;
+                        selection->material_asset_id = 0;
+                    }
+                }
+
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Set as primary viewport camera");
+                }
+                ImGui::PopStyleVar();
+            }
+
             if (has_children && open)
             {
                 for (const entt::entity child : children)
                 {
-                    DrawEntityTree(scene_world, child, selection);
+                    DrawEntityTree(scene_world, child, selection, commands);
                 }
                 ImGui::TreePop();
             }
@@ -97,6 +128,7 @@ namespace hybrid::ui
         auto view = registry.view<core::scene::HierarchyComponent>();
 
         bool drew_any = false;
+
         for (const entt::entity entity : view)
         {
             if (const auto &hierarchy = view.get<core::scene::HierarchyComponent>(entity); hierarchy.parent != entt::null)
@@ -105,7 +137,7 @@ namespace hybrid::ui
             }
 
             drew_any = true;
-            DrawEntityTree(scene_world, entity, context.selection);
+            DrawEntityTree(scene_world, entity, context.selection, context.commands);
         }
 
         if (!drew_any)

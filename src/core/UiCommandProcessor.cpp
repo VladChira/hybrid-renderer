@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 namespace hybrid::core
 {
@@ -29,6 +30,33 @@ namespace hybrid::core
                 return fallback;
             }
             return glm::normalize(vector);
+        }
+
+        void AssignPrimaryCamera(scene::SceneWorld &scene_world, entt::entity primary_camera)
+        {
+            auto &registry = scene_world.Registry();
+            if (!scene_world.IsValid(primary_camera) || !registry.all_of<scene::CameraComponent>(primary_camera))
+            {
+                return;
+            }
+
+            auto primary_view = registry.view<scene::PrimaryCameraComponent>();
+            std::vector<entt::entity> to_clear{};
+            for (const entt::entity entity : primary_view)
+            {
+                if (entity == primary_camera)
+                {
+                    continue;
+                }
+                to_clear.push_back(entity);
+            }
+
+            for (const entt::entity entity : to_clear)
+            {
+                registry.remove<scene::PrimaryCameraComponent>(entity);
+            }
+
+            registry.emplace_or_replace<scene::PrimaryCameraComponent>(primary_camera);
         }
     } // namespace
 
@@ -106,6 +134,32 @@ namespace hybrid::core
                             {
                                 camera_target->target = entt::null;
                             }
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, ui::CameraSetPrimaryCommand>)
+                    {
+                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
+                        {
+                            return;
+                        }
+
+                        AssignPrimaryCamera(*active_scene_world, typed_command.entity);
+                    }
+                    else if constexpr (std::is_same_v<T, ui::AddCameraCommand>)
+                    {
+                        if (active_scene_world == nullptr)
+                        {
+                            return;
+                        }
+
+                        auto &registry = active_scene_world->Registry();
+                        const entt::entity entity = active_scene_world->CreateEntity("Camera");
+                        registry.emplace<scene::CameraComponent>(entity);
+
+                        auto primary_camera_view = registry.view<scene::PrimaryCameraComponent, scene::CameraComponent>();
+                        if (primary_camera_view.begin() == primary_camera_view.end())
+                        {
+                            AssignPrimaryCamera(*active_scene_world, entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::AddPointLightCommand>)
