@@ -279,6 +279,7 @@ namespace hybrid::renderer
                 case 3:
                     internal_format = GL_RGB16F;
                     break;
+                case 4:
                     internal_format = GL_RGBA16F;
                     break;
                 default:
