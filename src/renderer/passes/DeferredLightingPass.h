@@ -20,6 +20,7 @@ namespace hybrid::renderer
         GlTextureId gbuffer_depth = 0;
         bool has_skybox = false;
         GlTextureId skybox_cubemap = 0;
+        GlTextureId convoluted_cubemap = 0;
         float skybox_intensity = 1.0f;
         float skybox_yaw_radians = 0.0f;
     };

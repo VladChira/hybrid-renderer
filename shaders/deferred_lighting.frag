@@ -6,12 +6,14 @@ uniform sampler2D u_gbuffer_rt0;
 uniform sampler2D u_gbuffer_rt1;
 uniform sampler2D u_gbuffer_depth;
 uniform samplerCube u_skybox_cubemap;
+uniform samplerCube u_irradiance_cubemap;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
 uniform float u_exposure;
 
 uniform int u_has_skybox;
+uniform int u_has_irradiance;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 
@@ -73,6 +75,11 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 vec3 FresnelSchlick(float cosTheta, vec3 F0)
 {
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 vec3 ReconstructWorldPosition(vec2 uv, float depth)
@@ -202,7 +209,18 @@ void main()
         Lo += (diffuse + specular) * radiance * ndotl;
     }
 
-    vec3 ambient = 0.00 * albedo;
+    vec3 ambient = vec3(0.0);
+    if (u_has_irradiance != 0)
+    {
+        vec3 irradiance_direction = RotateAroundY(normal, u_skybox_yaw_radians);
+        vec3 irradiance = texture(u_irradiance_cubemap, irradiance_direction).rgb * max(u_skybox_intensity, 0.0);
+        vec3 kS = FresnelSchlickRoughness(ndotv, F0, roughness);
+        // Tiny trick: metals should contribute almost no diffuse ambient.
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        vec3 diffuse_ibl = irradiance * albedo;
+        ambient = kD * diffuse_ibl;
+    }
+
     vec3 color = ambient + Lo;
 
     color = vec3(1.0) - exp(-color * max(u_exposure, 0.0001));
