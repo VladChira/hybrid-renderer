@@ -501,9 +501,26 @@ namespace hybrid::ui
                         ImGuizmo::SetRect(image_min.x, image_min.y, image_max.x - image_min.x, image_max.y - image_min.y);
                         ImGuizmo::Enable(true);
 
+                        ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
+                        if (context.transform_tool != nullptr)
+                        {
+                            switch (*context.transform_tool)
+                            {
+                            case TransformTool::Translate:
+                                operation = ImGuizmo::TRANSLATE;
+                                break;
+                            case TransformTool::Rotate:
+                                operation = ImGuizmo::ROTATE;
+                                break;
+                            case TransformTool::Scale:
+                                operation = ImGuizmo::SCALE;
+                                break;
+                            }
+                        }
+
                         const bool manipulated = ImGuizmo::Manipulate(glm::value_ptr(context.state->viewport_render_view.view),
                                                                       glm::value_ptr(context.state->viewport_render_view.projection),
-                                                                      ImGuizmo::TRANSLATE,
+                                                                      operation,
                                                                       ImGuizmo::LOCAL,
                                                                       glm::value_ptr(entity_world),
                                                                       nullptr,

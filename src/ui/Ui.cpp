@@ -153,6 +153,7 @@ namespace hybrid::ui
         context.state = &frame_state;
         context.selection = &m_selection;
         context.viewport_visualization = &m_viewport_visualization;
+        context.transform_tool = &m_transform_tool;
         m_panels.DrawAll(context);
 
         ImGui::Render();

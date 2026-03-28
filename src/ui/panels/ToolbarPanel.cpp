@@ -121,6 +121,10 @@ namespace hybrid::ui
 
     void ToolbarPanel::DrawContents(PanelContext &context)
     {
+        TransformTool active_tool = (context.transform_tool != nullptr)
+                                        ? *context.transform_tool
+                                        : TransformTool::Translate;
+
         if (DrawIconButton("##toolbar_add_point_light", "Add Point Light", m_light_icon.id))
         {
             // Hooked into command flow; scene mutation is processed by core.
@@ -160,26 +164,38 @@ namespace hybrid::ui
 
         if (DrawToggleIconButton("##toolbar_tool_translate",
                                  "Translate Tool",
-                                 m_transform_tool == TransformTool::Translate,
+                                 active_tool == TransformTool::Translate,
                                  m_translate_icon.id))
         {
-            m_transform_tool = TransformTool::Translate;
+            if (context.transform_tool != nullptr)
+            {
+                *context.transform_tool = TransformTool::Translate;
+            }
+            active_tool = TransformTool::Translate;
         }
         ImGui::SameLine();
         if (DrawToggleIconButton("##toolbar_tool_rotate",
                                  "Rotate Tool",
-                                 m_transform_tool == TransformTool::Rotate,
+                                 active_tool == TransformTool::Rotate,
                                  m_rotate_icon.id))
         {
-            m_transform_tool = TransformTool::Rotate;
+            if (context.transform_tool != nullptr)
+            {
+                *context.transform_tool = TransformTool::Rotate;
+            }
+            active_tool = TransformTool::Rotate;
         }
         ImGui::SameLine();
         if (DrawToggleIconButton("##toolbar_tool_scale",
                                  "Scale Tool",
-                                 m_transform_tool == TransformTool::Scale,
+                                 active_tool == TransformTool::Scale,
                                  m_scale_icon.id))
         {
-            m_transform_tool = TransformTool::Scale;
+            if (context.transform_tool != nullptr)
+            {
+                *context.transform_tool = TransformTool::Scale;
+            }
+            active_tool = TransformTool::Scale;
         }
 
         ImGui::SameLine();
@@ -194,6 +210,24 @@ namespace hybrid::ui
         if (DrawToggleIconButton("##toolbar_space_global", "Global Space", !m_use_local_space, m_global_space_icon.id))
         {
             m_use_local_space = false;
+        }
+
+        if (context.transform_tool != nullptr)
+        {
+            if (ImGui::IsKeyPressed(ImGuiKey_T))
+            {
+                *context.transform_tool = TransformTool::Translate;
+            }
+
+            if (ImGui::IsKeyPressed(ImGuiKey_R))
+            {
+                *context.transform_tool = TransformTool::Rotate;
+            }
+
+            if (ImGui::IsKeyPressed(ImGuiKey_S))
+            {
+                *context.transform_tool = TransformTool::Scale;
+            }
         }
     }
 

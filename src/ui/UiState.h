@@ -52,6 +52,13 @@ namespace hybrid::ui
         }
     };
 
+    enum class TransformTool : uint8_t
+    {
+        Translate = 0,
+        Rotate,
+        Scale
+    };
+
     struct UiState
     {
         const core::scene::SceneWorld *scene_world = nullptr;

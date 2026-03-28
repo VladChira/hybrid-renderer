@@ -17,6 +17,7 @@ namespace hybrid::ui
     struct UiState;
     struct UiSelection;
     enum class UiViewportVisualization : uint8_t;
+    enum class TransformTool : uint8_t;
 
     struct PanelContext
     {
@@ -26,6 +27,7 @@ namespace hybrid::ui
         const UiState *state = nullptr;
         UiSelection *selection = nullptr;
         UiViewportVisualization *viewport_visualization = nullptr;
+        TransformTool *transform_tool = nullptr;
     };
 
     class Panel

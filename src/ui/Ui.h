@@ -48,6 +48,7 @@ namespace hybrid::ui
         ThemePalette m_theme_palette{};
         UiSelection m_selection{};
         UiViewportVisualization m_viewport_visualization = UiViewportVisualization::FinalColor;
+        TransformTool m_transform_tool = TransformTool::Translate;
 
         ImGuiIO *io;
     };

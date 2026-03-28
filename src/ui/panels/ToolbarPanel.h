@@ -2,6 +2,8 @@
 
 #include "ui/panels/Panel.h"
 
+#include "ui/UiState.h"
+
 #include <cstdint>
 #include <string>
 
@@ -21,13 +23,6 @@ namespace hybrid::ui
             int height = 0;
         };
 
-        enum class TransformTool : uint8_t
-        {
-            Translate = 0,
-            Rotate,
-            Scale
-        };
-
         static std::string BuildIconPath(const char *icon_file);
         static IconTexture LoadIconTexture(const char *icon_file);
 
@@ -43,7 +38,6 @@ namespace hybrid::ui
         IconTexture m_local_space_icon{};
         IconTexture m_global_space_icon{};
 
-        TransformTool m_transform_tool = TransformTool::Translate;
         bool m_use_local_space = true;
     };
 
