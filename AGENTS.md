@@ -188,8 +188,5 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
 
 ## Current state vs hybrid target
 
-- Current renderer is a forward OpenGL baseline and does not yet implement the full deferred + ray-traced hybrid pipeline.
-- Treat current structure as the integration backbone for incremental evolution:
-  - first solidify scene data, pass boundaries, and inspectability
-  - then add deferred/G-buffer stages
-  - then add selective ray-traced effects with clear feature toggles and measurable cost
+- Current renderer implements deferred shading partially, missing IBL, area lights.
+- No ray traced effects are in place (shadows would be the first)

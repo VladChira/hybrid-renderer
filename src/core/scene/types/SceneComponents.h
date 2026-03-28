@@ -2,6 +2,7 @@
 
 #include "assets/AssetManager.h"
 #include "core/scene/types/SceneMath.h"
+#include "assets/ImageAsset.h"
 
 #include <string>
 #include <vector>
@@ -72,6 +73,7 @@ namespace hybrid::core::scene
 
     struct DirectionalLightComponent
     {
+        // Direction is computed based on local transform
     };
 
     struct AreaLightComponent
@@ -86,6 +88,7 @@ namespace hybrid::core::scene
     {
         // 0.0 means no explicit rotation override.
         float yaw_radians = 0.0f;
+        assets::AssetHandle<assets::ImageAsset> texture;
     };
 
 } // namespace hybrid::core::scene

@@ -8,6 +8,4 @@ namespace hybrid::renderer
 
     FrameSceneData BuildFrameSceneData(const core::scene::SceneWorld &scene_world);
 
-    RenderSceneSnapshot BuildRenderSceneSnapshot(const core::scene::SceneWorld &scene_world);
-
 } // namespace hybrid::renderer

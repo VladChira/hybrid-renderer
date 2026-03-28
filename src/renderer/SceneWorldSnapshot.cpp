@@ -245,36 +245,11 @@ namespace hybrid::renderer
             light.intensity = common.intensity;
             light.yaw_radians = hdri.yaw_radians;
             light.cast_shadows = common.cast_shadows;
+            light.texture = hdri.texture;
             frame_data.hdri_lights.push_back(light);
         }
 
         return frame_data;
-    }
-
-    RenderSceneSnapshot BuildRenderSceneSnapshot(const core::scene::SceneWorld &scene_world)
-    {
-        FrameSceneData frame_data = BuildFrameSceneData(scene_world);
-
-        RenderSceneSnapshot snapshot{};
-        const size_t total_instance_count = frame_data.opaque_mesh_instances.size() +
-                                            frame_data.masked_mesh_instances.size() +
-                                            frame_data.blended_mesh_instances.size();
-        snapshot.mesh_instances.reserve(total_instance_count);
-
-        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
-                                       frame_data.opaque_mesh_instances.begin(),
-                                       frame_data.opaque_mesh_instances.end());
-        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
-                                       frame_data.masked_mesh_instances.begin(),
-                                       frame_data.masked_mesh_instances.end());
-        snapshot.mesh_instances.insert(snapshot.mesh_instances.end(),
-                                       frame_data.blended_mesh_instances.begin(),
-                                       frame_data.blended_mesh_instances.end());
-        snapshot.directional_lights = frame_data.directional_lights;
-        snapshot.point_lights = frame_data.point_lights;
-        snapshot.area_lights = frame_data.area_lights;
-        snapshot.hdri_lights = frame_data.hdri_lights;
-        return snapshot;
     }
 
 } // namespace hybrid::renderer

@@ -98,6 +98,7 @@ namespace hybrid::renderer
         float intensity = 1.0f;
         float yaw_radians = 0.0f;
         bool cast_shadows = false;
+        assets::AssetHandle<assets::ImageAsset> texture;
     };
 
     struct FrameSceneData

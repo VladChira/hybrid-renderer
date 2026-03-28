@@ -8,7 +8,6 @@
 #include "renderer/ShaderManager.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/passes/DeferredLightingPass.h"
-#include "renderer/passes/ForwardLitPass.h"
 #include "renderer/passes/GBufferPass.h"
 
 #include <chrono>
@@ -46,7 +45,6 @@ namespace hybrid::renderer
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
-        std::unique_ptr<ForwardLitPass> forward_pass{};
 
         FrameContext frame_context{};
         const core::scene::SceneWorld *submitted_scene_world = nullptr;
@@ -109,7 +107,6 @@ namespace hybrid::renderer
 
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
         m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
-        m_impl->forward_pass = std::make_unique<ForwardLitPass>(&m_impl->forward_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -143,7 +140,6 @@ namespace hybrid::renderer
         m_impl->effective_view = {};
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
-        m_impl->forward_pass.reset();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
         m_impl->forward_shader.Destroy();
@@ -291,35 +287,6 @@ namespace hybrid::renderer
             {
                 m_impl->outputs.color = deferred_output.color;
                 m_impl->outputs.depth = deferred_output.depth;
-            }
-        }
-
-        if (m_impl->submitted_settings.mode != RenderMode::Lit && m_impl->forward_pass)
-        {
-            ForwardPassInput forward_input{};
-            forward_input.settings = &m_impl->submitted_settings;
-            forward_input.scene_data = &m_impl->scene_data;
-            forward_input.effective_view = &m_impl->effective_view;
-            forward_input.stats = &m_impl->stats;
-            forward_input.scene_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene);
-            forward_input.scene_color = m_impl->frame_resources.Get(FrameTarget::SceneColor);
-            forward_input.gbuffer_rt0 = m_impl->outputs.gbuffer_rt0;
-            forward_input.gbuffer_rt1 = m_impl->outputs.gbuffer_rt1;
-            forward_input.gbuffer_entity_id = m_impl->outputs.gbuffer_entity_id;
-            forward_input.gbuffer_depth = m_impl->outputs.depth;
-
-            ForwardPassOutput forward_output{};
-            if (!m_impl->forward_pass->Execute(forward_input, forward_output))
-            {
-                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->forward_pass->Name());
-            }
-            else
-            {
-                m_impl->outputs.color = forward_output.color;
-                m_impl->outputs.depth = forward_output.depth;
-                m_impl->outputs.gbuffer_rt0 = forward_output.gbuffer_rt0;
-                m_impl->outputs.gbuffer_rt1 = forward_output.gbuffer_rt1;
-                m_impl->outputs.gbuffer_entity_id = forward_output.gbuffer_entity_id;
             }
         }
 
