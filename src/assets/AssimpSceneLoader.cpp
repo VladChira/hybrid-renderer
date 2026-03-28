@@ -157,11 +157,22 @@ namespace hybrid::assets
 
         void AppendLights(const aiScene &ai_scene,
                           std::unordered_map<std::string, entt::entity> &entities_by_name,
+                          AssetManager *assets,
                           hybrid::core::scene::SceneWorld &scene)
         {
             LOG_INFO("[AssimpSceneLoader] \t Processing lights...");
 
             auto &registry = scene.Registry();
+            bool has_hdri_light = false;
+            assets::AssetHandle<assets::ImageAsset> default_hdri{};
+            if (assets != nullptr)
+            {
+                default_hdri = assets->LoadHandle<assets::ImageAsset>("hdris/furstenstein_2k.hdr");
+                if (!default_hdri.IsValid())
+                {
+                    LOG_WARN("[AssimpSceneLoader] Failed to load default HDRI: hdris/furstenstein_2k.hdr");
+                }
+            }
 
             for (unsigned int i = 0; i < ai_scene.mNumLights; ++i)
             {
@@ -243,12 +254,24 @@ namespace hybrid::assets
                 {
                     auto &ambient = registry.get_or_emplace<hybrid::core::scene::HdriLightComponent>(light_entity);
                     ambient.yaw_radians = 0.0f;
+                    ambient.texture = default_hdri;
+                    has_hdri_light = true;
                     break;
                 }
                 default:
                     LOG_INFO("[AssimpSceneLoader] Skipping unsupported light type for '" + entity_name + "'");
                     break;
                 }
+            }
+            if (!has_hdri_light)
+            {
+                const entt::entity default_hdri_entity = scene.CreateEntity("Default HDRI");
+                auto &common = registry.emplace<hybrid::core::scene::LightCommonComponent>(default_hdri_entity);
+                common.intensity = 10.0f;
+
+                auto &ambient = registry.emplace<hybrid::core::scene::HdriLightComponent>(default_hdri_entity);
+                ambient.yaw_radians = 0.0f;
+                ambient.texture = default_hdri;
             }
         }
 
@@ -662,7 +685,7 @@ namespace hybrid::assets
             entities_by_name.reserve(static_cast<size_t>(scene->mNumMeshes + scene->mNumCameras + scene->mNumLights + 8));
 
             AppendNode(*scene->mRootNode, entt::null, mesh_handles, cameras_by_node_name, entities_by_name, *result);
-            AppendLights(*scene, entities_by_name, *result);
+            AppendLights(*scene, entities_by_name, m_assets, *result);
         }
 
         LOG_INFO("[AssimpSceneLoader] glTF scene loaded");

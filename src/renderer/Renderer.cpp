@@ -41,6 +41,7 @@ namespace hybrid::renderer
         ShaderManager shader_manager{};
         GLShaderProgram gbuffer_shader{};
         GLShaderProgram deferred_lighting_shader{};
+        GLShaderProgram equirect_to_cubemap_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
 
@@ -99,8 +100,17 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("equirect_to_cubemap.vert",
+                                                            "equirect_to_cubemap.frag",
+                                                            m_impl->equirect_to_cubemap_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: equirect-to-cubemap shader program build failed");
+            return false;
+        }
+
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
         m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
+        m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -133,8 +143,10 @@ namespace hybrid::renderer
         m_impl->effective_view = {};
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
+        m_impl->hdri_precompute_pass.reset();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
+        m_impl->equirect_to_cubemap_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -259,12 +271,12 @@ namespace hybrid::renderer
         }
 
         // Precompute any new/stale HDRIs here before we shade.
+        HdriPrecomputePassOutput hdri_output{};
         if (m_impl->hdri_precompute_pass)
         {
             HdriPrecomputePassInput hdri_input{};
             hdri_input.scene_data = &m_impl->scene_data;
 
-            HdriPrecomputePassOutput hdri_output{};
             if (!m_impl->hdri_precompute_pass->Execute(hdri_input, hdri_output))
             {
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->hdri_precompute_pass->Name());
@@ -282,6 +294,10 @@ namespace hybrid::renderer
             deferred_input.gbuffer_rt0 = m_impl->outputs.gbuffer_rt0;
             deferred_input.gbuffer_rt1 = m_impl->outputs.gbuffer_rt1;
             deferred_input.gbuffer_depth = m_impl->outputs.depth;
+            deferred_input.has_skybox = hdri_output.has_skybox;
+            deferred_input.skybox_cubemap = hdri_output.skybox_cubemap;
+            deferred_input.skybox_intensity = hdri_output.skybox_intensity;
+            deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))

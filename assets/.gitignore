@@ -1,3 +1,5 @@
 # Ignore the big .glTF files
 
 scenes/
+
+hdris/

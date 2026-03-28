@@ -73,10 +73,14 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_gbuffer_rt0", 0);
         m_deferred_shader->SetUniform1i("u_gbuffer_rt1", 1);
         m_deferred_shader->SetUniform1i("u_gbuffer_depth", 2);
+        m_deferred_shader->SetUniform1i("u_skybox_cubemap", 3);
         m_deferred_shader->SetUniformMat4("u_inv_view", glm::affineInverse(effective_view.view));
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
         m_deferred_shader->SetUniform1f("u_exposure", settings.exposure);
+        m_deferred_shader->SetUniform1i("u_has_skybox", input.has_skybox && input.skybox_cubemap != 0 ? 1 : 0);
+        m_deferred_shader->SetUniform1f("u_skybox_intensity", input.skybox_intensity);
+        m_deferred_shader->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
 
         const int point_light_count = static_cast<int>(std::min<size_t>(scene.point_lights.size(),
                                                                          static_cast<size_t>(kMaxDeferredPointLights)));
@@ -164,12 +168,16 @@ namespace hybrid::renderer
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_rt1);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_depth);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, input.has_skybox ? input.skybox_cubemap : 0);
 
         m_impl->fullscreen_vao.Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE1);

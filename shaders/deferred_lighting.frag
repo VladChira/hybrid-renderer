@@ -5,10 +5,15 @@ in vec2 v_uv;
 uniform sampler2D u_gbuffer_rt0;
 uniform sampler2D u_gbuffer_rt1;
 uniform sampler2D u_gbuffer_depth;
+uniform samplerCube u_skybox_cubemap;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
 uniform float u_exposure;
+
+uniform int u_has_skybox;
+uniform float u_skybox_intensity;
+uniform float u_skybox_yaw_radians;
 
 const int MAX_POINT_LIGHTS = 64;
 const int MAX_DIRECTIONAL_LIGHTS = 16;
@@ -79,6 +84,24 @@ vec3 ReconstructWorldPosition(vec2 uv, float depth)
     return world.xyz;
 }
 
+vec3 ReconstructWorldDirection(vec2 uv)
+{
+    vec4 ndc = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec4 view = u_inv_projection * ndc;
+    vec3 view_direction = normalize(view.xyz / max(view.w, 1e-5));
+    vec3 world_direction = normalize((u_inv_view * vec4(view_direction, 0.0)).xyz);
+    return world_direction;
+}
+
+vec3 RotateAroundY(vec3 direction, float angle_radians)
+{
+    float c = cos(angle_radians);
+    float s = sin(angle_radians);
+    return vec3(c * direction.x + s * direction.z,
+                direction.y,
+                -s * direction.x + c * direction.z);
+}
+
 void main()
 {
     vec4 rt0 = texture(u_gbuffer_rt0, v_uv);
@@ -87,7 +110,19 @@ void main()
 
     if (depth >= 1.0)
     {
-        o_color = vec4(0.0, 0.0, 0.0, 1.0);
+        if (u_has_skybox != 0)
+        {
+            vec3 world_direction = ReconstructWorldDirection(v_uv);
+            world_direction = RotateAroundY(world_direction, u_skybox_yaw_radians);
+            vec3 sky_color = texture(u_skybox_cubemap, world_direction).rgb * max(u_skybox_intensity, 0.0);
+            sky_color = vec3(1.0) - exp(-sky_color * max(u_exposure, 0.0001));
+            sky_color = pow(sky_color, vec3(1.0 / 2.2));
+            o_color = vec4(sky_color, 1.0);
+        }
+        else
+        {
+            o_color = vec4(0.0, 0.0, 0.0, 1.0);
+        }
         return;
     }
 

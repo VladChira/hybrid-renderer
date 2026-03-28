@@ -18,6 +18,10 @@ namespace hybrid::renderer
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_depth = 0;
+        bool has_skybox = false;
+        GlTextureId skybox_cubemap = 0;
+        float skybox_intensity = 1.0f;
+        float skybox_yaw_radians = 0.0f;
     };
 
     struct DeferredLightingPassOutput
