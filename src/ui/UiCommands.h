@@ -83,12 +83,6 @@ namespace hybrid::ui
         float attenuation_quadratic = 1.0f;
     };
 
-    struct EditDirectionalLightCommand
-    {
-        entt::entity entity = entt::null;
-        glm::vec3 direction{0.0f, -1.0f, 0.0f};
-    };
-
     struct EditAreaLightCommand
     {
         entt::entity entity = entt::null;
@@ -169,7 +163,6 @@ namespace hybrid::ui
                                    AddDirectionalLightCommand,
                                    EditLightCommonCommand,
                                    EditPointLightCommand,
-                                   EditDirectionalLightCommand,
                                    EditAreaLightCommand,
                                    EditHdriLightCommand,
                                    MaterialSetScalarCommand,

@@ -5,15 +5,20 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
+#include <cmath>
+
 namespace hybrid::ui
 {
     namespace
     {
+        constexpr float kRotationSyncDotThreshold = 1.0f - 1e-4f;
+
         struct RotationUiState
         {
             float x = 0.0f;
             float y = 0.0f;
             float z = 0.0f;
+            glm::quat source_rotation{1.0f, 0.0f, 0.0f, 0.0f};
             bool initialized = false;
         };
 
@@ -24,6 +29,10 @@ namespace hybrid::ui
             const ImGuiID key_x = ImGui::GetID("TransformRotX");
             const ImGuiID key_y = ImGui::GetID("TransformRotY");
             const ImGuiID key_z = ImGui::GetID("TransformRotZ");
+            const ImGuiID key_qw = ImGui::GetID("TransformRotQW");
+            const ImGuiID key_qx = ImGui::GetID("TransformRotQX");
+            const ImGuiID key_qy = ImGui::GetID("TransformRotQY");
+            const ImGuiID key_qz = ImGui::GetID("TransformRotQZ");
             const ImGuiID key_initialized = ImGui::GetID("TransformRotInitialized");
             ImGui::PopID();
 
@@ -31,6 +40,10 @@ namespace hybrid::ui
             state.x = storage->GetFloat(key_x, 0.0f);
             state.y = storage->GetFloat(key_y, 0.0f);
             state.z = storage->GetFloat(key_z, 0.0f);
+            state.source_rotation.w = storage->GetFloat(key_qw, 1.0f);
+            state.source_rotation.x = storage->GetFloat(key_qx, 0.0f);
+            state.source_rotation.y = storage->GetFloat(key_qy, 0.0f);
+            state.source_rotation.z = storage->GetFloat(key_qz, 0.0f);
             state.initialized = storage->GetBool(key_initialized, false);
             return state;
         }
@@ -42,13 +55,28 @@ namespace hybrid::ui
             const ImGuiID key_x = ImGui::GetID("TransformRotX");
             const ImGuiID key_y = ImGui::GetID("TransformRotY");
             const ImGuiID key_z = ImGui::GetID("TransformRotZ");
+            const ImGuiID key_qw = ImGui::GetID("TransformRotQW");
+            const ImGuiID key_qx = ImGui::GetID("TransformRotQX");
+            const ImGuiID key_qy = ImGui::GetID("TransformRotQY");
+            const ImGuiID key_qz = ImGui::GetID("TransformRotQZ");
             const ImGuiID key_initialized = ImGui::GetID("TransformRotInitialized");
             ImGui::PopID();
 
             storage->SetFloat(key_x, state.x);
             storage->SetFloat(key_y, state.y);
             storage->SetFloat(key_z, state.z);
+            storage->SetFloat(key_qw, state.source_rotation.w);
+            storage->SetFloat(key_qx, state.source_rotation.x);
+            storage->SetFloat(key_qy, state.source_rotation.y);
+            storage->SetFloat(key_qz, state.source_rotation.z);
             storage->SetBool(key_initialized, state.initialized);
+        }
+
+        bool IsSameOrientation(const glm::quat &a, const glm::quat &b)
+        {
+            const glm::quat an = glm::normalize(a);
+            const glm::quat bn = glm::normalize(b);
+            return std::abs(glm::dot(an, bn)) >= kRotationSyncDotThreshold;
         }
 
         glm::quat ApplyEulerDeltaDegrees(const glm::quat &source, const glm::vec3 &delta_degrees)
@@ -115,13 +143,15 @@ namespace hybrid::ui
         const auto &transform = component.local;
 
         float position[3] = {transform.translation.x, transform.translation.y, transform.translation.z};
+        const glm::quat local_rotation = glm::normalize(transform.rotation);
         RotationUiState rotation_state = LoadRotationUiState(entity);
-        if (!rotation_state.initialized)
+        if (!rotation_state.initialized || !IsSameOrientation(local_rotation, rotation_state.source_rotation))
         {
-            const glm::vec3 euler = glm::degrees(glm::eulerAngles(transform.rotation));
+            const glm::vec3 euler = glm::degrees(glm::eulerAngles(local_rotation));
             rotation_state.x = euler.x;
             rotation_state.y = euler.y;
             rotation_state.z = euler.z;
+            rotation_state.source_rotation = local_rotation;
             rotation_state.initialized = true;
         }
         float rotation[3] = {rotation_state.x, rotation_state.y, rotation_state.z};
@@ -163,6 +193,7 @@ namespace hybrid::ui
         rotation_state.x = rotation[0];
         rotation_state.y = rotation[1];
         rotation_state.z = rotation[2];
+        rotation_state.source_rotation = local_rotation;
         rotation_state.initialized = true;
         SaveRotationUiState(entity, rotation_state);
 

@@ -72,8 +72,6 @@ namespace hybrid::core::scene
 
     struct DirectionalLightComponent
     {
-        // Local-space direction used by lighting systems that do not derive from transform.
-        glm::vec3 direction{0.0f, -1.0f, 0.0f};
     };
 
     struct AreaLightComponent

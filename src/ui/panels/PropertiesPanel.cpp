@@ -5,7 +5,6 @@
 #include "ui/UiState.h"
 #include "ui/panels/components/CameraComponentDrawer.h"
 #include "ui/panels/components/CameraTargetComponentDrawer.h"
-#include "ui/panels/components/DirectionalLightComponentDrawer.h"
 #include "ui/panels/components/AreaLightComponentDrawer.h"
 #include "ui/panels/components/HdriLightComponentDrawer.h"
 #include "ui/panels/components/LightCommonComponentDrawer.h"
@@ -124,12 +123,6 @@ namespace hybrid::ui
         if (const auto *point_light = registry.try_get<core::scene::PointLightComponent>(entity))
         {
             DrawPointLightComponent(entity, *point_light, context.commands);
-            drew_any = true;
-        }
-
-        if (const auto *directional_light = registry.try_get<core::scene::DirectionalLightComponent>(entity))
-        {
-            DrawDirectionalLightComponent(entity, *directional_light, context.commands);
             drew_any = true;
         }
 

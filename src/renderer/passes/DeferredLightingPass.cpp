@@ -15,6 +15,7 @@ namespace hybrid::renderer
     namespace
     {
         constexpr int kMaxDeferredPointLights = 64;
+        constexpr int kMaxDeferredDirectionalLights = 16;
     }
 
     struct DeferredLightingPass::Impl
@@ -81,7 +82,35 @@ namespace hybrid::renderer
                                                                          static_cast<size_t>(kMaxDeferredPointLights)));
         m_deferred_shader->SetUniform1i("u_point_light_count", point_light_count);
 
+        const int directional_light_count =
+            static_cast<int>(std::min<size_t>(scene.directional_lights.size(),
+                                              static_cast<size_t>(kMaxDeferredDirectionalLights)));
+        m_deferred_shader->SetUniform1i("u_directional_light_count", directional_light_count);
+
         std::array<char, 96> uniform_name{};
+        for (int light_index = 0; light_index < directional_light_count; ++light_index)
+        {
+            const RenderDirectionalLight &light = scene.directional_lights[static_cast<size_t>(light_index)];
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_directional_lights[%d].direction",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.direction);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_directional_lights[%d].color",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_directional_lights[%d].intensity",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
+        }
+
         for (int light_index = 0; light_index < point_light_count; ++light_index)
         {
             const RenderPointLight &light = scene.point_lights[static_cast<size_t>(light_index)];

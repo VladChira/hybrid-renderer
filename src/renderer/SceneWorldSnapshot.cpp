@@ -10,6 +10,9 @@ namespace hybrid::renderer
 
     namespace
     {
+        // The directional light's direction is derived from its local transform.
+        const glm::vec3 kDirectionalLightLocalAxis = glm::vec3(0.0f, -1.0f, 0.0f);
+
         enum class InstanceBucket
         {
             Opaque,
@@ -173,13 +176,11 @@ namespace hybrid::renderer
         frame_data.directional_lights.reserve(directional_view.size_hint());
         for (const entt::entity entity : directional_view)
         {
-            const auto &[transform, common, directional] =
-                directional_view.get<const core::scene::TransformComponent,
-                                     const core::scene::LightCommonComponent,
-                                     const core::scene::DirectionalLightComponent>(entity);
+            const auto &transform = directional_view.get<const core::scene::TransformComponent>(entity);
+            const auto &common = directional_view.get<const core::scene::LightCommonComponent>(entity);
             RenderDirectionalLight light{};
             light.instance_id = static_cast<uint64_t>(entt::to_integral(entity));
-            light.direction = TransformDirection(transform.world, directional.direction);
+            light.direction = TransformDirection(transform.world, kDirectionalLightLocalAxis);
             light.color = common.color;
             light.intensity = common.intensity;
             light.cast_shadows = common.cast_shadows;

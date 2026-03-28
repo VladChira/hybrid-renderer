@@ -229,19 +229,6 @@ namespace hybrid::core
                             light->attenuation_quadratic = std::max(0.0f, typed_command.attenuation_quadratic);
                         }
                     }
-                    else if constexpr (std::is_same_v<T, ui::EditDirectionalLightCommand>)
-                    {
-                        if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))
-                        {
-                            return;
-                        }
-
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *light = registry.try_get<scene::DirectionalLightComponent>(typed_command.entity))
-                        {
-                            light->direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
-                        }
-                    }
                     else if constexpr (std::is_same_v<T, ui::EditAreaLightCommand>)
                     {
                         if (active_scene_world == nullptr || !active_scene_world->IsValid(typed_command.entity))

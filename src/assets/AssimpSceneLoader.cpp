@@ -24,11 +24,40 @@
 #include <utility>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace hybrid::assets
 {
     namespace
     {
+        glm::quat RotationFromTo(const glm::vec3 &from, const glm::vec3 &to)
+        {
+            const glm::vec3 from_normalized = NormalizeOrDefault(from, glm::vec3(0.0f, -1.0f, 0.0f));
+            const glm::vec3 to_normalized = NormalizeOrDefault(to, glm::vec3(0.0f, -1.0f, 0.0f));
+            const float cosine = glm::clamp(glm::dot(from_normalized, to_normalized), -1.0f, 1.0f);
+
+            if (cosine >= 1.0f - 1e-6f)
+            {
+                return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+
+            if (cosine <= -1.0f + 1e-6f)
+            {
+                const glm::vec3 fallback_axis = std::abs(from_normalized.y) < 0.99f
+                                                    ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                                    : glm::vec3(1.0f, 0.0f, 0.0f);
+                const glm::vec3 axis = NormalizeOrDefault(glm::cross(from_normalized, fallback_axis),
+                                                          glm::vec3(1.0f, 0.0f, 0.0f));
+                return glm::angleAxis(glm::pi<float>(), axis);
+            }
+
+            const glm::vec3 axis = NormalizeOrDefault(glm::cross(from_normalized, to_normalized),
+                                                      glm::vec3(1.0f, 0.0f, 0.0f));
+            const float angle = std::acos(cosine);
+            return glm::angleAxis(angle, axis);
+        }
+
         void AppendNode(const aiNode &node,
                         entt::entity parent_entity,
                         const std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> &mesh_handles,
@@ -192,8 +221,15 @@ namespace hybrid::assets
                 }
                 case aiLightSource_DIRECTIONAL:
                 {
-                    auto &directional = registry.get_or_emplace<hybrid::core::scene::DirectionalLightComponent>(light_entity);
-                    directional.direction = NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+                    registry.get_or_emplace<hybrid::core::scene::DirectionalLightComponent>(light_entity);
+
+                    if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(light_entity))
+                    {
+                        const glm::vec3 imported_direction =
+                            NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+                        transform->local.rotation = RotationFromTo(glm::vec3(0.0f, -1.0f, 0.0f), imported_direction);
+                        transform->dirty = true;
+                    }
                     break;
                 }
                 case aiLightSource_AREA:

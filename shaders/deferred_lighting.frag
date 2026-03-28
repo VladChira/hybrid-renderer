@@ -11,6 +11,7 @@ uniform vec3 u_camera_position;
 uniform float u_exposure;
 
 const int MAX_POINT_LIGHTS = 64;
+const int MAX_DIRECTIONAL_LIGHTS = 16;
 struct PointLight
 {
     vec3 position;
@@ -23,6 +24,15 @@ struct PointLight
 };
 uniform int u_point_light_count;
 uniform PointLight u_point_lights[MAX_POINT_LIGHTS];
+
+struct DirectionalLight
+{
+    vec3 direction;
+    vec3 color;
+    float intensity;
+};
+uniform int u_directional_light_count;
+uniform DirectionalLight u_directional_lights[MAX_DIRECTIONAL_LIGHTS];
 
 out vec4 o_color;
 
@@ -92,6 +102,30 @@ void main()
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
+
+    for (int light_index = 0; light_index < u_directional_light_count; ++light_index)
+    {
+        DirectionalLight light = u_directional_lights[light_index];
+        vec3 L = normalize(-light.direction);
+        float ndotl = max(dot(normal, L), 0.0);
+        if (ndotl <= 0.0)
+        {
+            continue;
+        }
+
+        vec3 radiance = light.color * max(light.intensity, 0.0);
+        vec3 H = normalize(V + L);
+        vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+        float D = DistributionGGX(normal, H, roughness);
+        float G = GeometrySmith(normal, V, L, roughness);
+        vec3 numerator = D * G * F;
+        float denominator = max(4.0 * ndotv * ndotl, 1e-5);
+        vec3 specular = numerator / denominator;
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        vec3 diffuse = kD * albedo / PI;
+        Lo += (diffuse + specular) * radiance * ndotl;
+    }
 
     for (int light_index = 0; light_index < u_point_light_count; ++light_index)
     {
