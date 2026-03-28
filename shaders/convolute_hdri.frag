@@ -5,7 +5,7 @@ in vec3 v_local_position;
 uniform samplerCube u_env_map;
 
 const float PI = 3.14159265359;
-const float MAX_SAMPLE_RADIANCE = 100.0;
+const float MAX_SAMPLE_RADIANCE = 5000.0;
 
 void main()
 {		
