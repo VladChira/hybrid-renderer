@@ -267,7 +267,7 @@ namespace hybrid::assets
             {
                 const entt::entity default_hdri_entity = scene.CreateEntity("Default HDRI");
                 auto &common = registry.emplace<hybrid::core::scene::LightCommonComponent>(default_hdri_entity);
-                common.intensity = 10.0f;
+                common.intensity = 1.0f;
 
                 auto &ambient = registry.emplace<hybrid::core::scene::HdriLightComponent>(default_hdri_entity);
                 ambient.yaw_radians = 0.0f;

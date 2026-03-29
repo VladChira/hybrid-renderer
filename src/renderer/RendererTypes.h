@@ -42,12 +42,23 @@ namespace hybrid::renderer
         Wireframe
     };
 
+    enum class ToneMapper
+    {
+        Legacy = 0,
+        ACES = 1
+    };
+
     struct RenderSettings
     {
         RenderMode mode = RenderMode::Lit;
         RenderExtent render_extent{1920, 1080};
         bool show_bounds = false;
         float exposure = 1.0f;
+        ToneMapper tone_mapper = ToneMapper::ACES;
+        float legacy_curve_strength = 1.0f;
+        float legacy_gamma = 2.2f;
+        float aces_input_scale = 2.0f;
+        float aces_saturation = 1.0f;
     };
 
     struct RenderMeshInstance

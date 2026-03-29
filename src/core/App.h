@@ -33,6 +33,7 @@ namespace hybrid::core
         assets::AssetManager m_assets;
         scene::SceneLoadService m_scene_loader;
         assets::AssetId m_active_scene{};
+        renderer::RenderSettings m_render_settings{};
         bool m_should_quit = false;
     };
 

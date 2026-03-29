@@ -11,6 +11,11 @@ uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
 uniform float u_exposure;
+uniform int u_tonemapper;
+uniform float u_legacy_curve_strength;
+uniform float u_legacy_gamma;
+uniform float u_aces_input_scale;
+uniform float u_aces_saturation;
 
 uniform int u_has_skybox;
 uniform int u_has_irradiance;
@@ -44,6 +49,48 @@ uniform DirectionalLight u_directional_lights[MAX_DIRECTIONAL_LIGHTS];
 out vec4 o_color;
 
 const float PI = 3.14159265359;
+
+// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+vec3 ToneMapACES(vec3 color)
+{
+    // Common ACES fitted curve (Narkowicz approximation).
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
+}
+
+vec3 LinearToSrgb(vec3 color)
+{
+    color = max(color, 0.0);
+    vec3 low = 12.92 * color;
+    vec3 high = 1.055 * pow(color, vec3(1.0 / 2.4)) - 0.055;
+    return mix(low, high, step(vec3(0.0031308), color));
+}
+
+vec3 ApplySaturation(vec3 color, float saturation)
+{
+    const vec3 luma_weights = vec3(0.2126, 0.7152, 0.0722);
+    float luma = dot(color, luma_weights);
+    return mix(vec3(luma), color, max(saturation, 0.0));
+}
+
+vec3 ToneMapAndEncode(vec3 linear_color)
+{
+    vec3 exposed = linear_color * max(u_exposure, 0.0001);
+
+    if (u_tonemapper == 0)
+    {
+        vec3 mapped = vec3(1.0) - exp(-exposed * max(u_legacy_curve_strength, 0.0001));
+        return pow(max(mapped, 0.0), vec3(1.0 / max(u_legacy_gamma, 0.0001)));
+    }
+
+    vec3 mapped = ToneMapACES(exposed * max(u_aces_input_scale, 0.0001));
+    mapped = ApplySaturation(mapped, u_aces_saturation);
+    return LinearToSrgb(mapped);
+}
 
 float DistributionGGX(vec3 N, vec3 H, float roughness)
 {
@@ -122,9 +169,7 @@ void main()
             vec3 world_direction = ReconstructWorldDirection(v_uv);
             world_direction = RotateAroundY(world_direction, u_skybox_yaw_radians);
             vec3 sky_color = texture(u_skybox_cubemap, world_direction).rgb * max(u_skybox_intensity, 0.0);
-            sky_color = vec3(1.0) - exp(-sky_color * max(u_exposure, 0.0001));
-            sky_color = pow(sky_color, vec3(1.0 / 2.2));
-            o_color = vec4(sky_color, 1.0);
+            o_color = vec4(ToneMapAndEncode(sky_color), 1.0);
         }
         else
         {
@@ -222,8 +267,5 @@ void main()
     }
 
     vec3 color = ambient + Lo;
-
-    color = vec3(1.0) - exp(-color * max(u_exposure, 0.0001));
-    color = pow(color, vec3(1.0 / 2.2));
-    o_color = vec4(color, 1.0);
+    o_color = vec4(ToneMapAndEncode(color), 1.0);
 }

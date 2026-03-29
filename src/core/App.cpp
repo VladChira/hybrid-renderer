@@ -132,13 +132,11 @@ namespace hybrid::core
                 active_scene_world->UpdateTransforms();
             }
 
-            renderer::RenderSettings settings{};
-
             renderer::FrameContext frame_context{};
             frame_context.frame_index = frame_index;
             frame_context.delta_seconds = delta_seconds;
             frame_context.time_seconds = elapsed_seconds;
-            frame_context.render_extent = settings.render_extent;
+            frame_context.render_extent = m_render_settings.render_extent;
 
             renderer::RendererOutputs renderer_outputs{};
             renderer::RenderView resolved_view{};
@@ -147,8 +145,8 @@ namespace hybrid::core
             {
                 if (active_scene_world)
                 {
-                    const float aspect = static_cast<float>(std::max(settings.render_extent.width, 1u)) /
-                                         static_cast<float>(std::max(settings.render_extent.height, 1u));
+                    const float aspect = static_cast<float>(std::max(m_render_settings.render_extent.width, 1u)) /
+                                         static_cast<float>(std::max(m_render_settings.render_extent.height, 1u));
                     const scene::SceneCameraView scene_view =
                         scene::ResolvePrimaryCameraView(*active_scene_world, aspect);
 
@@ -163,7 +161,7 @@ namespace hybrid::core
                         resolved_view_valid = true;
                     }
                     resolved_view = view;
-                    renderer.SubmitScene(*active_scene_world, view, settings);
+                    renderer.SubmitScene(*active_scene_world, view, m_render_settings);
                 }
                 renderer_outputs = renderer.EndFrame();
             }
@@ -178,6 +176,7 @@ namespace hybrid::core
             ui_state.viewport_render_extent = frame_context.render_extent;
             ui_state.viewport_render_view = resolved_view;
             ui_state.viewport_render_view_valid = resolved_view_valid;
+            ui_state.render_settings = &m_render_settings;
 
             ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
             ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);

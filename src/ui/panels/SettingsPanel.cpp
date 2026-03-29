@@ -9,6 +9,19 @@ namespace hybrid::ui
 
     namespace
     {
+        const char *ToneMapperLabel(renderer::ToneMapper tone_mapper)
+        {
+            switch (tone_mapper)
+            {
+            case renderer::ToneMapper::Legacy:
+                return "Legacy";
+            case renderer::ToneMapper::ACES:
+                return "ACES";
+            }
+
+            return "Unknown";
+        }
+
         const char *VisualizationLabel(UiViewportVisualization visualization)
         {
             switch (visualization)
@@ -56,6 +69,40 @@ namespace hybrid::ui
         ImGui::TextUnformatted("Current:");
         ImGui::SameLine();
         ImGui::TextUnformatted(VisualizationLabel(*context.viewport_visualization));
+
+        renderer::RenderSettings *render_settings = context.state->render_settings;
+        if (render_settings == nullptr)
+        {
+            return;
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("Tone Mapping");
+
+        int tone_mapper_index = static_cast<int>(render_settings->tone_mapper);
+        const char *tone_mapper_options[] = {"Legacy", "ACES"};
+        if (ImGui::Combo("Tonemapper", &tone_mapper_index, tone_mapper_options, IM_ARRAYSIZE(tone_mapper_options)))
+        {
+            render_settings->tone_mapper = static_cast<renderer::ToneMapper>(tone_mapper_index);
+        }
+
+        ImGui::SliderFloat("Exposure", &render_settings->exposure, 0.01f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+
+        if (render_settings->tone_mapper == renderer::ToneMapper::Legacy)
+        {
+            ImGui::SliderFloat("Curve Strength", &render_settings->legacy_curve_strength, 0.1f, 4.0f, "%.3f");
+
+            ImGui::SliderFloat("Gamma", &render_settings->legacy_gamma, 1.0f, 3.0f, "%.3f");
+        }
+        else
+        {
+            ImGui::SliderFloat("Input Scale", &render_settings->aces_input_scale, 0.1f, 3.0f, "%.3f");
+
+            ImGui::SliderFloat("Saturation", &render_settings->aces_saturation, 0.0f, 2.0f, "%.3f");
+        }
     }
 
 } // namespace hybrid::ui

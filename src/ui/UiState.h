@@ -71,6 +71,7 @@ namespace hybrid::ui
         renderer::RenderExtent viewport_render_extent{};
         renderer::RenderView viewport_render_view{};
         bool viewport_render_view_valid = false;
+        renderer::RenderSettings *render_settings = nullptr;
     };
 
 } // namespace hybrid::ui

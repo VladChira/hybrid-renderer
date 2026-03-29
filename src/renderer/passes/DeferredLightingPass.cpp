@@ -79,6 +79,11 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
         m_deferred_shader->SetUniform1f("u_exposure", settings.exposure);
+        m_deferred_shader->SetUniform1i("u_tonemapper", static_cast<int>(settings.tone_mapper));
+        m_deferred_shader->SetUniform1f("u_legacy_curve_strength", settings.legacy_curve_strength);
+        m_deferred_shader->SetUniform1f("u_legacy_gamma", settings.legacy_gamma);
+        m_deferred_shader->SetUniform1f("u_aces_input_scale", settings.aces_input_scale);
+        m_deferred_shader->SetUniform1f("u_aces_saturation", settings.aces_saturation);
         const bool has_skybox_cubemap = input.has_skybox && input.skybox_cubemap != 0;
         const bool has_irradiance_cubemap = input.has_skybox && input.convoluted_cubemap != 0;
         m_deferred_shader->SetUniform1i("u_has_skybox", has_skybox_cubemap ? 1 : 0);

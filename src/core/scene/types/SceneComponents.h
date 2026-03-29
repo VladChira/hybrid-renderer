@@ -58,7 +58,7 @@ namespace hybrid::core::scene
     struct LightCommonComponent
     {
         glm::vec3 color{1.0f};
-        float intensity = 30.0f;
+        float intensity = 10.0f;
         bool cast_shadows = true;
     };
 
