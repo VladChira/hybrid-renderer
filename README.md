@@ -28,6 +28,9 @@ Use the “x64 Native Tools Command Prompt for VS 2022” (or otherwise ensure t
 
 ## Progress images
 
+<p align="center"><img src="images/snapshot-8.png" width="700"/></p>
+<p align="center">Specular HDRI, performance telemetry, profiling with tracy</p>
+
 <p align="center"><img src="images/snapshot-7.png" width="700"/></p>
 <p align="center">Diffuse HDRI</p>
 
