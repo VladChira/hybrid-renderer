@@ -1,6 +1,7 @@
 #include "renderer/Renderer.h"
 
 #include "core/Log.h"
+#include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
 #include "renderer/FrameResources.h"
 #include "renderer/OpenGLRenderBackend.h"
@@ -61,6 +62,7 @@ namespace hybrid::renderer
 
         bool initialized = false;
         std::chrono::steady_clock::time_point frame_start{};
+        bool tracy_gpu_context_initialized = false;
     };
 
     Renderer::Renderer()
@@ -75,6 +77,8 @@ namespace hybrid::renderer
 
     bool Renderer::Init()
     {
+        HYBRID_PROFILE_ZONE_N("Renderer::Init");
+
         if (glfwGetCurrentContext() == nullptr)
         {
             LOG_ERROR("[Renderer] Init failed: no current OpenGL context");
@@ -88,6 +92,11 @@ namespace hybrid::renderer
         }
 
         glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+        if (!m_impl->tracy_gpu_context_initialized)
+        {
+            HYBRID_PROFILE_GL_CONTEXT();
+            m_impl->tracy_gpu_context_initialized = true;
+        }
 
         if (!m_impl->shader_manager.CompileProgramFromFiles("gbuffer.vert",
                                                             "gbuffer.frag",
@@ -208,6 +217,8 @@ namespace hybrid::renderer
 
     bool Renderer::BeginFrame(const FrameContext &frame)
     {
+        HYBRID_PROFILE_ZONE_N("Renderer::BeginFrame");
+
         if (!m_impl->initialized)
         {
             return false;
@@ -257,6 +268,8 @@ namespace hybrid::renderer
 
     RendererOutputs Renderer::EndFrame()
     {
+        HYBRID_PROFILE_ZONE_N("Renderer::EndFrame");
+
         if (!m_impl->initialized)
         {
             return {};
@@ -264,6 +277,7 @@ namespace hybrid::renderer
 
         if (m_impl->submitted_scene_world != nullptr)
         {
+            HYBRID_PROFILE_ZONE_N("Renderer::BuildFrameSceneData");
             m_impl->scene_data = BuildFrameSceneData(*m_impl->submitted_scene_world);
         }
         else
@@ -276,15 +290,44 @@ namespace hybrid::renderer
             static_cast<uint32_t>(m_impl->scene_data.opaque_mesh_instances.size() +
                                   m_impl->scene_data.masked_mesh_instances.size() +
                                   m_impl->scene_data.blended_mesh_instances.size());
+        m_impl->stats.submitted_primitives = 0;
+        m_impl->stats.submitted_vertices = 0;
+        m_impl->stats.submitted_triangles = 0;
+        {
+            auto accumulate_mesh_batch = [this](const std::vector<RenderMeshInstance> &instances)
+            {
+                for (const RenderMeshInstance &instance : instances)
+                {
+                    const core::scene::MeshAsset *mesh = instance.mesh.Get();
+                    if (mesh == nullptr)
+                    {
+                        continue;
+                    }
+
+                    for (const core::scene::MeshPrimitive &primitive : mesh->primitives)
+                    {
+                        m_impl->stats.submitted_primitives++;
+                        m_impl->stats.submitted_vertices += static_cast<uint64_t>(primitive.vertices.size());
+                        m_impl->stats.submitted_triangles += static_cast<uint64_t>(primitive.indices.size() / 3u);
+                    }
+                }
+            };
+
+            accumulate_mesh_batch(m_impl->scene_data.opaque_mesh_instances);
+            accumulate_mesh_batch(m_impl->scene_data.masked_mesh_instances);
+            accumulate_mesh_batch(m_impl->scene_data.blended_mesh_instances);
+        }
 
         m_impl->outputs = BuildOutputs(m_impl->frame_resources);
 
         if (m_impl->gbuffer_pass)
         {
+            HYBRID_PROFILE_ZONE_N("Renderer::GBufferPass");
             GBufferPassInput gbuffer_input{};
             gbuffer_input.settings = &m_impl->submitted_settings;
             gbuffer_input.scene_data = &m_impl->scene_data;
             gbuffer_input.effective_view = &m_impl->effective_view;
+            gbuffer_input.renderer_stats = &m_impl->stats;
             gbuffer_input.gbuffer_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::GBuffer);
             gbuffer_input.gbuffer_rt0 = m_impl->frame_resources.Get(FrameTarget::GBufferRt0);
             gbuffer_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
@@ -309,6 +352,7 @@ namespace hybrid::renderer
         HdriPrecomputePassOutput hdri_output{};
         if (m_impl->hdri_precompute_pass)
         {
+            HYBRID_PROFILE_ZONE_N("Renderer::HdriPrecomputePass");
             HdriPrecomputePassInput hdri_input{};
             hdri_input.scene_data = &m_impl->scene_data;
             hdri_input.settings = &m_impl->submitted_settings;
@@ -321,6 +365,7 @@ namespace hybrid::renderer
         
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
+            HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
             deferred_input.scene_data = &m_impl->scene_data;
@@ -351,6 +396,7 @@ namespace hybrid::renderer
         }
 
         m_impl->backend.EndFrame();
+        HYBRID_PROFILE_GL_COLLECT();
 
         const auto frame_end = std::chrono::steady_clock::now();
         m_impl->stats.cpu_frame_ms =

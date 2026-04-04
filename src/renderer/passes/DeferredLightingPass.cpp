@@ -1,5 +1,6 @@
 #include "renderer/passes/DeferredLightingPass.h"
 
+#include "core/Profiling.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLVertexArray.h"
 
@@ -38,6 +39,9 @@ namespace hybrid::renderer
 
     bool DeferredLightingPass::Execute(const DeferredLightingPassInput &input, DeferredLightingPassOutput &output)
     {
+        HYBRID_PROFILE_ZONE_N("DeferredLightingPass::Execute");
+        HYBRID_PROFILE_GL_ZONE("DeferredLightingPass");
+
         if (m_deferred_shader == nullptr ||
             m_impl == nullptr ||
             input.settings == nullptr ||

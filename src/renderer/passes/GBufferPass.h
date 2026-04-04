@@ -13,6 +13,7 @@ namespace hybrid::renderer
         const RenderSettings *settings = nullptr;
         const FrameSceneData *scene_data = nullptr;
         const RenderView *effective_view = nullptr;
+        RendererStats *renderer_stats = nullptr;
         uint32_t gbuffer_framebuffer_id = 0;
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;

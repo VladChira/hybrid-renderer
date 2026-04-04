@@ -8,6 +8,7 @@ project(HybridRenderer LANGUAGES C CXX)
 option(HYBRID_BUILD_EDITOR "Build the editor application" ON)
 option(HYBRID_BUILD_TESTS  "Build tests" ON)
 option(HYBRID_IMGUI_DEMO   "Compile imgui_demo.cpp into ImGui library" OFF)
+option(HYBRID_ENABLE_TRACY "Enable Tracy profiling instrumentation" ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -55,6 +56,12 @@ find_package(glm CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+if(HYBRID_ENABLE_TRACY)
+  find_package(Tracy CONFIG QUIET)
+  if(NOT Tracy_FOUND)
+    find_package(unofficial-tracy CONFIG QUIET)
+  endif()
+endif()
 
 # Helper: resolve varying exported target names into stable wrapper targets.
 function(hybrid_require_target out_var)
@@ -128,6 +135,7 @@ target_sources(hybrid_engine PRIVATE
 
   src/core/App.cpp
   src/core/Log.cpp
+  src/core/PerformanceTelemetry.cpp
   src/core/ResourceMonitor.cpp
   src/core/UiCommandProcessor.cpp
   src/core/scene/SceneLoadService.cpp
@@ -196,7 +204,19 @@ target_include_directories(hybrid_engine
 
 target_compile_definitions(hybrid_engine PRIVATE
   HYBRID_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+  $<$<BOOL:${HYBRID_ENABLE_TRACY}>:HYBRID_ENABLE_TRACY=1>
 )
+
+if(HYBRID_ENABLE_TRACY)
+  hybrid_require_target(_HYBRID_TRACY_TGT
+    Tracy::TracyClient
+    Tracy::TracyClientStatic
+    tracy::TracyClient
+    unofficial::tracy::tracy-client
+    unofficial::tracy::tracy
+  )
+  target_link_libraries(hybrid_engine PRIVATE "${_HYBRID_TRACY_TGT}")
+endif()
 
 
 if(HYBRID_BUILD_EDITOR)

@@ -2,6 +2,7 @@
 
 #include "assets/ImageAsset.h"
 #include "core/Log.h"
+#include "core/Profiling.h"
 #include "renderer/opengl/GLFramebuffer.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLTexture.h"
@@ -148,6 +149,9 @@ namespace hybrid::renderer
 
     bool HdriPrecomputePass::Execute(const HdriPrecomputePassInput &input, HdriPrecomputePassOutput &output)
     {
+        HYBRID_PROFILE_ZONE_N("HdriPrecomputePass::Execute");
+        HYBRID_PROFILE_GL_ZONE("HdriPrecomputePass");
+
         if (m_impl == nullptr ||
             m_equirect_to_cubemap_shader == nullptr ||
             m_convolute_shader == nullptr ||

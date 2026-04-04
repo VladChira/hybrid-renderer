@@ -142,10 +142,22 @@ namespace hybrid::renderer
 
     struct RendererStats
     {
+        struct GBufferStats
+        {
+            uint32_t draw_calls = 0;
+            uint32_t uniform_updates = 0;
+            uint32_t texture_binds = 0;
+            uint32_t primitive_cache_misses = 0;
+            uint32_t texture_cache_misses = 0;
+            uint32_t primitive_uploads = 0;
+            uint32_t texture_uploads = 0;
+        };
+
         uint32_t submitted_mesh_instances = 0;
         uint32_t submitted_primitives = 0;
         uint64_t submitted_vertices = 0;
         uint64_t submitted_triangles = 0;
+        GBufferStats gbuffer{};
         double cpu_frame_ms = 0.0;
     };
 

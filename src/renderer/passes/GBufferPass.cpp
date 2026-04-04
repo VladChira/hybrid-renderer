@@ -1,5 +1,6 @@
 #include "renderer/passes/GBufferPass.h"
 
+#include "core/Profiling.h"
 #include "renderer/opengl/GLBuffer.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLTexture.h"
@@ -451,6 +452,9 @@ namespace hybrid::renderer
 
     bool GBufferPass::Execute(const GBufferPassInput &input, GBufferPassOutput &output)
     {
+        HYBRID_PROFILE_ZONE_N("GBufferPass::Execute");
+        HYBRID_PROFILE_GL_ZONE("GBufferPass");
+
         if (m_gbuffer_shader == nullptr ||
             m_impl == nullptr ||
             input.scene_data == nullptr ||
@@ -464,7 +468,11 @@ namespace hybrid::renderer
         const FrameSceneData &scene = *input.scene_data;
         const RenderView &effective_view = *input.effective_view;
         const RenderSettings &settings = *input.settings;
+        RendererStats::GBufferStats *gbuffer_stats =
+            input.renderer_stats != nullptr ? &input.renderer_stats->gbuffer : nullptr;
 
+        {
+            HYBRID_PROFILE_ZONE_N("GBufferPass::Setup");
         glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
         glViewport(0, 0,
                    static_cast<GLsizei>(settings.render_extent.width),
@@ -487,9 +495,11 @@ namespace hybrid::renderer
         m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
         m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
         m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
+        }
 
         if (!m_impl->white_texture_initialized)
         {
+            HYBRID_PROFILE_ZONE_N("GBufferPass::InitWhiteTexture");
             constexpr uint8_t kWhiteRgba[4] = {255, 255, 255, 255};
             m_impl->white_texture.Bind();
             m_impl->white_texture.SetParameter(GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -502,6 +512,7 @@ namespace hybrid::renderer
 
         if (!m_impl->flat_normal_texture_initialized)
         {
+            HYBRID_PROFILE_ZONE_N("GBufferPass::InitFlatNormalTexture");
             // Tangent-space (0,0,1) encoded to [0,1] range.
             constexpr uint8_t kFlatNormalRgba[4] = {128, 128, 255, 255};
             m_impl->flat_normal_texture.Bind();
@@ -532,10 +543,20 @@ namespace hybrid::renderer
                 auto gpu_it = m_impl->primitive_cache.find(key);
                 if (gpu_it == m_impl->primitive_cache.end())
                 {
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->primitive_cache_misses++;
+                    }
+
+                    HYBRID_PROFILE_ZONE_N("GBufferPass::UploadPrimitiveCacheMiss");
                     CachedPrimitiveGpu cached_primitive{};
                     if (!UploadPrimitiveToGpu(primitive, cached_primitive))
                     {
                         continue;
+                    }
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->primitive_uploads++;
                     }
                     gpu_it = m_impl->primitive_cache.emplace(key, std::move(cached_primitive)).first;
                 }
@@ -558,6 +579,11 @@ namespace hybrid::renderer
                 m_gbuffer_shader->SetUniform1i("u_normal_texcoord", ResolvePrimitiveNormalTexcoord(primitive));
                 m_gbuffer_shader->SetUniform1f("u_normal_scale", ResolvePrimitiveNormalScale(primitive));
                 m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
+                if (gbuffer_stats != nullptr)
+                {
+                    // Logical count of per-draw uniform writes we issue.
+                    gbuffer_stats->uniform_updates += 12;
+                }
 
                 bool has_base_color_texture = false;
                 if (const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive); base_color_texture != nullptr)
@@ -568,9 +594,19 @@ namespace hybrid::renderer
                         auto cached_texture_it = m_impl->texture_cache.find(image_id);
                         if (cached_texture_it == m_impl->texture_cache.end())
                         {
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_cache_misses++;
+                            }
+
+                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadBaseColorTextureCacheMiss");
                             CachedTextureGpu texture_gpu{};
                             if (UploadTextureToGpu(*base_color_texture, texture_gpu))
                             {
+                                if (gbuffer_stats != nullptr)
+                                {
+                                    gbuffer_stats->texture_uploads++;
+                                }
                                 cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
                             }
                         }
@@ -579,6 +615,10 @@ namespace hybrid::renderer
                         {
                             cached_texture_it->second.texture.BindToUnit(0);
                             has_base_color_texture = true;
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_binds++;
+                            }
                         }
                     }
                 }
@@ -586,8 +626,16 @@ namespace hybrid::renderer
                 if (!has_base_color_texture)
                 {
                     m_impl->white_texture.BindToUnit(0);
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->texture_binds++;
+                    }
                 }
                 m_gbuffer_shader->SetUniform1i("u_has_base_color_texture", has_base_color_texture ? 1 : 0);
+                if (gbuffer_stats != nullptr)
+                {
+                    gbuffer_stats->uniform_updates++;
+                }
 
                 bool has_metallic_roughness_texture = false;
                 if (const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
@@ -599,9 +647,19 @@ namespace hybrid::renderer
                         auto cached_texture_it = m_impl->texture_cache.find(image_id);
                         if (cached_texture_it == m_impl->texture_cache.end())
                         {
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_cache_misses++;
+                            }
+
+                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadMetallicRoughnessTextureCacheMiss");
                             CachedTextureGpu texture_gpu{};
                             if (UploadTextureToGpu(*metallic_roughness_texture, texture_gpu))
                             {
+                                if (gbuffer_stats != nullptr)
+                                {
+                                    gbuffer_stats->texture_uploads++;
+                                }
                                 cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
                             }
                         }
@@ -610,6 +668,10 @@ namespace hybrid::renderer
                         {
                             cached_texture_it->second.texture.BindToUnit(1);
                             has_metallic_roughness_texture = true;
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_binds++;
+                            }
                         }
                     }
                 }
@@ -617,8 +679,16 @@ namespace hybrid::renderer
                 if (!has_metallic_roughness_texture)
                 {
                     m_impl->white_texture.BindToUnit(1);
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->texture_binds++;
+                    }
                 }
                 m_gbuffer_shader->SetUniform1i("u_has_metallic_roughness_texture", has_metallic_roughness_texture ? 1 : 0);
+                if (gbuffer_stats != nullptr)
+                {
+                    gbuffer_stats->uniform_updates++;
+                }
 
                 bool has_normal_texture = false;
                 if (const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive); normal_texture != nullptr)
@@ -629,9 +699,19 @@ namespace hybrid::renderer
                         auto cached_texture_it = m_impl->texture_cache.find(image_id);
                         if (cached_texture_it == m_impl->texture_cache.end())
                         {
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_cache_misses++;
+                            }
+
+                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadNormalTextureCacheMiss");
                             CachedTextureGpu texture_gpu{};
                             if (UploadTextureToGpu(*normal_texture, texture_gpu))
                             {
+                                if (gbuffer_stats != nullptr)
+                                {
+                                    gbuffer_stats->texture_uploads++;
+                                }
                                 cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
                             }
                         }
@@ -640,6 +720,10 @@ namespace hybrid::renderer
                         {
                             cached_texture_it->second.texture.BindToUnit(2);
                             has_normal_texture = true;
+                            if (gbuffer_stats != nullptr)
+                            {
+                                gbuffer_stats->texture_binds++;
+                            }
                         }
                     }
                 }
@@ -647,15 +731,30 @@ namespace hybrid::renderer
                 if (!has_normal_texture)
                 {
                     m_impl->flat_normal_texture.BindToUnit(2);
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->texture_binds++;
+                    }
                 }
                 m_gbuffer_shader->SetUniform1i("u_has_normal_texture", has_normal_texture ? 1 : 0);
+                if (gbuffer_stats != nullptr)
+                {
+                    gbuffer_stats->uniform_updates++;
+                }
 
                 gpu.vao.Bind();
                 glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);
+                if (gbuffer_stats != nullptr)
+                {
+                    gbuffer_stats->draw_calls++;
+                }
             }
         };
 
-        ForEachOpaqueAndMaskedMeshInstance(scene, draw_instance);
+        {
+            HYBRID_PROFILE_ZONE_N("GBufferPass::DrawOpaqueMasked");
+            ForEachOpaqueAndMaskedMeshInstance(scene, draw_instance);
+        }
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();

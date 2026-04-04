@@ -9,6 +9,8 @@
 #include "core/scene/SceneWorld.h"
 #include "core/scene/SceneCameraResolver.h"
 #include "core/Log.h"
+#include "core/Profiling.h"
+#include "core/PerformanceTelemetry.h"
 #include "core/UiCommandProcessor.h"
 #include "ui/UiStateUtils.h"
 
@@ -31,6 +33,13 @@ namespace hybrid::core
     {
         Log::Init();
         LOG_INFO("Starting Hybrid Renderer...");
+        PerformanceTelemetry::Init();
+
+#if defined(HYBRID_ENABLE_TRACY) && HYBRID_ENABLE_TRACY
+        LOG_INFO("Profiling: Tracy ENABLED");
+#else
+        LOG_INFO("Profiling: Tracy DISABLED");
+#endif
 
         if (const std::string banner = utils::LoadBannerText(); !banner.empty())
         {
@@ -76,7 +85,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/spheres/MetalRoughSpheres.gltf");
+        RequestSceneLoad("scenes/sponza_low/Sponza.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -86,6 +95,7 @@ namespace hybrid::core
         ui.Shutdown();
         renderer.Shutdown();
         platform.Shutdown();
+        PerformanceTelemetry::Shutdown();
 
         LOG_WARN("----------------- Shutting down, goodbye! -----------------");
 
@@ -102,6 +112,7 @@ namespace hybrid::core
 
         while (!m_should_quit && !platform.ShouldClose())
         {
+            HYBRID_PROFILE_ZONE_N("App::Frame");
             platform.PollEvents();
             ProcessPlatformEvents(platform.Events());
 
@@ -166,6 +177,24 @@ namespace hybrid::core
                 renderer_outputs = renderer.EndFrame();
             }
 
+            const renderer::RendererStats &renderer_stats = renderer.GetStats();
+            const double fps = delta_seconds > 1e-6f ? 1.0 / static_cast<double>(delta_seconds) : 0.0;
+            FramePerformanceSample frame_sample{};
+            frame_sample.time_seconds = elapsed_seconds;
+            frame_sample.renderer_cpu_frame_ms = renderer_stats.cpu_frame_ms;
+            frame_sample.fps = fps;
+            frame_sample.draw_calls = renderer_stats.gbuffer.draw_calls;
+            frame_sample.submitted_primitives = renderer_stats.submitted_primitives;
+            frame_sample.submitted_vertices = renderer_stats.submitted_vertices;
+            frame_sample.submitted_triangles = renderer_stats.submitted_triangles;
+            frame_sample.gbuffer_uniform_updates = renderer_stats.gbuffer.uniform_updates;
+            frame_sample.gbuffer_texture_binds = renderer_stats.gbuffer.texture_binds;
+            frame_sample.gbuffer_primitive_cache_misses = renderer_stats.gbuffer.primitive_cache_misses;
+            frame_sample.gbuffer_texture_cache_misses = renderer_stats.gbuffer.texture_cache_misses;
+            frame_sample.gbuffer_primitive_uploads = renderer_stats.gbuffer.primitive_uploads;
+            frame_sample.gbuffer_texture_uploads = renderer_stats.gbuffer.texture_uploads;
+            PerformanceTelemetry::RecordFrameSample(frame_sample);
+
             ui::UiState ui_state{};
             ui_state.scene_world = active_scene_world;
             ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
@@ -182,6 +211,7 @@ namespace hybrid::core
             ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
 
             platform.SwapBuffers();
+            HYBRID_PROFILE_FRAME();
         }
     }
 

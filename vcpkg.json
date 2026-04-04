@@ -7,6 +7,13 @@
     "assimp",
     "glm",
     "gtest",
-    "spdlog"
+    "spdlog",
+    "tracy"
+  ],
+  "overrides": [
+    {
+      "name": "tracy",
+      "version": "0.13.1"
+    }
   ]
 }
