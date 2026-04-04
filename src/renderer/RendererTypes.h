@@ -59,6 +59,13 @@ namespace hybrid::renderer
         float legacy_gamma = 2.2f;
         float aces_input_scale = 2.0f;
         float aces_saturation = 1.0f;
+
+        // HDRI precompute controls (diffuse/specular IBL assets).
+        uint32_t hdri_env_cubemap_size = 512;
+        uint32_t hdri_irradiance_cubemap_size = 32;
+        uint32_t hdri_prefilter_cubemap_size = 128;
+        uint32_t hdri_prefilter_mip_levels = 5;
+        uint32_t hdri_brdf_lut_size = 512;
     };
 
     struct RenderMeshInstance

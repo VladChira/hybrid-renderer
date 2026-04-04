@@ -7,6 +7,7 @@
 #include "renderer/opengl/GLTexture.h"
 #include "renderer/opengl/GLVertexArray.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -20,11 +21,47 @@ namespace hybrid::renderer
 {
     namespace
     {
-        constexpr uint32_t kSkyboxCubemapSize = 512;
-        constexpr uint32_t kConvolutionSize = 32;
-        constexpr uint32_t kPrefilterCubemapSize = 128;
-        constexpr uint32_t kPrefilterMipLevels = 5;
-        constexpr uint32_t kBrdfLutSize = 512;
+        struct HdriBakeSettings
+        {
+            uint32_t env_cubemap_size = 512;
+            uint32_t irradiance_cubemap_size = 32;
+            uint32_t prefilter_cubemap_size = 128;
+            uint32_t prefilter_mip_levels = 5;
+            uint32_t brdf_lut_size = 512;
+
+            bool operator==(const HdriBakeSettings &other) const noexcept
+            {
+                return env_cubemap_size == other.env_cubemap_size &&
+                       irradiance_cubemap_size == other.irradiance_cubemap_size &&
+                       prefilter_cubemap_size == other.prefilter_cubemap_size &&
+                       prefilter_mip_levels == other.prefilter_mip_levels &&
+                       brdf_lut_size == other.brdf_lut_size;
+            }
+        };
+
+        uint32_t MaxMipLevelsForSize(uint32_t size)
+        {
+            uint32_t levels = 0;
+            while (size > 0)
+            {
+                ++levels;
+                size >>= 1u;
+            }
+            return std::max(levels, 1u);
+        }
+
+        HdriBakeSettings SanitizeHdriBakeSettings(const RenderSettings &settings)
+        {
+            HdriBakeSettings result{};
+            result.env_cubemap_size = std::clamp(settings.hdri_env_cubemap_size, 16u, 4096u);
+            result.irradiance_cubemap_size = std::clamp(settings.hdri_irradiance_cubemap_size, 4u, 1024u);
+            result.prefilter_cubemap_size = std::clamp(settings.hdri_prefilter_cubemap_size, 16u, 4096u);
+            result.brdf_lut_size = std::clamp(settings.hdri_brdf_lut_size, 16u, 4096u);
+
+            const uint32_t max_prefilter_mips = MaxMipLevelsForSize(result.prefilter_cubemap_size);
+            result.prefilter_mip_levels = std::clamp(settings.hdri_prefilter_mip_levels, 1u, max_prefilter_mips);
+            return result;
+        }
 
         struct IBLCacheKey
         {
@@ -86,6 +123,8 @@ namespace hybrid::renderer
         std::unordered_map<uint64_t, SourceTextureGpu> source_texture_cache{};
         GLFramebuffer capture_fbo{};
         GLVertexArray cube_vao{};
+        HdriBakeSettings last_bake_settings{};
+        bool has_last_bake_settings = false;
     };
 
     HdriPrecomputePass::HdriPrecomputePass(GLShaderProgram *equirect_to_cubemap_shader,
@@ -114,12 +153,21 @@ namespace hybrid::renderer
             m_convolute_shader == nullptr ||
             m_prefilter_shader == nullptr ||
             m_brdf_lut_shader == nullptr ||
-            input.scene_data == nullptr)
+            input.scene_data == nullptr ||
+            input.settings == nullptr)
         {
             return false;
         }
 
         output = {};
+        const HdriBakeSettings bake_settings = SanitizeHdriBakeSettings(*input.settings);
+        if (!m_impl->has_last_bake_settings || !(m_impl->last_bake_settings == bake_settings))
+        {
+            m_impl->ibl_cache.clear();
+            m_impl->last_bake_settings = bake_settings;
+            m_impl->has_last_bake_settings = true;
+            LOG_INFO("[HdriPrecomputePass] Cleared IBL cache after HDRI bake settings change.");
+        }
 
         const RenderHdriLight *selected_light = nullptr;
         for (const RenderHdriLight &hdri_light : input.scene_data->hdri_lights)
@@ -244,8 +292,8 @@ namespace hybrid::renderer
             glTexStorage2D(GL_TEXTURE_CUBE_MAP,
                            1,
                            GL_RGBA16F,
-                           static_cast<GLsizei>(kSkyboxCubemapSize),
-                           static_cast<GLsizei>(kSkyboxCubemapSize));
+                           static_cast<GLsizei>(bake_settings.env_cubemap_size),
+                           static_cast<GLsizei>(bake_settings.env_cubemap_size));
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
@@ -288,7 +336,10 @@ namespace hybrid::renderer
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
         m_impl->capture_fbo.SetDrawBuffers({GL_COLOR_ATTACHMENT0});
 
-        glViewport(0, 0, static_cast<GLsizei>(kSkyboxCubemapSize), static_cast<GLsizei>(kSkyboxCubemapSize));
+        glViewport(0,
+                   0,
+                   static_cast<GLsizei>(bake_settings.env_cubemap_size),
+                   static_cast<GLsizei>(bake_settings.env_cubemap_size));
         glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
@@ -343,8 +394,8 @@ namespace hybrid::renderer
             glTexStorage2D(GL_TEXTURE_CUBE_MAP,
                            1,
                            GL_RGBA16F,
-                           static_cast<GLsizei>(kConvolutionSize),
-                           static_cast<GLsizei>(kConvolutionSize));
+                           static_cast<GLsizei>(bake_settings.irradiance_cubemap_size),
+                           static_cast<GLsizei>(bake_settings.irradiance_cubemap_size));
             cached.convoluted_cubemap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             cached.convoluted_cubemap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             cached.convoluted_cubemap.SetParameter(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
@@ -363,7 +414,10 @@ namespace hybrid::renderer
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
         m_impl->capture_fbo.SetDrawBuffers({GL_COLOR_ATTACHMENT0});
 
-        glViewport(0, 0, static_cast<GLsizei>(kConvolutionSize), static_cast<GLsizei>(kConvolutionSize));
+        glViewport(0,
+                   0,
+                   static_cast<GLsizei>(bake_settings.irradiance_cubemap_size),
+                   static_cast<GLsizei>(bake_settings.irradiance_cubemap_size));
         glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
@@ -416,10 +470,10 @@ namespace hybrid::renderer
 
             cached.prefiltered_cubemap.Bind();
             glTexStorage2D(GL_TEXTURE_CUBE_MAP,
-                           static_cast<GLsizei>(kPrefilterMipLevels),
+                           static_cast<GLsizei>(bake_settings.prefilter_mip_levels),
                            GL_RGBA16F,
-                           static_cast<GLsizei>(kPrefilterCubemapSize),
-                           static_cast<GLsizei>(kPrefilterCubemapSize));
+                           static_cast<GLsizei>(bake_settings.prefilter_cubemap_size),
+                           static_cast<GLsizei>(bake_settings.prefilter_cubemap_size));
             cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
@@ -450,17 +504,17 @@ namespace hybrid::renderer
         cached.environment_cubemap.BindToUnit(0);
         m_impl->cube_vao.Bind();
 
-        for (uint32_t mip_level = 0; mip_level < kPrefilterMipLevels; ++mip_level)
+        for (uint32_t mip_level = 0; mip_level < bake_settings.prefilter_mip_levels; ++mip_level)
         {
-            const uint32_t mip_size = kPrefilterCubemapSize >> mip_level;
+            const uint32_t mip_size = bake_settings.prefilter_cubemap_size >> mip_level;
             if (mip_size == 0)
             {
                 break;
             }
 
             glViewport(0, 0, static_cast<GLsizei>(mip_size), static_cast<GLsizei>(mip_size));
-            const float roughness = (kPrefilterMipLevels > 1)
-                                        ? static_cast<float>(mip_level) / static_cast<float>(kPrefilterMipLevels - 1)
+            const float roughness = (bake_settings.prefilter_mip_levels > 1)
+                                        ? static_cast<float>(mip_level) / static_cast<float>(bake_settings.prefilter_mip_levels - 1)
                                         : 0.0f;
             m_prefilter_shader->SetUniform1f("u_roughness", roughness);
 
@@ -506,8 +560,8 @@ namespace hybrid::renderer
             cached.brdf_lut.Bind();
             cached.brdf_lut.SetImage2D(0,
                                        GL_RG16F,
-                                       static_cast<GLsizei>(kBrdfLutSize),
-                                       static_cast<GLsizei>(kBrdfLutSize),
+                                       static_cast<GLsizei>(bake_settings.brdf_lut_size),
+                                       static_cast<GLsizei>(bake_settings.brdf_lut_size),
                                        GL_RG,
                                        GL_FLOAT,
                                        nullptr);
@@ -535,7 +589,10 @@ namespace hybrid::renderer
             return true;
         }
 
-        glViewport(0, 0, static_cast<GLsizei>(kBrdfLutSize), static_cast<GLsizei>(kBrdfLutSize));
+        glViewport(0,
+                   0,
+                   static_cast<GLsizei>(bake_settings.brdf_lut_size),
+                   static_cast<GLsizei>(bake_settings.brdf_lut_size));
         glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);

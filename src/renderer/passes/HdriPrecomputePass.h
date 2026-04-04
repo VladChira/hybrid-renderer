@@ -11,6 +11,7 @@ namespace hybrid::renderer
     struct HdriPrecomputePassInput
     {
         const FrameSceneData *scene_data = nullptr;
+        const RenderSettings *settings = nullptr;
     };
 
     struct HdriPrecomputePassOutput

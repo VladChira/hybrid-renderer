@@ -9,18 +9,7 @@ namespace hybrid::ui
 
     namespace
     {
-        const char *ToneMapperLabel(renderer::ToneMapper tone_mapper)
-        {
-            switch (tone_mapper)
-            {
-            case renderer::ToneMapper::Legacy:
-                return "Legacy";
-            case renderer::ToneMapper::ACES:
-                return "ACES";
-            }
-
-            return "Unknown";
-        }
+        constexpr double kRenderSettingsCommitDebounceSeconds = 0.35;
 
         const char *VisualizationLabel(UiViewportVisualization visualization)
         {
@@ -76,32 +65,129 @@ namespace hybrid::ui
             return;
         }
 
+        if (!m_has_pending_render_settings)
+        {
+            m_pending_render_settings = *render_settings;
+            m_has_pending_render_settings = true;
+        }
+
+        if (!m_render_settings_dirty)
+        {
+            // Keep staged settings synced when there is no active local edit.
+            m_pending_render_settings = *render_settings;
+        }
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
         ImGui::TextUnformatted("Tone Mapping");
 
-        int tone_mapper_index = static_cast<int>(render_settings->tone_mapper);
+        auto MarkEdited = [this]()
+        {
+            m_render_settings_dirty = true;
+            m_last_edit_time_seconds = ImGui::GetTime();
+            if (ImGui::IsItemDeactivatedAfterEdit())
+            {
+                m_commit_requested = true;
+            }
+        };
+
+        int tone_mapper_index = static_cast<int>(m_pending_render_settings.tone_mapper);
         const char *tone_mapper_options[] = {"Legacy", "ACES"};
         if (ImGui::Combo("Tonemapper", &tone_mapper_index, tone_mapper_options, IM_ARRAYSIZE(tone_mapper_options)))
         {
-            render_settings->tone_mapper = static_cast<renderer::ToneMapper>(tone_mapper_index);
+            m_pending_render_settings.tone_mapper = static_cast<renderer::ToneMapper>(tone_mapper_index);
+            MarkEdited();
         }
 
-        ImGui::SliderFloat("Exposure", &render_settings->exposure, 0.01f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-
-        if (render_settings->tone_mapper == renderer::ToneMapper::Legacy)
+        if (ImGui::SliderFloat("Exposure",
+                               &m_pending_render_settings.exposure,
+                               0.01f,
+                               8.0f,
+                               "%.3f",
+                               ImGuiSliderFlags_Logarithmic))
         {
-            ImGui::SliderFloat("Curve Strength", &render_settings->legacy_curve_strength, 0.1f, 4.0f, "%.3f");
+            MarkEdited();
+        }
 
-            ImGui::SliderFloat("Gamma", &render_settings->legacy_gamma, 1.0f, 3.0f, "%.3f");
+        if (m_pending_render_settings.tone_mapper == renderer::ToneMapper::Legacy)
+        {
+            if (ImGui::SliderFloat("Curve Strength", &m_pending_render_settings.legacy_curve_strength, 0.1f, 4.0f, "%.3f"))
+            {
+                MarkEdited();
+            }
+
+            if (ImGui::SliderFloat("Gamma", &m_pending_render_settings.legacy_gamma, 1.0f, 3.0f, "%.3f"))
+            {
+                MarkEdited();
+            }
         }
         else
         {
-            ImGui::SliderFloat("Input Scale", &render_settings->aces_input_scale, 0.1f, 3.0f, "%.3f");
+            if (ImGui::SliderFloat("Input Scale", &m_pending_render_settings.aces_input_scale, 0.1f, 3.0f, "%.3f"))
+            {
+                MarkEdited();
+            }
 
-            ImGui::SliderFloat("Saturation", &render_settings->aces_saturation, 0.0f, 2.0f, "%.3f");
+            if (ImGui::SliderFloat("Saturation", &m_pending_render_settings.aces_saturation, 0.0f, 2.0f, "%.3f"))
+            {
+                MarkEdited();
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("HDRI Precompute");
+
+        int env_cubemap_size = static_cast<int>(m_pending_render_settings.hdri_env_cubemap_size);
+        if (ImGui::SliderInt("Env Cubemap Size", &env_cubemap_size, 16, 4096))
+        {
+            m_pending_render_settings.hdri_env_cubemap_size = static_cast<uint32_t>(env_cubemap_size);
+            MarkEdited();
+        }
+
+        int irradiance_size = static_cast<int>(m_pending_render_settings.hdri_irradiance_cubemap_size);
+        if (ImGui::SliderInt("Irradiance Size", &irradiance_size, 4, 1024))
+        {
+            m_pending_render_settings.hdri_irradiance_cubemap_size = static_cast<uint32_t>(irradiance_size);
+            MarkEdited();
+        }
+
+        int prefilter_size = static_cast<int>(m_pending_render_settings.hdri_prefilter_cubemap_size);
+        if (ImGui::SliderInt("Prefilter Size", &prefilter_size, 16, 4096))
+        {
+            m_pending_render_settings.hdri_prefilter_cubemap_size = static_cast<uint32_t>(prefilter_size);
+            MarkEdited();
+        }
+
+        int prefilter_mips = static_cast<int>(m_pending_render_settings.hdri_prefilter_mip_levels);
+        if (ImGui::SliderInt("Prefilter Mips", &prefilter_mips, 1, 12))
+        {
+            m_pending_render_settings.hdri_prefilter_mip_levels = static_cast<uint32_t>(prefilter_mips);
+            MarkEdited();
+        }
+
+        int brdf_lut_size = static_cast<int>(m_pending_render_settings.hdri_brdf_lut_size);
+        if (ImGui::SliderInt("BRDF LUT Size", &brdf_lut_size, 16, 4096))
+        {
+            m_pending_render_settings.hdri_brdf_lut_size = static_cast<uint32_t>(brdf_lut_size);
+            MarkEdited();
+        }
+
+        if (m_render_settings_dirty)
+        {
+            const bool debounce_elapsed =
+                !ImGui::IsAnyItemActive() &&
+                (ImGui::GetTime() - m_last_edit_time_seconds) >= kRenderSettingsCommitDebounceSeconds;
+            if (m_commit_requested || debounce_elapsed)
+            {
+                *render_settings = m_pending_render_settings;
+                m_render_settings_dirty = false;
+                m_commit_requested = false;
+            }
         }
     }
 

@@ -311,6 +311,7 @@ namespace hybrid::renderer
         {
             HdriPrecomputePassInput hdri_input{};
             hdri_input.scene_data = &m_impl->scene_data;
+            hdri_input.settings = &m_impl->submitted_settings;
 
             if (!m_impl->hdri_precompute_pass->Execute(hdri_input, hdri_output))
             {
