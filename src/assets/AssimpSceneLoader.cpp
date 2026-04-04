@@ -536,13 +536,13 @@ namespace hybrid::assets
                 if (has_uv0)
                 {
                     const aiVector3D &uv = mesh->mTextureCoords[0][v];
-                    vertex.uv0 = {uv.x, uv.y};
+                    vertex.uv0 = {uv.x, 1.0f - uv.y};
                 }
 
                 if (has_uv1)
                 {
                     const aiVector3D &uv = mesh->mTextureCoords[1][v];
-                    vertex.uv1 = {uv.x, uv.y};
+                    vertex.uv1 = {uv.x, 1.0f - uv.y};
                 }
 
                 if (has_color0)
