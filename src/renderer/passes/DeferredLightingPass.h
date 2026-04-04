@@ -21,6 +21,8 @@ namespace hybrid::renderer
         bool has_skybox = false;
         GlTextureId skybox_cubemap = 0;
         GlTextureId convoluted_cubemap = 0;
+        GlTextureId prefiltered_cubemap = 0;
+        GlTextureId brdf_lut = 0;
         float skybox_intensity = 1.0f;
         float skybox_yaw_radians = 0.0f;
     };

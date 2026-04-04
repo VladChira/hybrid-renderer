@@ -43,6 +43,8 @@ namespace hybrid::renderer
         GLShaderProgram deferred_lighting_shader{};
         GLShaderProgram equirect_to_cubemap_shader{};
         GLShaderProgram convolute_hdri_shader{};
+        GLShaderProgram prefilter_hdri_shader{};
+        GLShaderProgram brdf_lut_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
 
@@ -85,6 +87,8 @@ namespace hybrid::renderer
             return false;
         }
 
+        glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
         if (!m_impl->shader_manager.CompileProgramFromFiles("gbuffer.vert",
                                                             "gbuffer.frag",
                                                             m_impl->gbuffer_shader))
@@ -117,9 +121,28 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("convolute_hdri.vert",
+                                                            "prefilter_hdri.frag",
+                                                            m_impl->prefilter_hdri_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: prefilter-HDRI shader program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileProgramFromFiles("deferred_lighting.vert",
+                                                            "brdf_lut.frag",
+                                                            m_impl->brdf_lut_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: BRDF LUT shader program build failed");
+            return false;
+        }
+
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
         m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
-        m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader, &m_impl->convolute_hdri_shader);
+        m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader,
+                                                                             &m_impl->convolute_hdri_shader,
+                                                                             &m_impl->prefilter_hdri_shader,
+                                                                             &m_impl->brdf_lut_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -157,6 +180,8 @@ namespace hybrid::renderer
         m_impl->deferred_lighting_shader.Destroy();
         m_impl->equirect_to_cubemap_shader.Destroy();
         m_impl->convolute_hdri_shader.Destroy();
+        m_impl->prefilter_hdri_shader.Destroy();
+        m_impl->brdf_lut_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -307,6 +332,8 @@ namespace hybrid::renderer
             deferred_input.has_skybox = hdri_output.has_skybox;
             deferred_input.skybox_cubemap = hdri_output.skybox_cubemap;
             deferred_input.convoluted_cubemap = hdri_output.convoluted_cubemap;
+            deferred_input.prefiltered_cubemap = hdri_output.prefiltered_cubemap;
+            deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
 

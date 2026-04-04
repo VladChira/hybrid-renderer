@@ -7,6 +7,8 @@ uniform sampler2D u_gbuffer_rt1;
 uniform sampler2D u_gbuffer_depth;
 uniform samplerCube u_skybox_cubemap;
 uniform samplerCube u_irradiance_cubemap;
+uniform samplerCube u_prefiltered_env_cubemap;
+uniform sampler2D u_brdf_lut;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
@@ -19,6 +21,7 @@ uniform float u_aces_saturation;
 
 uniform int u_has_skybox;
 uniform int u_has_irradiance;
+uniform int u_has_specular_ibl;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 
@@ -255,15 +258,29 @@ void main()
     }
 
     vec3 ambient = vec3(0.0);
+    vec3 F_ibl = FresnelSchlickRoughness(ndotv, F0, roughness);
+    vec3 kS_ibl = F_ibl;
+    vec3 kD_ibl = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
+
     if (u_has_irradiance != 0)
     {
         vec3 irradiance_direction = RotateAroundY(normal, u_skybox_yaw_radians);
         vec3 irradiance = texture(u_irradiance_cubemap, irradiance_direction).rgb * max(u_skybox_intensity, 0.0);
-        vec3 kS = FresnelSchlickRoughness(ndotv, F0, roughness);
-        // Tiny trick: metals should contribute almost no diffuse ambient.
-        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
         vec3 diffuse_ibl = irradiance * albedo;
-        ambient = kD * diffuse_ibl;
+        ambient += kD_ibl * diffuse_ibl;
+    }
+
+    if (u_has_specular_ibl != 0)
+    {
+        vec3 R = reflect(-V, normal);
+        vec3 reflection_direction = RotateAroundY(R, u_skybox_yaw_radians);
+        const float MAX_REFLECTION_LOD = 4.0;
+        vec3 prefiltered_color =
+            textureLod(u_prefiltered_env_cubemap, reflection_direction, roughness * MAX_REFLECTION_LOD).rgb *
+            max(u_skybox_intensity, 0.0);
+        vec2 env_brdf = texture(u_brdf_lut, vec2(ndotv, roughness)).rg;
+        vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
+        ambient += specular_ibl;
     }
 
     vec3 color = ambient + Lo;

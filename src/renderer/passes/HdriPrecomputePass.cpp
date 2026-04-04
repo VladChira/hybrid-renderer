@@ -22,6 +22,9 @@ namespace hybrid::renderer
     {
         constexpr uint32_t kSkyboxCubemapSize = 512;
         constexpr uint32_t kConvolutionSize = 32;
+        constexpr uint32_t kPrefilterCubemapSize = 128;
+        constexpr uint32_t kPrefilterMipLevels = 5;
+        constexpr uint32_t kBrdfLutSize = 512;
 
         struct IBLCacheKey
         {
@@ -67,6 +70,8 @@ namespace hybrid::renderer
             IBLBakeState state = IBLBakeState::Pending;
             GLTexture environment_cubemap{};
             GLTexture convoluted_cubemap{};
+            GLTexture prefiltered_cubemap{};
+            GLTexture brdf_lut{};
         };
 
         struct SourceTextureGpu
@@ -83,9 +88,14 @@ namespace hybrid::renderer
         GLVertexArray cube_vao{};
     };
 
-    HdriPrecomputePass::HdriPrecomputePass(GLShaderProgram *equirect_to_cubemap_shader, GLShaderProgram *convolute_shader)
+    HdriPrecomputePass::HdriPrecomputePass(GLShaderProgram *equirect_to_cubemap_shader,
+                                           GLShaderProgram *convolute_shader,
+                                           GLShaderProgram *prefilter_shader,
+                                           GLShaderProgram *brdf_lut_shader)
         : m_equirect_to_cubemap_shader(equirect_to_cubemap_shader),
           m_convolute_shader(convolute_shader),
+          m_prefilter_shader(prefilter_shader),
+          m_brdf_lut_shader(brdf_lut_shader),
           m_impl(std::make_unique<Impl>())
     {
     }
@@ -99,7 +109,12 @@ namespace hybrid::renderer
 
     bool HdriPrecomputePass::Execute(const HdriPrecomputePassInput &input, HdriPrecomputePassOutput &output)
     {
-        if (m_impl == nullptr || m_equirect_to_cubemap_shader == nullptr || m_convolute_shader == nullptr || input.scene_data == nullptr)
+        if (m_impl == nullptr ||
+            m_equirect_to_cubemap_shader == nullptr ||
+            m_convolute_shader == nullptr ||
+            m_prefilter_shader == nullptr ||
+            m_brdf_lut_shader == nullptr ||
+            input.scene_data == nullptr)
         {
             return false;
         }
@@ -199,11 +214,15 @@ namespace hybrid::renderer
         IBLCached &cached = cache_it->second;
         if (cached.state == IBLBakeState::Ready &&
             cached.environment_cubemap.IsValid() &&
-            cached.convoluted_cubemap.IsValid())
+            cached.convoluted_cubemap.IsValid() &&
+            cached.prefiltered_cubemap.IsValid() &&
+            cached.brdf_lut.IsValid())
         {
             output.has_skybox = true;
             output.skybox_cubemap = cached.environment_cubemap.Id();
             output.convoluted_cubemap = cached.convoluted_cubemap.Id();
+            output.prefiltered_cubemap = cached.prefiltered_cubemap.Id();
+            output.brdf_lut = cached.brdf_lut.Id();
             output.skybox_intensity = selected_light->intensity;
             output.skybox_yaw_radians = selected_light->yaw_radians;
             return true;
@@ -386,6 +405,154 @@ namespace hybrid::renderer
         GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
         glDepthMask(GL_TRUE);
 
+        // ----------------------- PREFILTER (SPECULAR IBL) --------------------
+        if (!cached.prefiltered_cubemap.IsValid())
+        {
+            if (!cached.prefiltered_cubemap.Create(GL_TEXTURE_CUBE_MAP))
+            {
+                cached.state = IBLBakeState::Failed;
+                return true;
+            }
+
+            cached.prefiltered_cubemap.Bind();
+            glTexStorage2D(GL_TEXTURE_CUBE_MAP,
+                           static_cast<GLsizei>(kPrefilterMipLevels),
+                           GL_RGBA16F,
+                           static_cast<GLsizei>(kPrefilterCubemapSize),
+                           static_cast<GLsizei>(kPrefilterCubemapSize));
+            cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+            cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            cached.prefiltered_cubemap.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            if (const GLenum allocation_error = glGetError(); allocation_error != GL_NO_ERROR)
+            {
+                LOG_ERROR("[HdriPrecomputePass] Prefilter cubemap allocation failed with GL error {}", static_cast<unsigned>(allocation_error));
+                cached.state = IBLBakeState::Failed;
+                return true;
+            }
+        }
+
+        m_impl->capture_fbo.Bind();
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+        m_impl->capture_fbo.SetDrawBuffers({GL_COLOR_ATTACHMENT0});
+
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        m_prefilter_shader->Use();
+        m_prefilter_shader->SetUniform1i("u_env_map", 0);
+        m_prefilter_shader->SetUniformMat4("u_projection", capture_projection);
+        cached.environment_cubemap.BindToUnit(0);
+        m_impl->cube_vao.Bind();
+
+        for (uint32_t mip_level = 0; mip_level < kPrefilterMipLevels; ++mip_level)
+        {
+            const uint32_t mip_size = kPrefilterCubemapSize >> mip_level;
+            if (mip_size == 0)
+            {
+                break;
+            }
+
+            glViewport(0, 0, static_cast<GLsizei>(mip_size), static_cast<GLsizei>(mip_size));
+            const float roughness = (kPrefilterMipLevels > 1)
+                                        ? static_cast<float>(mip_level) / static_cast<float>(kPrefilterMipLevels - 1)
+                                        : 0.0f;
+            m_prefilter_shader->SetUniform1f("u_roughness", roughness);
+
+            for (int face_index = 0; face_index < 6; ++face_index)
+            {
+                m_prefilter_shader->SetUniformMat4("u_view", capture_views[static_cast<size_t>(face_index)]);
+                m_impl->capture_fbo.AttachTexture2D(GL_COLOR_ATTACHMENT0,
+                                                    cached.prefiltered_cubemap,
+                                                    GL_TEXTURE_CUBE_MAP_POSITIVE_X + face_index,
+                                                    static_cast<GLint>(mip_level));
+                if (!m_impl->capture_fbo.CheckComplete(GL_FRAMEBUFFER))
+                {
+                    cached.state = IBLBakeState::Failed;
+                    GLVertexArray::Unbind();
+                    GLShaderProgram::Unuse();
+                    GLTexture::Unbind(GL_TEXTURE_CUBE_MAP);
+                    GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+                    glDepthMask(GL_TRUE);
+                    return true;
+                }
+
+                const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                glClearBufferfv(GL_COLOR, 0, clear_color);
+                glDrawArrays(GL_TRIANGLES, 0, 36);
+            }
+        }
+
+        GLVertexArray::Unbind();
+        GLShaderProgram::Unuse();
+        GLTexture::Unbind(GL_TEXTURE_CUBE_MAP);
+        GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+        glDepthMask(GL_TRUE);
+
+        // ----------------------- BRDF LUT (SPECULAR IBL) --------------------
+        if (!cached.brdf_lut.IsValid())
+        {
+            if (!cached.brdf_lut.Create(GL_TEXTURE_2D))
+            {
+                cached.state = IBLBakeState::Failed;
+                return true;
+            }
+
+            cached.brdf_lut.Bind();
+            cached.brdf_lut.SetImage2D(0,
+                                       GL_RG16F,
+                                       static_cast<GLsizei>(kBrdfLutSize),
+                                       static_cast<GLsizei>(kBrdfLutSize),
+                                       GL_RG,
+                                       GL_FLOAT,
+                                       nullptr);
+            cached.brdf_lut.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            cached.brdf_lut.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            cached.brdf_lut.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            cached.brdf_lut.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            if (const GLenum allocation_error = glGetError(); allocation_error != GL_NO_ERROR)
+            {
+                LOG_ERROR("[HdriPrecomputePass] BRDF LUT allocation failed with GL error {}", static_cast<unsigned>(allocation_error));
+                cached.state = IBLBakeState::Failed;
+                return true;
+            }
+        }
+
+        m_impl->capture_fbo.Bind();
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+        m_impl->capture_fbo.SetDrawBuffers({GL_COLOR_ATTACHMENT0});
+        m_impl->capture_fbo.AttachTexture2D(GL_COLOR_ATTACHMENT0, cached.brdf_lut, GL_TEXTURE_2D, 0);
+        if (!m_impl->capture_fbo.CheckComplete(GL_FRAMEBUFFER))
+        {
+            cached.state = IBLBakeState::Failed;
+            GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+            return true;
+        }
+
+        glViewport(0, 0, static_cast<GLsizei>(kBrdfLutSize), static_cast<GLsizei>(kBrdfLutSize));
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        m_brdf_lut_shader->Use();
+        m_impl->cube_vao.Bind();
+        const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        glClearBufferfv(GL_COLOR, 0, clear_color);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        GLVertexArray::Unbind();
+        GLShaderProgram::Unuse();
+        GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+        glDepthMask(GL_TRUE);
+
         LOG_INFO("[HdriPrecomputePass] Done precomputing HDRI light.");
 
         cached.state = IBLBakeState::Ready;
@@ -393,6 +560,8 @@ namespace hybrid::renderer
         output.has_skybox = true;
         output.skybox_cubemap = cached.environment_cubemap.Id();
         output.convoluted_cubemap = cached.convoluted_cubemap.Id();
+        output.prefiltered_cubemap = cached.prefiltered_cubemap.Id();
+        output.brdf_lut = cached.brdf_lut.Id();
         output.skybox_intensity = selected_light->intensity;
         output.skybox_yaw_radians = selected_light->yaw_radians;
         return true;

@@ -18,6 +18,8 @@ namespace hybrid::renderer
         bool has_skybox = false;
         GlTextureId skybox_cubemap = 0;
         GlTextureId convoluted_cubemap = 0;
+        GlTextureId prefiltered_cubemap = 0;
+        GlTextureId brdf_lut = 0;
         float skybox_intensity = 1.0f;
         float skybox_yaw_radians = 0.0f;
     };
@@ -25,7 +27,10 @@ namespace hybrid::renderer
     class HdriPrecomputePass final
     {
     public:
-        explicit HdriPrecomputePass(GLShaderProgram *equirect_to_cubemap_shader, GLShaderProgram *convolute_shader);
+        explicit HdriPrecomputePass(GLShaderProgram *equirect_to_cubemap_shader,
+                                    GLShaderProgram *convolute_shader,
+                                    GLShaderProgram *prefilter_shader,
+                                    GLShaderProgram *brdf_lut_shader);
         ~HdriPrecomputePass();
 
         const char *Name() const;
@@ -35,6 +40,8 @@ namespace hybrid::renderer
         struct Impl;
         GLShaderProgram *m_equirect_to_cubemap_shader = nullptr;
         GLShaderProgram *m_convolute_shader = nullptr;
+        GLShaderProgram *m_prefilter_shader = nullptr;
+        GLShaderProgram *m_brdf_lut_shader = nullptr;
         std::unique_ptr<Impl> m_impl;
     };
 } // namespace hybrid::renderer
