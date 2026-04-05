@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/ResourceMonitor.h"
+#include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
@@ -129,6 +130,7 @@ namespace hybrid::ui
 
     CommandBuffer Ui::Frame(float delta_seconds, const UiState &state)
     {
+        HYBRID_PROFILE_ZONE_N("Ui::Frame");
         CommandBuffer commands;
         if (!m_initialized || !m_window)
         {
