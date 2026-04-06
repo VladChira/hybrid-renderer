@@ -13,6 +13,12 @@ namespace hybrid::core
 {
     namespace
     {
+        template <typename TComponent>
+        void EmitComponentUpdated(entt::registry &registry, entt::entity entity)
+        {
+            registry.patch<TComponent>(entity, [](TComponent &) {});
+        }
+
         scene::SceneWorld *ResolveActiveSceneWorld(assets::AssetManager &assets, assets::AssetId active_scene)
         {
             if (!active_scene.IsValid())
@@ -100,6 +106,7 @@ namespace hybrid::core
                         if (auto *transform = registry.try_get<scene::TransformComponent>(typed_command.entity))
                         {
                             transform->local = typed_command.local;
+                            EmitComponentUpdated<scene::TransformComponent>(registry, typed_command.entity);
                             active_scene_world->MarkDirty(typed_command.entity);
                         }
                     }
@@ -116,6 +123,7 @@ namespace hybrid::core
                             camera->horizontal_fov_radians = std::max(0.0174533f, typed_command.horizontal_fov_radians);
                             camera->near_plane = std::max(0.001f, typed_command.near_plane);
                             camera->far_plane = std::max(camera->near_plane + 0.001f, typed_command.far_plane);
+                            EmitComponentUpdated<scene::CameraComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetTargetCommand>)
@@ -134,6 +142,7 @@ namespace hybrid::core
                             {
                                 camera_target->target = entt::null;
                             }
+                            EmitComponentUpdated<scene::CameraTargetComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetPrimaryCommand>)
@@ -211,6 +220,7 @@ namespace hybrid::core
                             light->color = glm::max(typed_command.color, glm::vec3(0.0f));
                             light->intensity = std::max(0.0f, typed_command.intensity);
                             light->cast_shadows = typed_command.cast_shadows;
+                            EmitComponentUpdated<scene::LightCommonComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::EditPointLightCommand>)
@@ -227,6 +237,7 @@ namespace hybrid::core
                             light->attenuation_constant = std::max(0.0f, typed_command.attenuation_constant);
                             light->attenuation_linear = std::max(0.0f, typed_command.attenuation_linear);
                             light->attenuation_quadratic = std::max(0.0f, typed_command.attenuation_quadratic);
+                            EmitComponentUpdated<scene::PointLightComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::EditAreaLightCommand>)
@@ -242,6 +253,7 @@ namespace hybrid::core
                             light->size = glm::max(typed_command.size, glm::vec2(0.0f));
                             light->direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
                             light->two_sided = typed_command.two_sided;
+                            EmitComponentUpdated<scene::AreaLightComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::EditHdriLightCommand>)
@@ -255,6 +267,7 @@ namespace hybrid::core
                         if (auto *light = registry.try_get<scene::HdriLightComponent>(typed_command.entity))
                         {
                             light->yaw_radians = typed_command.yaw_radians;
+                            EmitComponentUpdated<scene::HdriLightComponent>(registry, typed_command.entity);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::MaterialSetScalarCommand>)

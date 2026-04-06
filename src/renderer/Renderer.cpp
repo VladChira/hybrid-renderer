@@ -52,9 +52,10 @@ namespace hybrid::renderer
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
+        SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
-        const core::scene::SceneWorld *submitted_scene_world = nullptr;
+        core::scene::SceneWorld *submitted_scene_world = nullptr;
         RenderView submitted_view{};
         RenderSettings submitted_settings{};
         FrameSceneData scene_data{};
@@ -251,7 +252,7 @@ namespace hybrid::renderer
             m_impl->current_extent);
     }
 
-    void Renderer::SubmitScene(const core::scene::SceneWorld &scene_world,
+    void Renderer::SubmitScene(core::scene::SceneWorld &scene_world,
                                const RenderView &view,
                                const RenderSettings &settings)
     {
@@ -278,11 +279,13 @@ namespace hybrid::renderer
         if (m_impl->submitted_scene_world != nullptr)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::BuildFrameSceneData");
-            m_impl->scene_data = BuildFrameSceneData(*m_impl->submitted_scene_world);
+            m_impl->scene_frame_cache.Sync(*m_impl->submitted_scene_world);
+            m_impl->scene_data = m_impl->scene_frame_cache.GetFrameData();
         }
         else
         {
             m_impl->scene_data = {};
+            m_impl->scene_frame_cache.Reset();
         }
 
         m_impl->effective_view = m_impl->submitted_view;

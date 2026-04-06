@@ -27,7 +27,7 @@ namespace hybrid::renderer
         void Resize(const RenderExtent &extent);
 
         bool BeginFrame(const FrameContext &frame);
-        void SubmitScene(const core::scene::SceneWorld &scene_world,
+        void SubmitScene(core::scene::SceneWorld &scene_world,
                          const RenderView &view,
                          const RenderSettings &settings);
         RendererOutputs EndFrame();
