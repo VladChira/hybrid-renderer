@@ -6,18 +6,41 @@
 #include "renderer/opengl/GLTexture.h"
 #include "renderer/opengl/GLVertexArray.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace hybrid::renderer
 {
 
     namespace
     {
+        constexpr GLuint kInstanceSsboBinding = 1;
+        constexpr GLuint kMaterialSsboBinding = 2;
+
+        struct GpuInstanceData
+        {
+            glm::mat4 model{1.0f};
+            glm::mat4 normal_matrix{1.0f};
+            uint32_t material_index = 0;
+            uint32_t entity_id = 0;
+            uint32_t pad0 = 0;
+            uint32_t pad1 = 0;
+        };
+
+        struct GpuMaterialData
+        {
+            glm::vec4 base_color_alpha{1.0f};
+            glm::vec4 metallic_roughness_normal_scale_alpha_cutoff{0.0f};
+            glm::uvec4 flags{0u};
+            glm::uvec4 texcoord_selectors{0u};
+        };
+
         struct PrimitiveCacheKey
         {
             uint64_t mesh_id = 0;
@@ -51,6 +74,19 @@ namespace hybrid::renderer
         {
             GLTexture texture{GL_TEXTURE_2D};
         };
+
+        struct DrawItem
+        {
+            CachedPrimitiveGpu *gpu = nullptr;
+            uint32_t instance_index = 0;
+            uint64_t mesh_id = 0;
+            uint32_t primitive_index = 0;
+            uint32_t material_index = 0;
+            GLuint base_color_texture_id = 0;
+            GLuint metallic_roughness_texture_id = 0;
+            GLuint normal_texture_id = 0;
+        };
+
 
         template <typename Fn>
         void ForEachOpaqueAndMaskedMeshInstance(const FrameSceneData &scene, Fn &&fn)
@@ -199,6 +235,18 @@ namespace hybrid::renderer
                 return material->normal_scale;
             }
             return 1.0f;
+        }
+
+        glm::mat4 ComputeNormalMatrix(const glm::mat4 &world_from_local)
+        {
+            const glm::mat3 normal_matrix_3x3 = glm::transpose(glm::inverse(glm::mat3(world_from_local)));
+
+            glm::mat4 normal_matrix_4x4{1.0f};
+            normal_matrix_4x4[0] = glm::vec4(normal_matrix_3x3[0], 0.0f);
+            normal_matrix_4x4[1] = glm::vec4(normal_matrix_3x3[1], 0.0f);
+            normal_matrix_4x4[2] = glm::vec4(normal_matrix_3x3[2], 0.0f);
+            normal_matrix_4x4[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            return normal_matrix_4x4;
         }
 
         GLint ToGlWrap(const core::scene::TextureWrap wrap)
@@ -431,6 +479,10 @@ namespace hybrid::renderer
     {
         std::unordered_map<PrimitiveCacheKey, CachedPrimitiveGpu, PrimitiveCacheKeyHash> primitive_cache;
         std::unordered_map<uint64_t, CachedTextureGpu> texture_cache;
+        GLBuffer instance_ssbo{GL_SHADER_STORAGE_BUFFER};
+        GLBuffer material_ssbo{GL_SHADER_STORAGE_BUFFER};
+        size_t instance_ssbo_capacity = 0;
+        size_t material_ssbo_capacity = 0;
         GLTexture white_texture{GL_TEXTURE_2D};
         GLTexture flat_normal_texture{GL_TEXTURE_2D};
         bool white_texture_initialized = false;
@@ -473,28 +525,33 @@ namespace hybrid::renderer
 
         {
             HYBRID_PROFILE_ZONE_N("GBufferPass::Setup");
-        glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
-        glViewport(0, 0,
-                   static_cast<GLsizei>(settings.render_extent.width),
-                   static_cast<GLsizei>(settings.render_extent.height));
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
+            glViewport(0, 0,
+                       static_cast<GLsizei>(settings.render_extent.width),
+                       static_cast<GLsizei>(settings.render_extent.height));
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
-        glClearBufferfv(GL_COLOR, 0, clear_rt0);
-        glClearBufferfv(GL_COLOR, 1, clear_rt1);
-        glClearBufferuiv(GL_COLOR, 2, clear_entity_id);
-        glClear(GL_DEPTH_BUFFER_BIT);
+            const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
+            glClearBufferfv(GL_COLOR, 0, clear_rt0);
+            glClearBufferfv(GL_COLOR, 1, clear_rt1);
+            glClearBufferuiv(GL_COLOR, 2, clear_entity_id);
+            glClear(GL_DEPTH_BUFFER_BIT);
 
-        m_gbuffer_shader->Use();
-        m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
-        m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
-        m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
-        m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
-        m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
+            m_gbuffer_shader->Use();
+            m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
+            m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
+            m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
+            m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
+            m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
+
+            if (gbuffer_stats != nullptr)
+            {
+                gbuffer_stats->uniform_updates += 5;
+            }
         }
 
         if (!m_impl->white_texture_initialized)
@@ -524,13 +581,122 @@ namespace hybrid::renderer
             m_impl->flat_normal_texture_initialized = true;
         }
 
-        auto draw_instance = [&](const RenderMeshInstance &instance)
+        std::vector<DrawItem> draw_items{};
+        std::vector<GpuInstanceData> instance_gpu_data{};
+        std::vector<GpuMaterialData> material_gpu_data{};
+        struct CachedMaterialFrameRecord
+        {
+            uint32_t material_index = 0;
+            GLuint base_color_texture_id = 0;
+            GLuint metallic_roughness_texture_id = 0;
+            GLuint normal_texture_id = 0;
+        };
+        std::unordered_map<uint64_t, CachedMaterialFrameRecord> material_frame_cache{};
+
+        auto ensure_ssbo_storage = [](GLBuffer &ssbo,
+                                      size_t &capacity_elements,
+                                      size_t required_elements,
+                                      const size_t element_size) -> bool
+        {
+            if (!ssbo.IsValid() && !ssbo.Create(GL_SHADER_STORAGE_BUFFER))
+            {
+                return false;
+            }
+
+            if (required_elements <= capacity_elements)
+            {
+                return true;
+            }
+
+            size_t new_capacity = capacity_elements > 0 ? capacity_elements : 1;
+            while (new_capacity < required_elements)
+            {
+                if (new_capacity > std::numeric_limits<size_t>::max() / 2)
+                {
+                    new_capacity = required_elements;
+                    break;
+                }
+                new_capacity *= 2;
+            }
+
+            ssbo.Bind();
+            ssbo.SetData(static_cast<GLsizeiptr>(new_capacity * element_size), nullptr, GL_DYNAMIC_DRAW);
+            capacity_elements = new_capacity;
+            return true;
+        };
+
+        enum class TextureUploadZone
+        {
+            BaseColor,
+            MetallicRoughness,
+            Normal
+        };
+
+        auto resolve_texture_gpu_id = [&](const core::scene::MaterialTexture *texture,
+                                          GLuint fallback_texture_id,
+                                          TextureUploadZone upload_zone,
+                                          bool &out_has_texture) -> GLuint
+        {
+            out_has_texture = false;
+            if (texture == nullptr)
+            {
+                return fallback_texture_id;
+            }
+
+            const uint64_t image_id = texture->image.Id().value;
+            if (image_id == 0)
+            {
+                return fallback_texture_id;
+            }
+
+            auto cached_texture_it = m_impl->texture_cache.find(image_id);
+            if (cached_texture_it == m_impl->texture_cache.end())
+            {
+                if (gbuffer_stats != nullptr)
+                {
+                    gbuffer_stats->texture_cache_misses++;
+                }
+
+                if (upload_zone == TextureUploadZone::BaseColor)
+                {
+                    HYBRID_PROFILE_ZONE_N("GBufferPass::UploadBaseColorTextureCacheMiss");
+                }
+                else if (upload_zone == TextureUploadZone::MetallicRoughness)
+                {
+                    HYBRID_PROFILE_ZONE_N("GBufferPass::UploadMetallicRoughnessTextureCacheMiss");
+                }
+                else
+                {
+                    HYBRID_PROFILE_ZONE_N("GBufferPass::UploadNormalTextureCacheMiss");
+                }
+                CachedTextureGpu texture_gpu{};
+                if (UploadTextureToGpu(*texture, texture_gpu))
+                {
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->texture_uploads++;
+                    }
+                    cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
+                }
+            }
+
+            if (cached_texture_it == m_impl->texture_cache.end())
+            {
+                return fallback_texture_id;
+            }
+
+            out_has_texture = true;
+            return cached_texture_it->second.texture.Id();
+        };
+
+        auto append_draw_items_for_instance = [&](const RenderMeshInstance &instance)
         {
             const core::scene::MeshAsset *mesh = instance.mesh.Get();
             if (mesh == nullptr)
             {
                 return;
             }
+            const glm::mat4 instance_normal_matrix = ComputeNormalMatrix(instance.world_from_local);
 
             for (size_t primitive_index = 0; primitive_index < mesh->primitives.size(); ++primitive_index)
             {
@@ -567,193 +733,171 @@ namespace hybrid::renderer
                     continue;
                 }
 
-                m_gbuffer_shader->SetUniformMat4("u_model", instance.world_from_local);
-                m_gbuffer_shader->SetUniformVec3("u_base_color", ResolvePrimitiveBaseColor(primitive));
-                m_gbuffer_shader->SetUniform1f("u_base_alpha", ResolvePrimitiveBaseAlpha(primitive));
-                m_gbuffer_shader->SetUniform1f("u_metallic", ResolvePrimitiveMetallic(primitive));
-                m_gbuffer_shader->SetUniform1f("u_roughness", ResolvePrimitiveRoughness(primitive));
-                m_gbuffer_shader->SetUniform1i("u_alpha_masked", ResolvePrimitiveAlphaMasked(primitive) ? 1 : 0);
-                m_gbuffer_shader->SetUniform1f("u_alpha_cutoff", ResolvePrimitiveAlphaCutoff(primitive));
-                m_gbuffer_shader->SetUniform1i("u_base_color_texcoord", ResolvePrimitiveBaseColorTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texcoord", ResolvePrimitiveMetallicRoughnessTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1i("u_normal_texcoord", ResolvePrimitiveNormalTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1f("u_normal_scale", ResolvePrimitiveNormalScale(primitive));
-                m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
-                if (gbuffer_stats != nullptr)
+                const uint64_t material_asset_id = primitive.material.Id().value;
+                CachedMaterialFrameRecord material_record{};
+
+                const auto cached_material_it = material_frame_cache.find(material_asset_id);
+                if (cached_material_it != material_frame_cache.end())
                 {
-                    // Logical count of per-draw uniform writes we issue.
-                    gbuffer_stats->uniform_updates += 12;
+                    material_record = cached_material_it->second;
+                }
+                else
+                {
+                    bool has_base_color_texture = false;
+                    const GLuint base_color_texture_id = resolve_texture_gpu_id(ResolvePrimitiveBaseColorTexture(primitive),
+                                                                                m_impl->white_texture.Id(),
+                                                                                TextureUploadZone::BaseColor,
+                                                                                has_base_color_texture);
+
+                    bool has_metallic_roughness_texture = false;
+                    const GLuint metallic_roughness_texture_id = resolve_texture_gpu_id(ResolvePrimitiveMetallicRoughnessTexture(primitive),
+                                                                                        m_impl->white_texture.Id(),
+                                                                                        TextureUploadZone::MetallicRoughness,
+                                                                                        has_metallic_roughness_texture);
+
+                    bool has_normal_texture = false;
+                    const GLuint normal_texture_id = resolve_texture_gpu_id(ResolvePrimitiveNormalTexture(primitive),
+                                                                            m_impl->flat_normal_texture.Id(),
+                                                                            TextureUploadZone::Normal,
+                                                                            has_normal_texture);
+
+                    GpuMaterialData material_data{};
+                    material_data.base_color_alpha = glm::vec4(ResolvePrimitiveBaseColor(primitive), ResolvePrimitiveBaseAlpha(primitive));
+                    material_data.metallic_roughness_normal_scale_alpha_cutoff = glm::vec4(ResolvePrimitiveMetallic(primitive),
+                                                                                            ResolvePrimitiveRoughness(primitive),
+                                                                                            ResolvePrimitiveNormalScale(primitive),
+                                                                                            ResolvePrimitiveAlphaCutoff(primitive));
+                    material_data.flags = glm::uvec4(has_base_color_texture ? 1u : 0u,
+                                                     has_metallic_roughness_texture ? 1u : 0u,
+                                                     has_normal_texture ? 1u : 0u,
+                                                     ResolvePrimitiveAlphaMasked(primitive) ? 1u : 0u);
+                    material_data.texcoord_selectors = glm::uvec4(ResolvePrimitiveBaseColorTexcoord(primitive) == 1 ? 1u : 0u,
+                                                                  ResolvePrimitiveMetallicRoughnessTexcoord(primitive) == 1 ? 1u : 0u,
+                                                                  ResolvePrimitiveNormalTexcoord(primitive) == 1 ? 1u : 0u,
+                                                                  0u);
+
+                    material_record.material_index = static_cast<uint32_t>(material_gpu_data.size());
+                    material_record.base_color_texture_id = base_color_texture_id;
+                    material_record.metallic_roughness_texture_id = metallic_roughness_texture_id;
+                    material_record.normal_texture_id = normal_texture_id;
+                    material_gpu_data.push_back(material_data);
+                    material_frame_cache.emplace(material_asset_id, material_record);
                 }
 
-                bool has_base_color_texture = false;
-                if (const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive); base_color_texture != nullptr)
-                {
-                    const uint64_t image_id = base_color_texture->image.Id().value;
-                    if (image_id != 0)
-                    {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
-                        {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
+                GpuInstanceData instance_data{};
+                instance_data.model = instance.world_from_local;
+                instance_data.normal_matrix = instance_normal_matrix;
+                instance_data.material_index = material_record.material_index;
+                instance_data.entity_id = static_cast<uint32_t>(instance.instance_id);
+                const uint32_t instance_index = static_cast<uint32_t>(instance_gpu_data.size());
+                instance_gpu_data.push_back(instance_data);
 
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadBaseColorTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*base_color_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
-                        }
-
-                        if (cached_texture_it != m_impl->texture_cache.end())
-                        {
-                            cached_texture_it->second.texture.BindToUnit(0);
-                            has_base_color_texture = true;
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_binds++;
-                            }
-                        }
-                    }
-                }
-
-                if (!has_base_color_texture)
-                {
-                    m_impl->white_texture.BindToUnit(0);
-                    if (gbuffer_stats != nullptr)
-                    {
-                        gbuffer_stats->texture_binds++;
-                    }
-                }
-                m_gbuffer_shader->SetUniform1i("u_has_base_color_texture", has_base_color_texture ? 1 : 0);
-                if (gbuffer_stats != nullptr)
-                {
-                    gbuffer_stats->uniform_updates++;
-                }
-
-                bool has_metallic_roughness_texture = false;
-                if (const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
-                    metallic_roughness_texture != nullptr)
-                {
-                    const uint64_t image_id = metallic_roughness_texture->image.Id().value;
-                    if (image_id != 0)
-                    {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
-                        {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
-
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadMetallicRoughnessTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*metallic_roughness_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
-                        }
-
-                        if (cached_texture_it != m_impl->texture_cache.end())
-                        {
-                            cached_texture_it->second.texture.BindToUnit(1);
-                            has_metallic_roughness_texture = true;
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_binds++;
-                            }
-                        }
-                    }
-                }
-
-                if (!has_metallic_roughness_texture)
-                {
-                    m_impl->white_texture.BindToUnit(1);
-                    if (gbuffer_stats != nullptr)
-                    {
-                        gbuffer_stats->texture_binds++;
-                    }
-                }
-                m_gbuffer_shader->SetUniform1i("u_has_metallic_roughness_texture", has_metallic_roughness_texture ? 1 : 0);
-                if (gbuffer_stats != nullptr)
-                {
-                    gbuffer_stats->uniform_updates++;
-                }
-
-                bool has_normal_texture = false;
-                if (const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive); normal_texture != nullptr)
-                {
-                    const uint64_t image_id = normal_texture->image.Id().value;
-                    if (image_id != 0)
-                    {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
-                        {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
-
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadNormalTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*normal_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
-                        }
-
-                        if (cached_texture_it != m_impl->texture_cache.end())
-                        {
-                            cached_texture_it->second.texture.BindToUnit(2);
-                            has_normal_texture = true;
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_binds++;
-                            }
-                        }
-                    }
-                }
-
-                if (!has_normal_texture)
-                {
-                    m_impl->flat_normal_texture.BindToUnit(2);
-                    if (gbuffer_stats != nullptr)
-                    {
-                        gbuffer_stats->texture_binds++;
-                    }
-                }
-                m_gbuffer_shader->SetUniform1i("u_has_normal_texture", has_normal_texture ? 1 : 0);
-                if (gbuffer_stats != nullptr)
-                {
-                    gbuffer_stats->uniform_updates++;
-                }
-
-                gpu.vao.Bind();
-                glDrawElements(GL_TRIANGLES, gpu.index_count, GL_UNSIGNED_INT, nullptr);
-                if (gbuffer_stats != nullptr)
-                {
-                    gbuffer_stats->draw_calls++;
-                }
+                DrawItem draw_item{};
+                draw_item.gpu = &gpu;
+                draw_item.instance_index = instance_index;
+                draw_item.mesh_id = key.mesh_id;
+                draw_item.primitive_index = key.primitive_index;
+                draw_item.material_index = material_record.material_index;
+                draw_item.base_color_texture_id = material_record.base_color_texture_id;
+                draw_item.metallic_roughness_texture_id = material_record.metallic_roughness_texture_id;
+                draw_item.normal_texture_id = material_record.normal_texture_id;
+                draw_items.push_back(draw_item);
             }
         };
 
         {
             HYBRID_PROFILE_ZONE_N("GBufferPass::DrawOpaqueMasked");
-            ForEachOpaqueAndMaskedMeshInstance(scene, draw_instance);
+            ForEachOpaqueAndMaskedMeshInstance(scene, append_draw_items_for_instance);
+
+            if (!draw_items.empty())
+            {
+                std::stable_sort(draw_items.begin(), draw_items.end(), [](const DrawItem &a, const DrawItem &b)
+                                 {
+                                     if (a.material_index != b.material_index)
+                                     {
+                                         return a.material_index < b.material_index;
+                                     }
+                                     if (a.mesh_id != b.mesh_id)
+                                     {
+                                         return a.mesh_id < b.mesh_id;
+                                     }
+                                     return a.primitive_index < b.primitive_index;
+                                 });
+
+                if (!ensure_ssbo_storage(m_impl->instance_ssbo, m_impl->instance_ssbo_capacity, instance_gpu_data.size(), sizeof(GpuInstanceData)) ||
+                    !ensure_ssbo_storage(m_impl->material_ssbo, m_impl->material_ssbo_capacity, material_gpu_data.size(), sizeof(GpuMaterialData)))
+                {
+                    return false;
+                }
+
+                m_impl->instance_ssbo.Bind();
+                m_impl->instance_ssbo.SetSubData(0,
+                                                 static_cast<GLsizeiptr>(instance_gpu_data.size() * sizeof(GpuInstanceData)),
+                                                 instance_gpu_data.data());
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, kInstanceSsboBinding, m_impl->instance_ssbo.Id());
+
+                m_impl->material_ssbo.Bind();
+                m_impl->material_ssbo.SetSubData(0,
+                                                 static_cast<GLsizeiptr>(material_gpu_data.size() * sizeof(GpuMaterialData)),
+                                                 material_gpu_data.data());
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, kMaterialSsboBinding, m_impl->material_ssbo.Id());
+
+                GLuint last_base_color_texture = std::numeric_limits<GLuint>::max();
+                GLuint last_metallic_roughness_texture = std::numeric_limits<GLuint>::max();
+                GLuint last_normal_texture = std::numeric_limits<GLuint>::max();
+                GLuint last_vao = std::numeric_limits<GLuint>::max();
+
+                for (const DrawItem &draw_item : draw_items)
+                {
+                    if (draw_item.base_color_texture_id != last_base_color_texture)
+                    {
+                        glActiveTexture(GL_TEXTURE0);
+                        glBindTexture(GL_TEXTURE_2D, draw_item.base_color_texture_id);
+                        last_base_color_texture = draw_item.base_color_texture_id;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
+                        }
+                    }
+                    if (draw_item.metallic_roughness_texture_id != last_metallic_roughness_texture)
+                    {
+                        glActiveTexture(GL_TEXTURE1);
+                        glBindTexture(GL_TEXTURE_2D, draw_item.metallic_roughness_texture_id);
+                        last_metallic_roughness_texture = draw_item.metallic_roughness_texture_id;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
+                        }
+                    }
+                    if (draw_item.normal_texture_id != last_normal_texture)
+                    {
+                        glActiveTexture(GL_TEXTURE2);
+                        glBindTexture(GL_TEXTURE_2D, draw_item.normal_texture_id);
+                        last_normal_texture = draw_item.normal_texture_id;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
+                        }
+                    }
+
+                    const GLuint vao_id = draw_item.gpu->vao.Id();
+                    if (vao_id != last_vao)
+                    {
+                        draw_item.gpu->vao.Bind();
+                        last_vao = vao_id;
+                    }
+                    glDrawElementsInstancedBaseInstance(GL_TRIANGLES,
+                                                        draw_item.gpu->index_count,
+                                                        GL_UNSIGNED_INT,
+                                                        nullptr,
+                                                        1,
+                                                        draw_item.instance_index);
+                    if (gbuffer_stats != nullptr)
+                    {
+                        gbuffer_stats->draw_calls++;
+                    }
+                }
+            }
         }
 
         GLVertexArray::Unbind();

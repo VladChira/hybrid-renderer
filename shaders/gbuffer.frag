@@ -1,28 +1,29 @@
-#version 330 core
+#version 460 core
 
 in vec3 v_world_normal;
 in vec3 v_world_tangent;
 in vec3 v_world_bitangent;
 in vec2 v_uv0;
 in vec2 v_uv1;
+flat in uint v_material_index;
+flat in uint v_entity_id;
 
-uniform vec3 u_base_color;
-uniform float u_base_alpha;
 uniform sampler2D u_base_color_texture;
-uniform int u_has_base_color_texture;
-uniform int u_base_color_texcoord;
-uniform int u_alpha_masked;
-uniform float u_alpha_cutoff;
-uniform float u_metallic;
-uniform float u_roughness;
 uniform sampler2D u_metallic_roughness_texture;
-uniform int u_has_metallic_roughness_texture;
-uniform int u_metallic_roughness_texcoord;
 uniform sampler2D u_normal_texture;
-uniform int u_has_normal_texture;
-uniform int u_normal_texcoord;
-uniform float u_normal_scale;
-uniform uint u_instance_id;
+
+struct MaterialData
+{
+    vec4 base_color_alpha;
+    vec4 metallic_roughness_normal_scale_alpha_cutoff;
+    uvec4 flags;
+    uvec4 texcoord_selectors;
+};
+
+layout (std430, binding = 2) readonly buffer MaterialSSBO
+{
+    MaterialData materials[];
+};
 
 layout (location = 0) out vec4 o_rt0;
 layout (location = 1) out vec4 o_rt1;
@@ -30,19 +31,26 @@ layout (location = 2) out uint o_entity_id;
 
 void main()
 {
-    vec2 base_uv = (u_base_color_texcoord == 1) ? v_uv1 : v_uv0;
-    vec4 base_sample = (u_has_base_color_texture != 0) ? texture(u_base_color_texture, base_uv) : vec4(1.0);
-    vec3 base_color = clamp(u_base_color * base_sample.rgb, 0.0, 1.0);
-    float alpha = clamp(u_base_alpha * base_sample.a, 0.0, 1.0);
-    if (u_alpha_masked != 0 && alpha < u_alpha_cutoff)
+    MaterialData material = materials[v_material_index];
+
+    bool has_base_color_texture = material.flags.x != 0u;
+    bool has_metallic_roughness_texture = material.flags.y != 0u;
+    bool has_normal_texture = material.flags.z != 0u;
+    bool alpha_masked = material.flags.w != 0u;
+
+    vec2 base_uv = (material.texcoord_selectors.x == 1u) ? v_uv1 : v_uv0;
+    vec4 base_sample = has_base_color_texture ? texture(u_base_color_texture, base_uv) : vec4(1.0);
+    vec3 base_color = clamp(material.base_color_alpha.rgb * base_sample.rgb, 0.0, 1.0);
+    float alpha = clamp(material.base_color_alpha.a * base_sample.a, 0.0, 1.0);
+    if (alpha_masked && alpha < material.metallic_roughness_normal_scale_alpha_cutoff.w)
     {
         discard;
     }
 
-    vec2 mr_uv = (u_metallic_roughness_texcoord == 1) ? v_uv1 : v_uv0;
-    vec4 mr_sample = (u_has_metallic_roughness_texture != 0) ? texture(u_metallic_roughness_texture, mr_uv) : vec4(1.0);
-    float metallic = clamp(u_metallic * mr_sample.b, 0.0, 1.0);
-    float roughness = clamp(u_roughness * mr_sample.g, 0.0, 1.0);
+    vec2 mr_uv = (material.texcoord_selectors.y == 1u) ? v_uv1 : v_uv0;
+    vec4 mr_sample = has_metallic_roughness_texture ? texture(u_metallic_roughness_texture, mr_uv) : vec4(1.0);
+    float metallic = clamp(material.metallic_roughness_normal_scale_alpha_cutoff.x * mr_sample.b, 0.0, 1.0);
+    float roughness = clamp(material.metallic_roughness_normal_scale_alpha_cutoff.y * mr_sample.g, 0.0, 1.0);
 
     vec3 normal = normalize(v_world_normal);
     if (dot(normal, normal) < 0.00001)
@@ -50,11 +58,11 @@ void main()
         normal = vec3(0.0, 1.0, 0.0);
     }
 
-    if (u_has_normal_texture != 0)
+    if (has_normal_texture)
     {
-        vec2 normal_uv = (u_normal_texcoord == 1) ? v_uv1 : v_uv0;
+        vec2 normal_uv = (material.texcoord_selectors.z == 1u) ? v_uv1 : v_uv0;
         vec3 tangent_normal = texture(u_normal_texture, normal_uv).xyz * 2.0 - 1.0;
-        tangent_normal.xy *= u_normal_scale;
+        tangent_normal.xy *= material.metallic_roughness_normal_scale_alpha_cutoff.z;
         tangent_normal = normalize(tangent_normal);
 
         vec3 tangent = normalize(v_world_tangent);
@@ -72,5 +80,5 @@ void main()
 
     o_rt0 = vec4(base_color, metallic);
     o_rt1 = vec4(normal * 0.5 + 0.5, roughness);
-    o_entity_id = u_instance_id;
+    o_entity_id = v_entity_id;
 }
