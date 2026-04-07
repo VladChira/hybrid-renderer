@@ -66,139 +66,70 @@ namespace hybrid::renderer
             }
         }
 
-        glm::vec3 ResolvePrimitiveBaseColor(const core::scene::MeshPrimitive &primitive)
+        struct ResolvedMaterialTexture
         {
-            if (const auto *material = primitive.material.Get())
+            const core::scene::MaterialTexture *texture = nullptr;
+            uint64_t image_id = 0;
+            bool has_texture = false;
+            int texcoord = 0;
+        };
+
+        struct ResolvedMaterial
+        {
+            glm::vec3 base_color{0.8f};
+            float base_alpha = 1.0f;
+            float metallic = 0.0f;
+            float roughness = 1.0f;
+            bool alpha_masked = false;
+            float alpha_cutoff = 0.5f;
+            float normal_scale = 1.0f;
+            ResolvedMaterialTexture base_color_texture{};
+            ResolvedMaterialTexture metallic_roughness_texture{};
+            ResolvedMaterialTexture normal_texture{};
+        };
+
+        ResolvedMaterialTexture ResolveMaterialTexture(const core::scene::MaterialTexture &texture)
+        {
+            ResolvedMaterialTexture resolved{};
+            resolved.texcoord = texture.texcoord == 1 ? 1 : 0;
+
+            if (!texture.image.IsValid())
             {
-                return glm::vec3(material->base_color_factor);
+                return resolved;
             }
-            return glm::vec3(0.8f);
+
+            const uint64_t image_id = texture.image.Id().value;
+            if (image_id == 0)
+            {
+                return resolved;
+            }
+
+            resolved.texture = &texture;
+            resolved.image_id = image_id;
+            resolved.has_texture = true;
+            return resolved;
         }
 
-        float ResolvePrimitiveMetallic(const core::scene::MeshPrimitive &primitive)
+        ResolvedMaterial ResolvePrimitiveMaterial(const core::scene::MeshPrimitive &primitive)
         {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->metallic_factor;
-            }
-            return 0.0f;
-        }
-
-        float ResolvePrimitiveRoughness(const core::scene::MeshPrimitive &primitive)
-        {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->roughness_factor;
-            }
-            return 1.0f;
-        }
-
-        float ResolvePrimitiveBaseAlpha(const core::scene::MeshPrimitive &primitive)
-        {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->base_color_factor.a;
-            }
-            return 1.0f;
-        }
-
-        bool ResolvePrimitiveAlphaMasked(const core::scene::MeshPrimitive &primitive)
-        {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->alpha_mode == core::scene::AlphaMode::Mask;
-            }
-            return false;
-        }
-
-        float ResolvePrimitiveAlphaCutoff(const core::scene::MeshPrimitive &primitive)
-        {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->alpha_cutoff;
-            }
-            return 0.5f;
-        }
-
-        const core::scene::MaterialTexture *ResolvePrimitiveBaseColorTexture(const core::scene::MeshPrimitive &primitive)
-        {
+            ResolvedMaterial resolved{};
             const auto *material = primitive.material.Get();
             if (material == nullptr)
             {
-                return nullptr;
+                return resolved;
             }
-            if (!material->base_color_texture.image.IsValid())
-            {
-                return nullptr;
-            }
-            return &material->base_color_texture;
-        }
 
-        int ResolvePrimitiveBaseColorTexcoord(const core::scene::MeshPrimitive &primitive)
-        {
-            const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive);
-            if (base_color_texture == nullptr)
-            {
-                return 0;
-            }
-            return base_color_texture->texcoord == 1 ? 1 : 0;
-        }
-
-        const core::scene::MaterialTexture *ResolvePrimitiveMetallicRoughnessTexture(const core::scene::MeshPrimitive &primitive)
-        {
-            const auto *material = primitive.material.Get();
-            if (material == nullptr)
-            {
-                return nullptr;
-            }
-            if (!material->metallic_roughness_texture.image.IsValid())
-            {
-                return nullptr;
-            }
-            return &material->metallic_roughness_texture;
-        }
-
-        const core::scene::MaterialTexture *ResolvePrimitiveNormalTexture(const core::scene::MeshPrimitive &primitive)
-        {
-            const auto *material = primitive.material.Get();
-            if (material == nullptr)
-            {
-                return nullptr;
-            }
-            if (!material->normal_texture.image.IsValid())
-            {
-                return nullptr;
-            }
-            return &material->normal_texture;
-        }
-
-        int ResolvePrimitiveMetallicRoughnessTexcoord(const core::scene::MeshPrimitive &primitive)
-        {
-            const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
-            if (metallic_roughness_texture == nullptr)
-            {
-                return 0;
-            }
-            return metallic_roughness_texture->texcoord == 1 ? 1 : 0;
-        }
-
-        int ResolvePrimitiveNormalTexcoord(const core::scene::MeshPrimitive &primitive)
-        {
-            const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive);
-            if (normal_texture == nullptr)
-            {
-                return 0;
-            }
-            return normal_texture->texcoord == 1 ? 1 : 0;
-        }
-
-        float ResolvePrimitiveNormalScale(const core::scene::MeshPrimitive &primitive)
-        {
-            if (const auto *material = primitive.material.Get())
-            {
-                return material->normal_scale;
-            }
-            return 1.0f;
+            resolved.base_color = glm::vec3(material->base_color_factor);
+            resolved.base_alpha = material->base_color_factor.a;
+            resolved.metallic = material->metallic_factor;
+            resolved.roughness = material->roughness_factor;
+            resolved.alpha_masked = material->alpha_mode == core::scene::AlphaMode::Mask;
+            resolved.alpha_cutoff = material->alpha_cutoff;
+            resolved.normal_scale = material->normal_scale;
+            resolved.base_color_texture = ResolveMaterialTexture(material->base_color_texture);
+            resolved.metallic_roughness_texture = ResolveMaterialTexture(material->metallic_roughness_texture);
+            resolved.normal_texture = ResolveMaterialTexture(material->normal_texture);
+            return resolved;
         }
 
         GLint ToGlWrap(const core::scene::TextureWrap wrap)
@@ -470,31 +401,32 @@ namespace hybrid::renderer
         const RenderSettings &settings = *input.settings;
         RendererStats::GBufferStats *gbuffer_stats =
             input.renderer_stats != nullptr ? &input.renderer_stats->gbuffer : nullptr;
+        std::unordered_map<uint64_t, ResolvedMaterial> material_cache;
 
         {
             HYBRID_PROFILE_ZONE_N("GBufferPass::Setup");
-        glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
-        glViewport(0, 0,
-                   static_cast<GLsizei>(settings.render_extent.width),
-                   static_cast<GLsizei>(settings.render_extent.height));
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glBindFramebuffer(GL_FRAMEBUFFER, input.gbuffer_framebuffer_id);
+            glViewport(0, 0,
+                       static_cast<GLsizei>(settings.render_extent.width),
+                       static_cast<GLsizei>(settings.render_extent.height));
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
-        glClearBufferfv(GL_COLOR, 0, clear_rt0);
-        glClearBufferfv(GL_COLOR, 1, clear_rt1);
-        glClearBufferuiv(GL_COLOR, 2, clear_entity_id);
-        glClear(GL_DEPTH_BUFFER_BIT);
+            const GLfloat clear_rt0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            const GLfloat clear_rt1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            const GLuint clear_entity_id[1] = {std::numeric_limits<uint32_t>::max()};
+            glClearBufferfv(GL_COLOR, 0, clear_rt0);
+            glClearBufferfv(GL_COLOR, 1, clear_rt1);
+            glClearBufferuiv(GL_COLOR, 2, clear_entity_id);
+            glClear(GL_DEPTH_BUFFER_BIT);
 
-        m_gbuffer_shader->Use();
-        m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
-        m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
-        m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
-        m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
-        m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
+            m_gbuffer_shader->Use();
+            m_gbuffer_shader->SetUniformMat4("u_view", effective_view.view);
+            m_gbuffer_shader->SetUniformMat4("u_projection", effective_view.projection);
+            m_gbuffer_shader->SetUniform1i("u_base_color_texture", 0);
+            m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texture", 1);
+            m_gbuffer_shader->SetUniform1i("u_normal_texture", 2);
         }
 
         if (!m_impl->white_texture_initialized)
@@ -567,17 +499,25 @@ namespace hybrid::renderer
                     continue;
                 }
 
+                const uint64_t material_asset_id = primitive.material.Id().value;
+                auto material_it = material_cache.find(material_asset_id);
+                if (material_it == material_cache.end())
+                {
+                    material_it = material_cache.emplace(material_asset_id, ResolvePrimitiveMaterial(primitive)).first;
+                }
+                const ResolvedMaterial &resolved_material = material_it->second;
+
                 m_gbuffer_shader->SetUniformMat4("u_model", instance.world_from_local);
-                m_gbuffer_shader->SetUniformVec3("u_base_color", ResolvePrimitiveBaseColor(primitive));
-                m_gbuffer_shader->SetUniform1f("u_base_alpha", ResolvePrimitiveBaseAlpha(primitive));
-                m_gbuffer_shader->SetUniform1f("u_metallic", ResolvePrimitiveMetallic(primitive));
-                m_gbuffer_shader->SetUniform1f("u_roughness", ResolvePrimitiveRoughness(primitive));
-                m_gbuffer_shader->SetUniform1i("u_alpha_masked", ResolvePrimitiveAlphaMasked(primitive) ? 1 : 0);
-                m_gbuffer_shader->SetUniform1f("u_alpha_cutoff", ResolvePrimitiveAlphaCutoff(primitive));
-                m_gbuffer_shader->SetUniform1i("u_base_color_texcoord", ResolvePrimitiveBaseColorTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texcoord", ResolvePrimitiveMetallicRoughnessTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1i("u_normal_texcoord", ResolvePrimitiveNormalTexcoord(primitive));
-                m_gbuffer_shader->SetUniform1f("u_normal_scale", ResolvePrimitiveNormalScale(primitive));
+                m_gbuffer_shader->SetUniformVec3("u_base_color", resolved_material.base_color);
+                m_gbuffer_shader->SetUniform1f("u_base_alpha", resolved_material.base_alpha);
+                m_gbuffer_shader->SetUniform1f("u_metallic", resolved_material.metallic);
+                m_gbuffer_shader->SetUniform1f("u_roughness", resolved_material.roughness);
+                m_gbuffer_shader->SetUniform1i("u_alpha_masked", resolved_material.alpha_masked ? 1 : 0);
+                m_gbuffer_shader->SetUniform1f("u_alpha_cutoff", resolved_material.alpha_cutoff);
+                m_gbuffer_shader->SetUniform1i("u_base_color_texcoord", resolved_material.base_color_texture.texcoord);
+                m_gbuffer_shader->SetUniform1i("u_metallic_roughness_texcoord", resolved_material.metallic_roughness_texture.texcoord);
+                m_gbuffer_shader->SetUniform1i("u_normal_texcoord", resolved_material.normal_texture.texcoord);
+                m_gbuffer_shader->SetUniform1f("u_normal_scale", resolved_material.normal_scale);
                 m_gbuffer_shader->SetUniform1ui("u_instance_id", static_cast<uint32_t>(instance.instance_id));
                 if (gbuffer_stats != nullptr)
                 {
@@ -586,39 +526,38 @@ namespace hybrid::renderer
                 }
 
                 bool has_base_color_texture = false;
-                if (const auto *base_color_texture = ResolvePrimitiveBaseColorTexture(primitive); base_color_texture != nullptr)
+                if (resolved_material.base_color_texture.has_texture)
                 {
-                    const uint64_t image_id = base_color_texture->image.Id().value;
-                    if (image_id != 0)
+                    auto cached_texture_it = m_impl->texture_cache.find(resolved_material.base_color_texture.image_id);
+                    if (cached_texture_it == m_impl->texture_cache.end())
                     {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
+                        if (gbuffer_stats != nullptr)
                         {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
-
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadBaseColorTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*base_color_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
+                            gbuffer_stats->texture_cache_misses++;
                         }
 
-                        if (cached_texture_it != m_impl->texture_cache.end())
+                        HYBRID_PROFILE_ZONE_N("GBufferPass::UploadBaseColorTextureCacheMiss");
+                        CachedTextureGpu texture_gpu{};
+                        if (UploadTextureToGpu(*resolved_material.base_color_texture.texture, texture_gpu))
                         {
-                            cached_texture_it->second.texture.BindToUnit(0);
-                            has_base_color_texture = true;
                             if (gbuffer_stats != nullptr)
                             {
-                                gbuffer_stats->texture_binds++;
+                                gbuffer_stats->texture_uploads++;
                             }
+                            cached_texture_it = m_impl->texture_cache.emplace(
+                                                                      resolved_material.base_color_texture.image_id,
+                                                                      std::move(texture_gpu))
+                                                  .first;
+                        }
+                    }
+
+                    if (cached_texture_it != m_impl->texture_cache.end())
+                    {
+                        cached_texture_it->second.texture.BindToUnit(0);
+                        has_base_color_texture = true;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
                         }
                     }
                 }
@@ -638,40 +577,38 @@ namespace hybrid::renderer
                 }
 
                 bool has_metallic_roughness_texture = false;
-                if (const auto *metallic_roughness_texture = ResolvePrimitiveMetallicRoughnessTexture(primitive);
-                    metallic_roughness_texture != nullptr)
+                if (resolved_material.metallic_roughness_texture.has_texture)
                 {
-                    const uint64_t image_id = metallic_roughness_texture->image.Id().value;
-                    if (image_id != 0)
+                    auto cached_texture_it = m_impl->texture_cache.find(resolved_material.metallic_roughness_texture.image_id);
+                    if (cached_texture_it == m_impl->texture_cache.end())
                     {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
+                        if (gbuffer_stats != nullptr)
                         {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
-
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadMetallicRoughnessTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*metallic_roughness_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
+                            gbuffer_stats->texture_cache_misses++;
                         }
 
-                        if (cached_texture_it != m_impl->texture_cache.end())
+                        HYBRID_PROFILE_ZONE_N("GBufferPass::UploadMetallicRoughnessTextureCacheMiss");
+                        CachedTextureGpu texture_gpu{};
+                        if (UploadTextureToGpu(*resolved_material.metallic_roughness_texture.texture, texture_gpu))
                         {
-                            cached_texture_it->second.texture.BindToUnit(1);
-                            has_metallic_roughness_texture = true;
                             if (gbuffer_stats != nullptr)
                             {
-                                gbuffer_stats->texture_binds++;
+                                gbuffer_stats->texture_uploads++;
                             }
+                            cached_texture_it = m_impl->texture_cache.emplace(
+                                                                      resolved_material.metallic_roughness_texture.image_id,
+                                                                      std::move(texture_gpu))
+                                                  .first;
+                        }
+                    }
+
+                    if (cached_texture_it != m_impl->texture_cache.end())
+                    {
+                        cached_texture_it->second.texture.BindToUnit(1);
+                        has_metallic_roughness_texture = true;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
                         }
                     }
                 }
@@ -691,39 +628,38 @@ namespace hybrid::renderer
                 }
 
                 bool has_normal_texture = false;
-                if (const auto *normal_texture = ResolvePrimitiveNormalTexture(primitive); normal_texture != nullptr)
+                if (resolved_material.normal_texture.has_texture)
                 {
-                    const uint64_t image_id = normal_texture->image.Id().value;
-                    if (image_id != 0)
+                    auto cached_texture_it = m_impl->texture_cache.find(resolved_material.normal_texture.image_id);
+                    if (cached_texture_it == m_impl->texture_cache.end())
                     {
-                        auto cached_texture_it = m_impl->texture_cache.find(image_id);
-                        if (cached_texture_it == m_impl->texture_cache.end())
+                        if (gbuffer_stats != nullptr)
                         {
-                            if (gbuffer_stats != nullptr)
-                            {
-                                gbuffer_stats->texture_cache_misses++;
-                            }
-
-                            HYBRID_PROFILE_ZONE_N("GBufferPass::UploadNormalTextureCacheMiss");
-                            CachedTextureGpu texture_gpu{};
-                            if (UploadTextureToGpu(*normal_texture, texture_gpu))
-                            {
-                                if (gbuffer_stats != nullptr)
-                                {
-                                    gbuffer_stats->texture_uploads++;
-                                }
-                                cached_texture_it = m_impl->texture_cache.emplace(image_id, std::move(texture_gpu)).first;
-                            }
+                            gbuffer_stats->texture_cache_misses++;
                         }
 
-                        if (cached_texture_it != m_impl->texture_cache.end())
+                        HYBRID_PROFILE_ZONE_N("GBufferPass::UploadNormalTextureCacheMiss");
+                        CachedTextureGpu texture_gpu{};
+                        if (UploadTextureToGpu(*resolved_material.normal_texture.texture, texture_gpu))
                         {
-                            cached_texture_it->second.texture.BindToUnit(2);
-                            has_normal_texture = true;
                             if (gbuffer_stats != nullptr)
                             {
-                                gbuffer_stats->texture_binds++;
+                                gbuffer_stats->texture_uploads++;
                             }
+                            cached_texture_it = m_impl->texture_cache.emplace(
+                                                                      resolved_material.normal_texture.image_id,
+                                                                      std::move(texture_gpu))
+                                                  .first;
+                        }
+                    }
+
+                    if (cached_texture_it != m_impl->texture_cache.end())
+                    {
+                        cached_texture_it->second.texture.BindToUnit(2);
+                        has_normal_texture = true;
+                        if (gbuffer_stats != nullptr)
+                        {
+                            gbuffer_stats->texture_binds++;
                         }
                     }
                 }
