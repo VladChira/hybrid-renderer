@@ -89,7 +89,7 @@ Diffuse GI is important but expensive and uncertain. Do not block the rest of th
 
 - Windowing/input/platform abstraction over GLFW.
 - `Platform.*`:
-  - creates window + OpenGL 3.3 core context
+  - creates window + OpenGL 4.6 core context
   - stores events and input snapshot each frame
   - exposes native window handle to other modules
 - `PlatformEvents.h`: event and input structs (`PlatformEvent`, `InputState`, `NativeWindowHandle`).
@@ -188,5 +188,60 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
 
 ## Current state vs hybrid target
 
-- Current renderer implements deferred shading partially, missing IBL, area lights.
+- Current renderer implements deferred shading partially, missing area lights.
 - No ray traced effects are in place (shadows would be the first)
+
+## Ray tracing readiness analysis (2026-04-07)
+
+### Overall readiness
+
+- The codebase is architecturally close, but not yet implementation-ready for robust real-time ray tracing.
+- BVH prototyping can start now.
+- Production-quality ray-traced shadows/reflections need core renderer infrastructure first.
+
+### What is already in place
+
+- CPU-side geometry and bounds are available in renderer-friendly scene assets (`vertices`, `indices`, primitive/mesh `Aabb`).
+- Per-instance world transforms and world bounds are already extracted for each frame.
+- Dirty queues for transforms/meshes/lights already exist and can drive TLAS refit/rebuild decisions.
+- Pass-oriented renderer structure exists and is a good integration point for future ray passes.
+
+### Major missing pieces
+
+- No ray execution path yet:
+  - no compute/ray pipeline in the shader manager/runtime
+  - no compute dispatch path in renderer orchestration
+- No acceleration structure system:
+  - no BLAS/TLAS data model
+  - no builder/refit lifecycle
+  - no GPU node/index buffers for traversal
+- No shared geometry GPU database for both raster and ray paths:
+  - current mesh upload/cache is scoped inside `GBufferPass`
+- Lighting extraction is ahead of shading usage:
+  - area lights and `cast_shadows` flags exist in frame data
+  - deferred shader currently uses directional + point lights only
+- Reflections are currently IBL-only, not ray traced.
+- Material fidelity gap for ray hits:
+  - scene material model includes UV transform/occlusion/emissive
+  - G-buffer path currently resolves baseColor/metallic-roughness/normal only
+- Blended geometry is tracked but not integrated into a ray-tracing strategy.
+- Performance debt:
+  - frame targets are reallocated each frame path; this will hurt headroom needed for ray workloads
+
+### Recommended implementation order
+
+1. Add compute-shader support in shader/runtime abstractions and renderer pass plumbing.
+2. Create shared GPU geometry/material buffers consumable by both raster and ray passes.
+3. Implement BLAS per mesh + TLAS per instance, wired to scene dirty queues.
+4. Add first ray pass: shadow rays (directional/point), output shadow mask, compose in deferred lighting.
+5. Add reflection ray pass with IBL fallback and roughness-aware sampling budget.
+6. Add ray debug UI + telemetry + renderer-focused tests/regression baselines.
+
+### Immediate tactical guidance
+
+- Start with a CPU BVH and debug visualization first to validate scene extraction, bounds, and update logic.
+- Keep first integration to low-risk effects (single-bounce shadows), then expand to reflections.
+- Do not start with GI-first development; keep GI as a follow-up phase.
+
+## Notes
+You cannot run builds in your sandboxed environment. Let me do it.

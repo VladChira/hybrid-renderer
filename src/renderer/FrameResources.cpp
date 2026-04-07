@@ -7,6 +7,13 @@ namespace hybrid::renderer
 
     bool FrameResources::Resize(const RenderExtent &extent)
     {
+        if (m_valid &&
+            m_extent.width == extent.width &&
+            m_extent.height == extent.height)
+        {
+            return true;
+        }
+
         m_extent = extent;
         if (!m_extent.IsValid())
         {
