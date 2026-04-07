@@ -67,18 +67,13 @@ namespace hybrid::assets
         {
             const std::string node_name = node.mName.C_Str();
             entt::entity entity = scene.CreateEntity(node_name);
-            auto &registry = scene.Registry();
 
             if (!node_name.empty() && !entities_by_name.try_emplace(node_name, entity).second)
             {
                 LOG_WARN("[AssimpSceneLoader] Duplicate node name for entity lookup: '" + node_name + "', keeping first instance");
             }
 
-            if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(entity))
-            {
-                transform->local = ToTransform(node.mTransformation);
-                transform->dirty = true;
-            }
+            scene.SetLocalTransform(entity, ToTransform(node.mTransformation));
 
             if (parent_entity != entt::null)
             {
@@ -102,8 +97,8 @@ namespace hybrid::assets
                     camera_component.far_plane = camera.mClipPlaneFar;
                 }
 
-                registry.emplace<hybrid::core::scene::CameraComponent>(entity, camera_component);
-                registry.emplace<hybrid::core::scene::CameraTargetComponent>(entity);
+                scene.AddCamera(entity, camera_component);
+                scene.SetCameraTarget(entity, false, entt::null);
             }
 
             if (node.mNumMeshes == 1)
@@ -111,8 +106,7 @@ namespace hybrid::assets
                 const unsigned int mesh_index = node.mMeshes[0];
                 if (mesh_index < mesh_handles.size())
                 {
-                    registry.emplace<hybrid::core::scene::MeshRendererComponent>(
-                        entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
+                    scene.AddMeshRenderer(entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
                 }
                 else
                 {
@@ -138,14 +132,9 @@ namespace hybrid::assets
                                                       ? ("mesh_" + std::to_string(i))
                                                       : (node_name + "_mesh_" + std::to_string(i));
                     entt::entity mesh_entity = scene.CreateEntity(mesh_name);
-                    if (auto *mesh_transform = registry.try_get<hybrid::core::scene::TransformComponent>(mesh_entity))
-                    {
-                        mesh_transform->local = hybrid::core::scene::Transform{};
-                        mesh_transform->dirty = true;
-                    }
+                    scene.SetLocalTransform(mesh_entity, hybrid::core::scene::Transform{});
                     scene.SetParent(mesh_entity, entity);
-                    registry.emplace<hybrid::core::scene::MeshRendererComponent>(
-                        mesh_entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
+                    scene.AddMeshRenderer(mesh_entity, hybrid::core::scene::MeshRendererComponent{mesh_handles[mesh_index]});
                 }
             }
 
@@ -161,8 +150,6 @@ namespace hybrid::assets
                           hybrid::core::scene::SceneWorld &scene)
         {
             LOG_INFO("[AssimpSceneLoader] \t Processing lights...");
-
-            auto &registry = scene.Registry();
             bool has_hdri_light = false;
             assets::AssetHandle<assets::ImageAsset> default_hdri{};
             if (assets != nullptr)
@@ -203,24 +190,20 @@ namespace hybrid::assets
                     {
                         entities_by_name.try_emplace(source_name, light_entity);
                     }
-
-                    if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(light_entity))
-                    {
-                        transform->local.translation = ToVec3(light->mPosition);
-                        transform->dirty = true;
-                    }
+                    scene.SetLocalTranslation(light_entity, ToVec3(light->mPosition));
                 }
 
                 const glm::vec3 color = ToVec3(light->mColorDiffuse);
-                auto &common = registry.get_or_emplace<hybrid::core::scene::LightCommonComponent>(light_entity);
+                hybrid::core::scene::LightCommonComponent common{};
                 common.color = color;
                 common.intensity = 1.0f;
+                scene.RemoveLight(light_entity);
 
                 switch (light->mType)
                 {
                 case aiLightSource_POINT:
                 {
-                    auto &point = registry.get_or_emplace<hybrid::core::scene::PointLightComponent>(light_entity);
+                    hybrid::core::scene::PointLightComponent point{};
                     point.attenuation_constant = light->mAttenuationConstant;
                     point.attenuation_linear = light->mAttenuationLinear;
                     point.attenuation_quadratic = light->mAttenuationQuadratic;
@@ -228,33 +211,31 @@ namespace hybrid::assets
                     {
                         point.range = std::sqrt(1.0f / light->mAttenuationQuadratic);
                     }
+                    scene.AddPointLight(light_entity, common, point);
                     break;
                 }
                 case aiLightSource_DIRECTIONAL:
                 {
-                    registry.get_or_emplace<hybrid::core::scene::DirectionalLightComponent>(light_entity);
-
-                    if (auto *transform = registry.try_get<hybrid::core::scene::TransformComponent>(light_entity))
-                    {
-                        const glm::vec3 imported_direction =
-                            NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
-                        transform->local.rotation = RotationFromTo(glm::vec3(0.0f, -1.0f, 0.0f), imported_direction);
-                        transform->dirty = true;
-                    }
+                    scene.AddDirectionalLight(light_entity, common, hybrid::core::scene::DirectionalLightComponent{});
+                    const glm::vec3 imported_direction =
+                        NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
+                    scene.SetLocalRotation(light_entity, RotationFromTo(glm::vec3(0.0f, -1.0f, 0.0f), imported_direction));
                     break;
                 }
                 case aiLightSource_AREA:
                 {
-                    auto &area = registry.get_or_emplace<hybrid::core::scene::AreaLightComponent>(light_entity);
+                    hybrid::core::scene::AreaLightComponent area{};
                     area.direction = NormalizeOrDefault(ToVec3(light->mDirection), glm::vec3(0.0f, -1.0f, 0.0f));
                     area.size = glm::vec2(1.0f);
+                    scene.AddAreaLight(light_entity, common, area);
                     break;
                 }
                 case aiLightSource_AMBIENT:
                 {
-                    auto &ambient = registry.get_or_emplace<hybrid::core::scene::HdriLightComponent>(light_entity);
+                    hybrid::core::scene::HdriLightComponent ambient{};
                     ambient.yaw_radians = 0.0f;
                     ambient.texture = default_hdri;
+                    scene.AddHdriLight(light_entity, common, ambient);
                     has_hdri_light = true;
                     break;
                 }
@@ -266,12 +247,13 @@ namespace hybrid::assets
             if (!has_hdri_light)
             {
                 const entt::entity default_hdri_entity = scene.CreateEntity("Default HDRI");
-                auto &common = registry.emplace<hybrid::core::scene::LightCommonComponent>(default_hdri_entity);
+                hybrid::core::scene::LightCommonComponent common{};
                 common.intensity = 1.0f;
 
-                auto &ambient = registry.emplace<hybrid::core::scene::HdriLightComponent>(default_hdri_entity);
+                hybrid::core::scene::HdriLightComponent ambient{};
                 ambient.yaw_radians = 0.0f;
                 ambient.texture = default_hdri;
+                scene.AddHdriLight(default_hdri_entity, common, ambient);
             }
         }
 

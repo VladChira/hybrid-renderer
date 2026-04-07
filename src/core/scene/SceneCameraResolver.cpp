@@ -39,14 +39,19 @@ namespace hybrid::core::scene
 
         entt::entity EnsurePrimaryCameraEntity(SceneWorld &scene_world)
         {
-            auto &registry = scene_world.Registry();
             entt::entity primary_camera = entt::null;
+            std::vector<entt::entity> cameras{};
+            scene_world.GetEntitiesWithCamera(cameras);
 
-            auto primary_view = registry.view<PrimaryCameraComponent>();
             std::vector<entt::entity> invalid_primaries{};
-            for (const entt::entity entity : primary_view)
+            for (const entt::entity entity : cameras)
             {
-                if (registry.all_of<CameraComponent, TransformComponent>(entity) && primary_camera == entt::null)
+                if (scene_world.TryGetPrimaryCamera(entity) == nullptr)
+                {
+                    continue;
+                }
+
+                if (scene_world.TryGetTransform(entity) != nullptr && primary_camera == entt::null)
                 {
                     primary_camera = entity;
                 }
@@ -58,7 +63,7 @@ namespace hybrid::core::scene
 
             for (const entt::entity entity : invalid_primaries)
             {
-                registry.remove<PrimaryCameraComponent>(entity);
+                scene_world.SetPrimaryCamera(entity, false);
             }
 
             if (primary_camera != entt::null)
@@ -66,11 +71,14 @@ namespace hybrid::core::scene
                 return primary_camera;
             }
 
-            if (auto camera_view = registry.view<CameraComponent, TransformComponent>(); camera_view.begin() != camera_view.end())
+            for (const entt::entity entity : cameras)
             {
-                primary_camera = *camera_view.begin();
-                registry.emplace_or_replace<PrimaryCameraComponent>(primary_camera);
-                return primary_camera;
+                if (scene_world.TryGetTransform(entity) == nullptr)
+                {
+                    continue;
+                }
+                scene_world.SetPrimaryCamera(entity, true);
+                return entity;
             }
 
             if (static bool warned = false; !warned)
@@ -80,18 +88,19 @@ namespace hybrid::core::scene
             }
 
             const entt::entity camera_entity = scene_world.CreateEntity("Default Camera");
-            auto &transform = registry.get<TransformComponent>(camera_entity);
-            transform.local.translation = kDefaultCameraPosition;
-            transform.local.rotation = glm::quatLookAt(glm::normalize(-kDefaultCameraPosition),
-                                                       glm::vec3(0.0f, 2.2f, 0.0f));
-            transform.local.scale = glm::vec3(1.0f);
-            transform.dirty = true;
+            Transform camera_transform{};
+            camera_transform.translation = kDefaultCameraPosition;
+            camera_transform.rotation = glm::quatLookAt(glm::normalize(-kDefaultCameraPosition),
+                                                        glm::vec3(0.0f, 2.2f, 0.0f));
+            camera_transform.scale = glm::vec3(1.0f);
+            scene_world.SetLocalTransform(camera_entity, camera_transform);
 
-            auto &camera = registry.emplace<CameraComponent>(camera_entity);
+            CameraComponent camera{};
             camera.horizontal_fov_radians = glm::radians(75.0f);
             camera.near_plane = 0.1f;
             camera.far_plane = 1000.0f;
-            registry.emplace<PrimaryCameraComponent>(camera_entity);
+            scene_world.AddCamera(camera_entity, camera);
+            scene_world.SetPrimaryCamera(camera_entity, true);
 
             scene_world.UpdateTransforms();
             return camera_entity;

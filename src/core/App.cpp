@@ -113,6 +113,7 @@ namespace hybrid::core
         while (!m_should_quit && !platform.ShouldClose())
         {
             HYBRID_PROFILE_ZONE_N("App::Frame");
+            bool active_scene_changed = false;
             {
                 HYBRID_PROFILE_ZONE_N("App::PollEvents");
                 platform.PollEvents();
@@ -139,6 +140,7 @@ namespace hybrid::core
                     if (load_result.success)
                     {
                         m_active_scene = load_result.scene_id;
+                        active_scene_changed = true;
                         LOG_INFO("[App] Scene loaded: " + load_result.path);
                     }
                     else
@@ -156,10 +158,10 @@ namespace hybrid::core
                                          : nullptr;
             }
             {
-                HYBRID_PROFILE_ZONE_N("App::UpdateSceneTransforms");
-                if (active_scene_world)
+                HYBRID_PROFILE_ZONE_N("App::FlushSceneOnActivation");
+                if (active_scene_world && active_scene_changed)
                 {
-                    active_scene_world->UpdateTransforms();
+                    active_scene_world->FlushPendingChanges();
                 }
             }
 
@@ -241,6 +243,10 @@ namespace hybrid::core
             {
                 HYBRID_PROFILE_ZONE_N("App::ProcessUiCommands");
                 ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
+                if (active_scene_world && !commands.empty())
+                {
+                    active_scene_world->FlushPendingChanges();
+                }
             }
 
             platform.SwapBuffers();

@@ -13,12 +13,6 @@ namespace hybrid::core
 {
     namespace
     {
-        template <typename TComponent>
-        void EmitComponentUpdated(entt::registry &registry, entt::entity entity)
-        {
-            registry.patch<TComponent>(entity, [](TComponent &) {});
-        }
-
         scene::SceneWorld *ResolveActiveSceneWorld(assets::AssetManager &assets, assets::AssetId active_scene)
         {
             if (!active_scene.IsValid())
@@ -38,32 +32,6 @@ namespace hybrid::core
             return glm::normalize(vector);
         }
 
-        void AssignPrimaryCamera(scene::SceneWorld &scene_world, entt::entity primary_camera)
-        {
-            auto &registry = scene_world.Registry();
-            if (!scene_world.IsValid(primary_camera) || !registry.all_of<scene::CameraComponent>(primary_camera))
-            {
-                return;
-            }
-
-            auto primary_view = registry.view<scene::PrimaryCameraComponent>();
-            std::vector<entt::entity> to_clear{};
-            for (const entt::entity entity : primary_view)
-            {
-                if (entity == primary_camera)
-                {
-                    continue;
-                }
-                to_clear.push_back(entity);
-            }
-
-            for (const entt::entity entity : to_clear)
-            {
-                registry.remove<scene::PrimaryCameraComponent>(entity);
-            }
-
-            registry.emplace_or_replace<scene::PrimaryCameraComponent>(primary_camera);
-        }
     } // namespace
 
     void ProcessUiCommands(const ui::CommandBuffer &commands,
@@ -90,10 +58,7 @@ namespace hybrid::core
                         {
                             return;
                         }
-
-                        auto &registry = active_scene_world->Registry();
-                        auto &name = registry.get_or_emplace<scene::NameComponent>(typed_command.entity);
-                        name.name = typed_command.name;
+                        active_scene_world->SetName(typed_command.entity, typed_command.name);
                     }
                     else if constexpr (std::is_same_v<T, ui::EntitySetLocalTransformCommand>)
                     {
@@ -101,14 +66,7 @@ namespace hybrid::core
                         {
                             return;
                         }
-
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *transform = registry.try_get<scene::TransformComponent>(typed_command.entity))
-                        {
-                            transform->local = typed_command.local;
-                            EmitComponentUpdated<scene::TransformComponent>(registry, typed_command.entity);
-                            active_scene_world->MarkDirty(typed_command.entity);
-                        }
+                        active_scene_world->SetLocalTransform(typed_command.entity, typed_command.local);
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetLensCommand>)
                     {
@@ -116,15 +74,10 @@ namespace hybrid::core
                         {
                             return;
                         }
-
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *camera = registry.try_get<scene::CameraComponent>(typed_command.entity))
-                        {
-                            camera->horizontal_fov_radians = std::max(0.0174533f, typed_command.horizontal_fov_radians);
-                            camera->near_plane = std::max(0.001f, typed_command.near_plane);
-                            camera->far_plane = std::max(camera->near_plane + 0.001f, typed_command.far_plane);
-                            EmitComponentUpdated<scene::CameraComponent>(registry, typed_command.entity);
-                        }
+                        active_scene_world->SetCameraLens(typed_command.entity,
+                                                          typed_command.horizontal_fov_radians,
+                                                          typed_command.near_plane,
+                                                          typed_command.far_plane);
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetTargetCommand>)
                     {
@@ -132,18 +85,9 @@ namespace hybrid::core
                         {
                             return;
                         }
-
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *camera_target = registry.try_get<scene::CameraTargetComponent>(typed_command.entity))
-                        {
-                            camera_target->enabled = typed_command.enabled;
-                            camera_target->target = typed_command.target;
-                            if (camera_target->target != entt::null && !active_scene_world->IsValid(camera_target->target))
-                            {
-                                camera_target->target = entt::null;
-                            }
-                            EmitComponentUpdated<scene::CameraTargetComponent>(registry, typed_command.entity);
-                        }
+                        active_scene_world->SetCameraTarget(typed_command.entity,
+                                                            typed_command.enabled,
+                                                            typed_command.target);
                     }
                     else if constexpr (std::is_same_v<T, ui::CameraSetPrimaryCommand>)
                     {
@@ -151,8 +95,7 @@ namespace hybrid::core
                         {
                             return;
                         }
-
-                        AssignPrimaryCamera(*active_scene_world, typed_command.entity);
+                        active_scene_world->SetPrimaryCamera(typed_command.entity, true);
                     }
                     else if constexpr (std::is_same_v<T, ui::AddCameraCommand>)
                     {
@@ -161,14 +104,24 @@ namespace hybrid::core
                             return;
                         }
 
-                        auto &registry = active_scene_world->Registry();
                         const entt::entity entity = active_scene_world->CreateEntity("Camera");
-                        registry.emplace<scene::CameraComponent>(entity);
+                        active_scene_world->AddCamera(entity);
 
-                        auto primary_camera_view = registry.view<scene::PrimaryCameraComponent, scene::CameraComponent>();
-                        if (primary_camera_view.begin() == primary_camera_view.end())
+                        std::vector<entt::entity> camera_entities{};
+                        active_scene_world->GetEntitiesWithCamera(camera_entities);
+                        bool has_primary_camera = false;
+                        for (const entt::entity camera_entity : camera_entities)
                         {
-                            AssignPrimaryCamera(*active_scene_world, entity);
+                            if (active_scene_world->TryGetPrimaryCamera(camera_entity) != nullptr)
+                            {
+                                has_primary_camera = true;
+                                break;
+                            }
+                        }
+
+                        if (!has_primary_camera)
+                        {
+                            active_scene_world->SetPrimaryCamera(entity, true);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::AddPointLightCommand>)
@@ -179,9 +132,7 @@ namespace hybrid::core
                         }
 
                         const entt::entity entity = active_scene_world->CreateEntity("Point Light");
-                        auto &registry = active_scene_world->Registry();
-                        registry.emplace<scene::LightCommonComponent>(entity);
-                        registry.emplace<scene::PointLightComponent>(entity);
+                        active_scene_world->AddPointLight(entity, scene::LightCommonComponent{}, scene::PointLightComponent{});
                     }
                     else if constexpr (std::is_same_v<T, ui::AddAreaLightCommand>)
                     {
@@ -191,9 +142,7 @@ namespace hybrid::core
                         }
 
                         const entt::entity entity = active_scene_world->CreateEntity("Area Light");
-                        auto &registry = active_scene_world->Registry();
-                        registry.emplace<scene::LightCommonComponent>(entity);
-                        registry.emplace<scene::AreaLightComponent>(entity);
+                        active_scene_world->AddAreaLight(entity, scene::LightCommonComponent{}, scene::AreaLightComponent{});
                     }
                     else if constexpr (std::is_same_v<T, ui::AddDirectionalLightCommand>)
                     {
@@ -203,9 +152,9 @@ namespace hybrid::core
                         }
 
                         const entt::entity entity = active_scene_world->CreateEntity("Directional Light");
-                        auto &registry = active_scene_world->Registry();
-                        registry.emplace<scene::LightCommonComponent>(entity);
-                        registry.emplace<scene::DirectionalLightComponent>(entity);
+                        active_scene_world->AddDirectionalLight(entity,
+                                                                scene::LightCommonComponent{},
+                                                                scene::DirectionalLightComponent{});
                     }
                     else if constexpr (std::is_same_v<T, ui::EditLightCommonCommand>)
                     {
@@ -214,14 +163,11 @@ namespace hybrid::core
                             return;
                         }
 
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *light = registry.try_get<scene::LightCommonComponent>(typed_command.entity))
-                        {
-                            light->color = glm::max(typed_command.color, glm::vec3(0.0f));
-                            light->intensity = std::max(0.0f, typed_command.intensity);
-                            light->cast_shadows = typed_command.cast_shadows;
-                            EmitComponentUpdated<scene::LightCommonComponent>(registry, typed_command.entity);
-                        }
+                        scene::LightCommonComponent updated{};
+                        updated.color = glm::max(typed_command.color, glm::vec3(0.0f));
+                        updated.intensity = std::max(0.0f, typed_command.intensity);
+                        updated.cast_shadows = typed_command.cast_shadows;
+                        active_scene_world->SetLightCommon(typed_command.entity, updated);
                     }
                     else if constexpr (std::is_same_v<T, ui::EditPointLightCommand>)
                     {
@@ -230,15 +176,12 @@ namespace hybrid::core
                             return;
                         }
 
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *light = registry.try_get<scene::PointLightComponent>(typed_command.entity))
-                        {
-                            light->range = std::max(0.0f, typed_command.range);
-                            light->attenuation_constant = std::max(0.0f, typed_command.attenuation_constant);
-                            light->attenuation_linear = std::max(0.0f, typed_command.attenuation_linear);
-                            light->attenuation_quadratic = std::max(0.0f, typed_command.attenuation_quadratic);
-                            EmitComponentUpdated<scene::PointLightComponent>(registry, typed_command.entity);
-                        }
+                        scene::PointLightComponent updated{};
+                        updated.range = std::max(0.0f, typed_command.range);
+                        updated.attenuation_constant = std::max(0.0f, typed_command.attenuation_constant);
+                        updated.attenuation_linear = std::max(0.0f, typed_command.attenuation_linear);
+                        updated.attenuation_quadratic = std::max(0.0f, typed_command.attenuation_quadratic);
+                        active_scene_world->SetPointLight(typed_command.entity, updated);
                     }
                     else if constexpr (std::is_same_v<T, ui::EditAreaLightCommand>)
                     {
@@ -247,14 +190,11 @@ namespace hybrid::core
                             return;
                         }
 
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *light = registry.try_get<scene::AreaLightComponent>(typed_command.entity))
-                        {
-                            light->size = glm::max(typed_command.size, glm::vec2(0.0f));
-                            light->direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
-                            light->two_sided = typed_command.two_sided;
-                            EmitComponentUpdated<scene::AreaLightComponent>(registry, typed_command.entity);
-                        }
+                        scene::AreaLightComponent updated{};
+                        updated.size = glm::max(typed_command.size, glm::vec2(0.0f));
+                        updated.direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
+                        updated.two_sided = typed_command.two_sided;
+                        active_scene_world->SetAreaLight(typed_command.entity, updated);
                     }
                     else if constexpr (std::is_same_v<T, ui::EditHdriLightCommand>)
                     {
@@ -263,11 +203,11 @@ namespace hybrid::core
                             return;
                         }
 
-                        auto &registry = active_scene_world->Registry();
-                        if (auto *light = registry.try_get<scene::HdriLightComponent>(typed_command.entity))
+                        if (const scene::HdriLightComponent *existing = active_scene_world->TryGetHdriLight(typed_command.entity))
                         {
-                            light->yaw_radians = typed_command.yaw_radians;
-                            EmitComponentUpdated<scene::HdriLightComponent>(registry, typed_command.entity);
+                            scene::HdriLightComponent updated = *existing;
+                            updated.yaw_radians = typed_command.yaw_radians;
+                            active_scene_world->SetHdriLight(typed_command.entity, updated);
                         }
                     }
                     else if constexpr (std::is_same_v<T, ui::MaterialSetScalarCommand>)

@@ -26,6 +26,12 @@ namespace hybrid::core::scene
             result = glm::scale(result, transform.scale);
             return result;
         }
+
+        template <typename TComponent>
+        void EmitComponentUpdated(entt::registry &registry, const entt::entity entity)
+        {
+            registry.patch<TComponent>(entity, [](TComponent &) {});
+        }
     } // namespace
 
     SceneWorld::SceneWorld()
@@ -125,11 +131,11 @@ namespace hybrid::core::scene
         return entity;
     }
 
-    void SceneWorld::DestroyEntity(entt::entity entity)
+    bool SceneWorld::DestroyEntity(entt::entity entity)
     {
         if (!m_registry.valid(entity))
         {
-            return;
+            return false;
         }
 
         if (auto const *hierarchy = m_registry.try_get<HierarchyComponent>(entity))
@@ -148,6 +154,77 @@ namespace hybrid::core::scene
         }
 
         m_registry.destroy(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetName(const entt::entity entity, const std::string &name)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<NameComponent>(entity, NameComponent{name});
+        return true;
+    }
+
+    bool SceneWorld::SetLocalTransform(const entt::entity entity, const Transform &local)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        auto &transform = m_registry.get_or_emplace<TransformComponent>(entity);
+        transform.local = local;
+        transform.dirty = true;
+        EmitComponentUpdated<TransformComponent>(m_registry, entity);
+        MarkDirty(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetLocalTranslation(const entt::entity entity, const glm::vec3 &translation)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        auto &transform = m_registry.get_or_emplace<TransformComponent>(entity);
+        transform.local.translation = translation;
+        transform.dirty = true;
+        EmitComponentUpdated<TransformComponent>(m_registry, entity);
+        MarkDirty(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetLocalRotation(const entt::entity entity, const glm::quat &rotation)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        auto &transform = m_registry.get_or_emplace<TransformComponent>(entity);
+        transform.local.rotation = rotation;
+        transform.dirty = true;
+        EmitComponentUpdated<TransformComponent>(m_registry, entity);
+        MarkDirty(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetLocalScale(const entt::entity entity, const glm::vec3 &scale)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        auto &transform = m_registry.get_or_emplace<TransformComponent>(entity);
+        transform.local.scale = scale;
+        transform.dirty = true;
+        EmitComponentUpdated<TransformComponent>(m_registry, entity);
+        MarkDirty(entity);
+        return true;
     }
 
     bool SceneWorld::IsValid(entt::entity entity) const
@@ -155,43 +232,361 @@ namespace hybrid::core::scene
         return m_registry.valid(entity);
     }
 
-    void SceneWorld::SetParent(entt::entity child, entt::entity parent)
+    const NameComponent *SceneWorld::TryGetName(const entt::entity entity) const
+    {
+        return m_registry.try_get<NameComponent>(entity);
+    }
+
+    const TransformComponent *SceneWorld::TryGetTransform(const entt::entity entity) const
+    {
+        return m_registry.try_get<TransformComponent>(entity);
+    }
+
+    const HierarchyComponent *SceneWorld::TryGetHierarchy(const entt::entity entity) const
+    {
+        return m_registry.try_get<HierarchyComponent>(entity);
+    }
+
+    const MeshRendererComponent *SceneWorld::TryGetMeshRenderer(const entt::entity entity) const
+    {
+        return m_registry.try_get<MeshRendererComponent>(entity);
+    }
+
+    const CameraComponent *SceneWorld::TryGetCamera(const entt::entity entity) const
+    {
+        return m_registry.try_get<CameraComponent>(entity);
+    }
+
+    const PrimaryCameraComponent *SceneWorld::TryGetPrimaryCamera(const entt::entity entity) const
+    {
+        static const PrimaryCameraComponent k_primary_camera_tag{};
+        return m_registry.all_of<PrimaryCameraComponent>(entity) ? &k_primary_camera_tag : nullptr;
+    }
+
+    const CameraTargetComponent *SceneWorld::TryGetCameraTarget(const entt::entity entity) const
+    {
+        return m_registry.try_get<CameraTargetComponent>(entity);
+    }
+
+    const LightCommonComponent *SceneWorld::TryGetLightCommon(const entt::entity entity) const
+    {
+        return m_registry.try_get<LightCommonComponent>(entity);
+    }
+
+    const DirectionalLightComponent *SceneWorld::TryGetDirectionalLight(const entt::entity entity) const
+    {
+        static const DirectionalLightComponent k_directional_light_tag{};
+        return m_registry.all_of<DirectionalLightComponent>(entity) ? &k_directional_light_tag : nullptr;
+    }
+
+    const PointLightComponent *SceneWorld::TryGetPointLight(const entt::entity entity) const
+    {
+        return m_registry.try_get<PointLightComponent>(entity);
+    }
+
+    const AreaLightComponent *SceneWorld::TryGetAreaLight(const entt::entity entity) const
+    {
+        return m_registry.try_get<AreaLightComponent>(entity);
+    }
+
+    const HdriLightComponent *SceneWorld::TryGetHdriLight(const entt::entity entity) const
+    {
+        return m_registry.try_get<HdriLightComponent>(entity);
+    }
+
+    bool SceneWorld::SetParent(entt::entity child, entt::entity parent)
     {
         if (child == entt::null || child == parent)
         {
-            return;
+            return false;
         }
         if (!m_registry.valid(child))
         {
-            return;
+            return false;
         }
 
         if (parent != entt::null && !m_registry.valid(parent))
         {
-            return;
+            return false;
         }
 
         if (parent != entt::null && IsAncestor(child, parent))
         {
-            return;
+            return false;
         }
 
         auto &child_hierarchy = m_registry.get_or_emplace<HierarchyComponent>(child);
+        const entt::entity previous_parent = child_hierarchy.parent;
 
-        if (child_hierarchy.parent != entt::null)
+        if (previous_parent == parent)
         {
-            RemoveChild(child_hierarchy.parent, child);
+            return true;
+        }
+
+        if (previous_parent != entt::null)
+        {
+            RemoveChild(previous_parent, child);
         }
 
         child_hierarchy.parent = parent;
+        EmitComponentUpdated<HierarchyComponent>(m_registry, child);
+        EnqueueDirty(DirtyQueueKind::Hierarchy, child);
 
         if (parent != entt::null)
         {
             auto &parent_hierarchy = m_registry.get_or_emplace<HierarchyComponent>(parent);
             parent_hierarchy.children.push_back(child);
+            EmitComponentUpdated<HierarchyComponent>(m_registry, parent);
+            EnqueueDirty(DirtyQueueKind::Hierarchy, parent);
         }
 
+        if (previous_parent != entt::null && m_registry.valid(previous_parent))
+        {
+            EmitComponentUpdated<HierarchyComponent>(m_registry, previous_parent);
+            EnqueueDirty(DirtyQueueKind::Hierarchy, previous_parent);
+        }
+
+        MarkStructureChanged();
         MarkDirtyRecursive(child);
+        return true;
+    }
+
+    bool SceneWorld::ClearParent(const entt::entity child)
+    {
+        return SetParent(child, entt::null);
+    }
+
+    bool SceneWorld::AddCamera(const entt::entity entity, const CameraComponent &camera)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<CameraComponent>(entity, camera);
+        m_registry.emplace_or_replace<CameraTargetComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::RemoveCamera(const entt::entity entity)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.remove<CameraComponent>(entity);
+        m_registry.remove<PrimaryCameraComponent>(entity);
+        m_registry.remove<CameraTargetComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetCameraLens(const entt::entity entity,
+                                   const float horizontal_fov_radians,
+                                   const float near_plane,
+                                   const float far_plane)
+    {
+        if (!m_registry.valid(entity) || !m_registry.all_of<CameraComponent>(entity))
+        {
+            return false;
+        }
+
+        auto &camera = m_registry.get<CameraComponent>(entity);
+        camera.horizontal_fov_radians = std::max(0.0174533f, horizontal_fov_radians);
+        camera.near_plane = std::max(0.001f, near_plane);
+        camera.far_plane = std::max(camera.near_plane + 0.001f, far_plane);
+        EmitComponentUpdated<CameraComponent>(m_registry, entity);
+        return true;
+    }
+
+    bool SceneWorld::SetPrimaryCamera(const entt::entity entity, const bool is_primary)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        if (!is_primary)
+        {
+            m_registry.remove<PrimaryCameraComponent>(entity);
+            return true;
+        }
+
+        if (!m_registry.all_of<CameraComponent>(entity))
+        {
+            return false;
+        }
+
+        auto view = m_registry.view<PrimaryCameraComponent>();
+        for (const entt::entity existing_primary : view)
+        {
+            if (existing_primary != entity)
+            {
+                m_registry.remove<PrimaryCameraComponent>(existing_primary);
+            }
+        }
+
+        m_registry.emplace_or_replace<PrimaryCameraComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetCameraTarget(const entt::entity entity, const bool enabled, entt::entity target)
+    {
+        if (!m_registry.valid(entity) ||
+            !m_registry.all_of<CameraComponent>(entity) ||
+            !m_registry.all_of<CameraTargetComponent>(entity))
+        {
+            return false;
+        }
+
+        if (target != entt::null && !m_registry.valid(target))
+        {
+            target = entt::null;
+        }
+
+        auto &camera_target = m_registry.get<CameraTargetComponent>(entity);
+        camera_target.enabled = enabled;
+        camera_target.target = target;
+        EmitComponentUpdated<CameraTargetComponent>(m_registry, entity);
+        return true;
+    }
+
+    bool SceneWorld::AddMeshRenderer(const entt::entity entity, const MeshRendererComponent &mesh_renderer)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<MeshRendererComponent>(entity, mesh_renderer);
+        return true;
+    }
+
+    bool SceneWorld::RemoveMeshRenderer(const entt::entity entity)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.remove<MeshRendererComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetMeshRenderer(const entt::entity entity, const MeshRendererComponent &mesh_renderer)
+    {
+        return AddMeshRenderer(entity, mesh_renderer);
+    }
+
+    bool SceneWorld::AddDirectionalLight(const entt::entity entity,
+                                         const LightCommonComponent &common,
+                                         const DirectionalLightComponent &)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<LightCommonComponent>(entity, common);
+        m_registry.emplace_or_replace<DirectionalLightComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::AddPointLight(const entt::entity entity,
+                                   const LightCommonComponent &common,
+                                   const PointLightComponent &point)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<LightCommonComponent>(entity, common);
+        m_registry.emplace_or_replace<PointLightComponent>(entity, point);
+        return true;
+    }
+
+    bool SceneWorld::AddAreaLight(const entt::entity entity,
+                                  const LightCommonComponent &common,
+                                  const AreaLightComponent &area)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<LightCommonComponent>(entity, common);
+        m_registry.emplace_or_replace<AreaLightComponent>(entity, area);
+        return true;
+    }
+
+    bool SceneWorld::AddHdriLight(const entt::entity entity,
+                                  const LightCommonComponent &common,
+                                  const HdriLightComponent &hdri)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+        m_registry.emplace_or_replace<LightCommonComponent>(entity, common);
+        m_registry.emplace_or_replace<HdriLightComponent>(entity, hdri);
+        return true;
+    }
+
+    bool SceneWorld::RemoveLight(const entt::entity entity)
+    {
+        if (!m_registry.valid(entity))
+        {
+            return false;
+        }
+
+        m_registry.remove<LightCommonComponent>(entity);
+        m_registry.remove<DirectionalLightComponent>(entity);
+        m_registry.remove<PointLightComponent>(entity);
+        m_registry.remove<AreaLightComponent>(entity);
+        m_registry.remove<HdriLightComponent>(entity);
+        return true;
+    }
+
+    bool SceneWorld::SetLightCommon(const entt::entity entity, const LightCommonComponent &common)
+    {
+        if (!m_registry.valid(entity) || !m_registry.all_of<LightCommonComponent>(entity))
+        {
+            return false;
+        }
+        auto &light = m_registry.get<LightCommonComponent>(entity);
+        light = common;
+        EmitComponentUpdated<LightCommonComponent>(m_registry, entity);
+        return true;
+    }
+
+    bool SceneWorld::SetPointLight(const entt::entity entity, const PointLightComponent &point)
+    {
+        if (!m_registry.valid(entity) || !m_registry.all_of<PointLightComponent>(entity))
+        {
+            return false;
+        }
+        auto &light = m_registry.get<PointLightComponent>(entity);
+        light = point;
+        EmitComponentUpdated<PointLightComponent>(m_registry, entity);
+        return true;
+    }
+
+    bool SceneWorld::SetAreaLight(const entt::entity entity, const AreaLightComponent &area)
+    {
+        if (!m_registry.valid(entity) || !m_registry.all_of<AreaLightComponent>(entity))
+        {
+            return false;
+        }
+        auto &light = m_registry.get<AreaLightComponent>(entity);
+        light = area;
+        EmitComponentUpdated<AreaLightComponent>(m_registry, entity);
+        return true;
+    }
+
+    bool SceneWorld::SetHdriLight(const entt::entity entity, const HdriLightComponent &hdri)
+    {
+        if (!m_registry.valid(entity) || !m_registry.all_of<HdriLightComponent>(entity))
+        {
+            return false;
+        }
+        auto &light = m_registry.get<HdriLightComponent>(entity);
+        light = hdri;
+        EmitComponentUpdated<HdriLightComponent>(m_registry, entity);
+        return true;
     }
 
     entt::entity SceneWorld::GetParent(entt::entity child) const
@@ -214,9 +609,76 @@ namespace hybrid::core::scene
         return hierarchy->children;
     }
 
+    uint32_t SceneWorld::GetEntityCount() const
+    {
+        uint32_t count = 0;
+        const auto entities = m_registry.view<entt::entity>();
+        for (const entt::entity entity : entities)
+        {
+            static_cast<void>(entity);
+            ++count;
+        }
+        return count;
+    }
+
+    void SceneWorld::GetEntities(std::vector<entt::entity> &out_entities) const
+    {
+        out_entities.clear();
+        const auto entities = m_registry.view<entt::entity>();
+        for (const entt::entity entity : entities)
+        {
+            out_entities.push_back(entity);
+        }
+    }
+
+    void SceneWorld::GetEntitiesWithTransform(std::vector<entt::entity> &out_entities) const
+    {
+        out_entities.clear();
+        const auto view = m_registry.view<const TransformComponent>();
+        for (const entt::entity entity : view)
+        {
+            out_entities.push_back(entity);
+        }
+    }
+
+    void SceneWorld::GetEntitiesWithMeshRenderer(std::vector<entt::entity> &out_entities) const
+    {
+        out_entities.clear();
+        const auto view = m_registry.view<const MeshRendererComponent>();
+        for (const entt::entity entity : view)
+        {
+            out_entities.push_back(entity);
+        }
+    }
+
+    void SceneWorld::GetEntitiesWithCamera(std::vector<entt::entity> &out_entities) const
+    {
+        out_entities.clear();
+        const auto view = m_registry.view<const CameraComponent>();
+        for (const entt::entity entity : view)
+        {
+            out_entities.push_back(entity);
+        }
+    }
+
+    void SceneWorld::GetEntitiesWithLight(std::vector<entt::entity> &out_entities) const
+    {
+        out_entities.clear();
+        const auto view = m_registry.view<const LightCommonComponent>();
+        for (const entt::entity entity : view)
+        {
+            out_entities.push_back(entity);
+        }
+    }
+
     void SceneWorld::MarkDirty(entt::entity entity)
     {
         MarkDirtyRecursive(entity);
+    }
+
+    void SceneWorld::FlushPendingChanges()
+    {
+        UpdateTransforms();
     }
 
     void SceneWorld::UpdateTransforms()

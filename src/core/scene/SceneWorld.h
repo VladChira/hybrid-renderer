@@ -1,5 +1,7 @@
 #pragma once
 
+#include "SceneReadApi.h"
+#include "SceneWriteApi.h"
 #include "SceneTypes.h"
 
 #include <entt/entt.hpp>
@@ -11,7 +13,7 @@
 namespace hybrid::core::scene
 {
 
-    class SceneWorld
+    class SceneWorld : public ISceneReadApi, public ISceneWriteApi
     {
     public:
         struct RenderDirtyQueues
@@ -27,18 +29,76 @@ namespace hybrid::core::scene
         SceneWorld();
         ~SceneWorld();
 
-        entt::entity CreateEntity(const std::string &name = {});
-        void DestroyEntity(entt::entity entity);
-        bool IsValid(entt::entity entity) const;
+        entt::entity CreateEntity(const std::string &name = {}) override;
+        bool DestroyEntity(entt::entity entity) override;
+        bool SetName(entt::entity entity, const std::string &name) override;
+        bool IsValid(entt::entity entity) const override;
 
-        entt::registry &Registry() { return m_registry; }
+        const NameComponent *TryGetName(entt::entity entity) const override;
+        const TransformComponent *TryGetTransform(entt::entity entity) const override;
+        const HierarchyComponent *TryGetHierarchy(entt::entity entity) const override;
+        const MeshRendererComponent *TryGetMeshRenderer(entt::entity entity) const override;
+        const CameraComponent *TryGetCamera(entt::entity entity) const override;
+        const PrimaryCameraComponent *TryGetPrimaryCamera(entt::entity entity) const override;
+        const CameraTargetComponent *TryGetCameraTarget(entt::entity entity) const override;
+        const LightCommonComponent *TryGetLightCommon(entt::entity entity) const override;
+        const DirectionalLightComponent *TryGetDirectionalLight(entt::entity entity) const override;
+        const PointLightComponent *TryGetPointLight(entt::entity entity) const override;
+        const AreaLightComponent *TryGetAreaLight(entt::entity entity) const override;
+        const HdriLightComponent *TryGetHdriLight(entt::entity entity) const override;
+
         const entt::registry &Registry() const { return m_registry; }
 
-        void SetParent(entt::entity child, entt::entity parent);
-        entt::entity GetParent(entt::entity child) const;
-        const std::vector<entt::entity> &GetChildren(entt::entity parent) const;
+        bool SetLocalTransform(entt::entity entity, const Transform &local) override;
+        bool SetLocalTranslation(entt::entity entity, const glm::vec3 &translation) override;
+        bool SetLocalRotation(entt::entity entity, const glm::quat &rotation) override;
+        bool SetLocalScale(entt::entity entity, const glm::vec3 &scale) override;
 
-        void MarkDirty(entt::entity entity);
+        bool SetParent(entt::entity child, entt::entity parent) override;
+        bool ClearParent(entt::entity child) override;
+        entt::entity GetParent(entt::entity child) const override;
+        const std::vector<entt::entity> &GetChildren(entt::entity parent) const override;
+
+        bool AddCamera(entt::entity entity, const CameraComponent &camera = {}) override;
+        bool RemoveCamera(entt::entity entity) override;
+        bool SetCameraLens(entt::entity entity,
+                           float horizontal_fov_radians,
+                           float near_plane,
+                           float far_plane) override;
+        bool SetPrimaryCamera(entt::entity entity, bool is_primary) override;
+        bool SetCameraTarget(entt::entity entity, bool enabled, entt::entity target) override;
+
+        bool AddMeshRenderer(entt::entity entity, const MeshRendererComponent &mesh_renderer) override;
+        bool RemoveMeshRenderer(entt::entity entity) override;
+        bool SetMeshRenderer(entt::entity entity, const MeshRendererComponent &mesh_renderer) override;
+
+        bool AddDirectionalLight(entt::entity entity,
+                                 const LightCommonComponent &common,
+                                 const DirectionalLightComponent &directional = {}) override;
+        bool AddPointLight(entt::entity entity,
+                           const LightCommonComponent &common,
+                           const PointLightComponent &point = {}) override;
+        bool AddAreaLight(entt::entity entity,
+                          const LightCommonComponent &common,
+                          const AreaLightComponent &area = {}) override;
+        bool AddHdriLight(entt::entity entity,
+                          const LightCommonComponent &common,
+                          const HdriLightComponent &hdri = {}) override;
+        bool RemoveLight(entt::entity entity) override;
+        bool SetLightCommon(entt::entity entity, const LightCommonComponent &common) override;
+        bool SetPointLight(entt::entity entity, const PointLightComponent &point) override;
+        bool SetAreaLight(entt::entity entity, const AreaLightComponent &area) override;
+        bool SetHdriLight(entt::entity entity, const HdriLightComponent &hdri) override;
+
+        uint32_t GetEntityCount() const override;
+        void GetEntities(std::vector<entt::entity> &out_entities) const override;
+        void GetEntitiesWithTransform(std::vector<entt::entity> &out_entities) const override;
+        void GetEntitiesWithMeshRenderer(std::vector<entt::entity> &out_entities) const override;
+        void GetEntitiesWithCamera(std::vector<entt::entity> &out_entities) const override;
+        void GetEntitiesWithLight(std::vector<entt::entity> &out_entities) const override;
+
+        void MarkDirty(entt::entity entity) override;
+        void FlushPendingChanges() override;
         void UpdateTransforms();
 
         RenderDirtyQueues ConsumeRenderDirtyQueues();
