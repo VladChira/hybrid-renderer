@@ -23,7 +23,13 @@ namespace hybrid::ui
     {
         const core::scene::MaterialAsset *FindSelectedMaterial(const UiState &state, uint64_t material_asset_id)
         {
-            for (const UiMaterialEntry &entry : state.materials)
+            const std::vector<UiMaterialEntry> *materials = state.materials;
+            if (materials == nullptr)
+            {
+                return nullptr;
+            }
+
+            for (const UiMaterialEntry &entry : *materials)
             {
                 if (entry.asset_id == material_asset_id)
                 {

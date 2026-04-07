@@ -62,7 +62,7 @@ namespace hybrid::ui
     struct UiState
     {
         const core::scene::SceneWorld *scene_world = nullptr;
-        std::vector<UiMaterialEntry> materials;
+        const std::vector<UiMaterialEntry> *materials = nullptr;
         uint64_t viewport_color_texture = 0;
         uint64_t viewport_gbuffer_rt0_texture = 0;
         uint64_t viewport_gbuffer_rt1_texture = 0;

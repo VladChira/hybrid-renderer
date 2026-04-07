@@ -12,7 +12,6 @@
 #include "core/Profiling.h"
 #include "core/PerformanceTelemetry.h"
 #include "core/UiCommandProcessor.h"
-#include "ui/UiStateUtils.h"
 
 #include "utils/Banner.h"
 
@@ -224,7 +223,6 @@ namespace hybrid::core
             {
                 HYBRID_PROFILE_ZONE_N("App::BuildUiState");
                 ui_state.scene_world = active_scene_world;
-                ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
                 ui_state.viewport_color_texture = renderer_outputs.color;
                 ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0;
                 ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;

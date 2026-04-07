@@ -4,6 +4,7 @@
 #include "core/ResourceMonitor.h"
 #include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
+#include "ui/UiStateUtils.h"
 #include "themes/Themes.h"
 #include "panels/ConsolePanel.h"
 #include "panels/MaterialsPanel.h"
@@ -149,6 +150,8 @@ namespace hybrid::ui
         }
 
         UiState frame_state = state;
+        BuildMaterialEntries(frame_state.scene_world, m_material_entries);
+        frame_state.materials = &m_material_entries;
         frame_state.viewport_visualization = m_viewport_visualization;
 
         PanelContext context{};

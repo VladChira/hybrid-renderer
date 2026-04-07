@@ -37,8 +37,8 @@ namespace hybrid::ui
             return;
         }
 
-        const auto &materials = context.state->materials;
-        if (materials.empty())
+        const std::vector<UiMaterialEntry> *materials = context.state->materials;
+        if (materials == nullptr || materials->empty())
         {
             if (!context.state->scene_world)
             {
@@ -57,9 +57,9 @@ namespace hybrid::ui
         const float available_width = ImGui::GetContentRegionAvail().x;
         const int columns = std::max(1, static_cast<int>((available_width + item_spacing) / (cell_width + item_spacing)));
 
-        for (size_t i = 0; i < materials.size(); ++i)
+        for (size_t i = 0; i < materials->size(); ++i)
         {
-            const UiMaterialEntry &material = materials[i];
+            const UiMaterialEntry &material = (*materials)[i];
             const bool same_line = (i % static_cast<size_t>(columns)) != 0;
             if (same_line)
             {
