@@ -1,5 +1,6 @@
 #include "ViewportPanel.h"
 
+#include "core/Profiling.h"
 #include "core/scene/SceneWorld.h"
 #include "core/scene/types/SceneAssets.h"
 #include "core/scene/types/SceneComponents.h"
@@ -51,6 +52,7 @@ namespace hybrid::ui
 
         bool ReadEntityIdPixel(uint64_t texture_id, int32_t pixel_x, int32_t pixel_y, uint32_t &out_entity_id)
         {
+            HYBRID_PROFILE_ZONE_N("ViewportPanel::ReadEntityIdPixel");
             if (texture_id == 0)
             {
                 return false;
@@ -114,6 +116,7 @@ namespace hybrid::ui
                                           const ImVec2 &image_min,
                                           const ImVec2 &image_size)
         {
+            HYBRID_PROFILE_ZONE_N("ViewportPanel::ResolveHoveredEntity");
             if (state.scene_world == nullptr)
             {
                 return entt::null;
@@ -238,6 +241,7 @@ namespace hybrid::ui
 
     void ViewportPanel::DrawContents(PanelContext &context)
     {
+        HYBRID_PROFILE_ZONE_N("ViewportPanel::DrawContents");
         const ImVec2 current_size = ImGui::GetContentRegionAvail();
         if (context.state != nullptr)
         {

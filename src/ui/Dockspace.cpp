@@ -1,5 +1,7 @@
 #include "ui/Dockspace.h"
 
+#include "core/Profiling.h"
+
 #include <algorithm>
 
 #include <imgui.h>
@@ -16,6 +18,7 @@ namespace hybrid::ui
 
     void Dockspace::BeginFrame() const
     {
+        HYBRID_PROFILE_ZONE_N("Dockspace::BeginFrame");
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
         ImGui::DockSpaceOverViewport(viewport->ID,
                                      viewport,
@@ -24,6 +27,7 @@ namespace hybrid::ui
 
     void Dockspace::BuildLayout(const DockspaceLayout &layout)
     {
+        HYBRID_PROFILE_ZONE_N("Dockspace::BuildLayout");
         if (m_layout_built)
         {
             return;

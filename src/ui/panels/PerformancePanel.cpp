@@ -1,5 +1,6 @@
 #include "PerformancePanel.h"
 
+#include "core/Profiling.h"
 #include "core/PerformanceTelemetry.h"
 #include "core/ResourceMonitor.h"
 
@@ -19,9 +20,14 @@ namespace hybrid::ui
 
     void PerformancePanel::DrawContents(PanelContext &context)
     {
+        HYBRID_PROFILE_ZONE_N("PerformancePanel::DrawContents");
         (void)context;
 
-        const auto frame_samples = core::PerformanceTelemetry::GetFrameSamples();
+        std::vector<core::FramePerformanceSample> frame_samples;
+        {
+            HYBRID_PROFILE_ZONE_N("PerformancePanel::GetFrameSamples");
+            frame_samples = core::PerformanceTelemetry::GetFrameSamples();
+        }
         if (frame_samples.empty())
         {
             ImGui::TextUnformatted("Waiting for frame samples...");
@@ -31,19 +37,21 @@ namespace hybrid::ui
             std::vector<double> frame_times;
             std::vector<double> frame_ms;
             std::vector<double> fps_values;
-            frame_times.reserve(frame_samples.size());
-            frame_ms.reserve(frame_samples.size());
-            fps_values.reserve(frame_samples.size());
-
             double frame_ms_sum = 0.0;
             double fps_sum = 0.0;
-            for (const auto &sample : frame_samples)
             {
-                frame_times.push_back(sample.time_seconds);
-                frame_ms.push_back(sample.renderer_cpu_frame_ms);
-                fps_values.push_back(sample.fps);
-                frame_ms_sum += sample.renderer_cpu_frame_ms;
-                fps_sum += sample.fps;
+                HYBRID_PROFILE_ZONE_N("PerformancePanel::BuildFrameSeries");
+                frame_times.reserve(frame_samples.size());
+                frame_ms.reserve(frame_samples.size());
+                fps_values.reserve(frame_samples.size());
+                for (const auto &sample : frame_samples)
+                {
+                    frame_times.push_back(sample.time_seconds);
+                    frame_ms.push_back(sample.renderer_cpu_frame_ms);
+                    fps_values.push_back(sample.fps);
+                    frame_ms_sum += sample.renderer_cpu_frame_ms;
+                    fps_sum += sample.fps;
+                }
             }
 
             const double latest_frame_ms = frame_ms.back();
@@ -87,6 +95,7 @@ namespace hybrid::ui
 
             if (ImPlot::BeginPlot("Renderer Frame Time (ms)", ImVec2(-1, 160), ImPlotFlags_NoLegend))
             {
+                HYBRID_PROFILE_ZONE_N("PerformancePanel::PlotFrameMs");
                 ImPlot::SetupAxes(nullptr, "ms",
                                   ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoTickLabels,
                                   ImPlotAxisFlags_AutoFit);
@@ -97,6 +106,7 @@ namespace hybrid::ui
 
             if (ImPlot::BeginPlot("Renderer FPS", ImVec2(-1, 160), ImPlotFlags_NoLegend))
             {
+                HYBRID_PROFILE_ZONE_N("PerformancePanel::PlotFps");
                 ImPlot::SetupAxes(nullptr, "FPS",
                                   ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoTickLabels,
                                   ImPlotAxisFlags_AutoFit);
@@ -106,7 +116,11 @@ namespace hybrid::ui
             }
         }
 
-        const auto ram_samples = core::ResourceMonitor::GetSamples();
+        std::vector<core::ResourceSample> ram_samples;
+        {
+            HYBRID_PROFILE_ZONE_N("PerformancePanel::GetRamSamples");
+            ram_samples = core::ResourceMonitor::GetSamples();
+        }
         if (ram_samples.empty())
         {
             ImGui::TextUnformatted("Waiting for RAM samples...");
@@ -115,15 +129,17 @@ namespace hybrid::ui
 
         std::vector<double> ram_times;
         std::vector<double> ram_mb;
-        ram_times.reserve(ram_samples.size());
-        ram_mb.reserve(ram_samples.size());
-
         double max_ram = 0.0;
-        for (const auto &sample : ram_samples)
         {
-            ram_times.push_back(sample.time_seconds);
-            ram_mb.push_back(sample.ram_mb);
-            max_ram = std::max(max_ram, sample.ram_mb);
+            HYBRID_PROFILE_ZONE_N("PerformancePanel::BuildRamSeries");
+            ram_times.reserve(ram_samples.size());
+            ram_mb.reserve(ram_samples.size());
+            for (const auto &sample : ram_samples)
+            {
+                ram_times.push_back(sample.time_seconds);
+                ram_mb.push_back(sample.ram_mb);
+                max_ram = std::max(max_ram, sample.ram_mb);
+            }
         }
 
         const double x_min = ram_times.front();
@@ -132,6 +148,7 @@ namespace hybrid::ui
 
         if (ImPlot::BeginPlot("RAM Usage (MB)", ImVec2(-1, 160), ImPlotFlags_NoLegend))
         {
+            HYBRID_PROFILE_ZONE_N("PerformancePanel::PlotRam");
             ImPlot::SetupAxes(nullptr, "MB",
                               ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoTickLabels,
                               ImPlotAxisFlags_AutoFit);

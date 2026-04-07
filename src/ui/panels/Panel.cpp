@@ -1,5 +1,7 @@
 #include "Panel.h"
 
+#include "core/Profiling.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -80,6 +82,7 @@ namespace hybrid::ui
 
     void PanelRegistry::DrawAll(PanelContext &context) const
     {
+        HYBRID_PROFILE_ZONE_N("PanelRegistry::DrawAll");
         for (auto &panel : m_panels)
         {
             if (panel)

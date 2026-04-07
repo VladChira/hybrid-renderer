@@ -142,8 +142,11 @@ namespace hybrid::ui
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
 
-        m_dockspace.BeginFrame();
-        m_dockspace.BuildLayout(m_layout);
+        {
+            HYBRID_PROFILE_ZONE_N("Ui::Frame::Dockspace");
+            m_dockspace.BeginFrame();
+            m_dockspace.BuildLayout(m_layout);
+        }
 
         UiState frame_state = state;
         frame_state.viewport_visualization = m_viewport_visualization;
@@ -156,17 +159,25 @@ namespace hybrid::ui
         context.selection = &m_selection;
         context.viewport_visualization = &m_viewport_visualization;
         context.transform_tool = &m_transform_tool;
-        m_panels.DrawAll(context);
+        {
+            HYBRID_PROFILE_ZONE_N("Ui::Frame::Panels");
+            m_panels.DrawAll(context);
+        }
 
-        ImGui::Render();
+        {
+            HYBRID_PROFILE_ZONE_N("Ui::Frame::ImGuiRender");
+            ImGui::Render();
+        }
 
         int fb_width = 0;
         int fb_height = 0;
         glfwGetFramebufferSize(static_cast<GLFWwindow *>(m_window), &fb_width, &fb_height);
 
-        glViewport(0, 0, fb_width, fb_height);
-
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        {
+            HYBRID_PROFILE_ZONE_N("Ui::Frame::BackendSubmit");
+            glViewport(0, 0, fb_width, fb_height);
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        }
 
         return commands;
     }

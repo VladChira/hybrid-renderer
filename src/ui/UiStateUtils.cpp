@@ -1,5 +1,6 @@
 #include "ui/UiStateUtils.h"
 
+#include "core/Profiling.h"
 #include "core/scene/SceneWorld.h"
 #include "core/scene/types/SceneComponents.h"
 
@@ -11,6 +12,7 @@ namespace hybrid::ui
 
     void BuildMaterialEntries(const core::scene::SceneWorld *scene_world, std::vector<UiMaterialEntry> &out_entries)
     {
+        HYBRID_PROFILE_ZONE_N("UiStateUtils::BuildMaterialEntries");
         out_entries.clear();
         if (!scene_world)
         {

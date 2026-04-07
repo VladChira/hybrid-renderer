@@ -1,5 +1,6 @@
 #include "SceneHierarchyPanel.h"
 
+#include "core/Profiling.h"
 #include "core/scene/SceneWorld.h"
 #include "core/scene/types/SceneComponents.h"
 #include "ui/UiState.h"
@@ -116,6 +117,7 @@ namespace hybrid::ui
 
     void SceneHierarchyPanel::DrawContents(PanelContext &context)
     {
+        HYBRID_PROFILE_ZONE_N("SceneHierarchyPanel::DrawContents");
         const UiState *state = context.state;
         if (!state || !state->scene_world)
         {

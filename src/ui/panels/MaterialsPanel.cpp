@@ -1,5 +1,6 @@
 #include "MaterialsPanel.h"
 
+#include "core/Profiling.h"
 #include "ui/UiState.h"
 
 #include <imgui.h>
@@ -29,6 +30,7 @@ namespace hybrid::ui
 
     void MaterialsPanel::DrawContents(PanelContext &context)
     {
+        HYBRID_PROFILE_ZONE_N("MaterialsPanel::DrawContents");
         if (!context.state)
         {
             ImGui::TextUnformatted("UI state unavailable.");

@@ -113,41 +113,64 @@ namespace hybrid::core
         while (!m_should_quit && !platform.ShouldClose())
         {
             HYBRID_PROFILE_ZONE_N("App::Frame");
-            platform.PollEvents();
-            ProcessPlatformEvents(platform.Events());
-
-            auto now = std::chrono::steady_clock::now();
-            float delta_seconds = std::chrono::duration<float>(now - last_time).count();
-            last_time = now;
-            elapsed_seconds += delta_seconds;
-            frame_index++;
-
-            if (scene::SceneLoadResult load_result{}; m_scene_loader.TryConsumeResult(load_result))
             {
-                if (load_result.success)
+                HYBRID_PROFILE_ZONE_N("App::PollEvents");
+                platform.PollEvents();
+            }
+            {
+                HYBRID_PROFILE_ZONE_N("App::ProcessPlatformEvents");
+                ProcessPlatformEvents(platform.Events());
+            }
+
+            float delta_seconds = 0.0f;
+            {
+                HYBRID_PROFILE_ZONE_N("App::UpdateFrameTime");
+                auto now = std::chrono::steady_clock::now();
+                delta_seconds = std::chrono::duration<float>(now - last_time).count();
+                last_time = now;
+                elapsed_seconds += delta_seconds;
+                frame_index++;
+            }
+
+            {
+                HYBRID_PROFILE_ZONE_N("App::TryConsumeSceneLoad");
+                if (scene::SceneLoadResult load_result{}; m_scene_loader.TryConsumeResult(load_result))
                 {
-                    m_active_scene = load_result.scene_id;
-                    LOG_INFO("[App] Scene loaded: " + load_result.path);
-                }
-                else
-                {
-                    LOG_ERROR("[App] Scene load failed: " + load_result.path);
+                    if (load_result.success)
+                    {
+                        m_active_scene = load_result.scene_id;
+                        LOG_INFO("[App] Scene loaded: " + load_result.path);
+                    }
+                    else
+                    {
+                        LOG_ERROR("[App] Scene load failed: " + load_result.path);
+                    }
                 }
             }
 
-            scene::SceneWorld *active_scene_world = m_active_scene.IsValid()
-                                                        ? m_assets.Get<scene::SceneWorld>(m_active_scene)
-                                                        : nullptr;
-            if (active_scene_world)
+            scene::SceneWorld *active_scene_world = nullptr;
             {
-                active_scene_world->UpdateTransforms();
+                HYBRID_PROFILE_ZONE_N("App::ResolveActiveSceneWorld");
+                active_scene_world = m_active_scene.IsValid()
+                                         ? m_assets.Get<scene::SceneWorld>(m_active_scene)
+                                         : nullptr;
+            }
+            {
+                HYBRID_PROFILE_ZONE_N("App::UpdateSceneTransforms");
+                if (active_scene_world)
+                {
+                    active_scene_world->UpdateTransforms();
+                }
             }
 
             renderer::FrameContext frame_context{};
-            frame_context.frame_index = frame_index;
-            frame_context.delta_seconds = delta_seconds;
-            frame_context.time_seconds = elapsed_seconds;
-            frame_context.render_extent = m_render_settings.render_extent;
+            {
+                HYBRID_PROFILE_ZONE_N("App::BuildFrameContext");
+                frame_context.frame_index = frame_index;
+                frame_context.delta_seconds = delta_seconds;
+                frame_context.time_seconds = elapsed_seconds;
+                frame_context.render_extent = m_render_settings.render_extent;
+            }
 
             renderer::RendererOutputs renderer_outputs{};
             renderer::RenderView resolved_view{};
@@ -196,19 +219,29 @@ namespace hybrid::core
             PerformanceTelemetry::RecordFrameSample(frame_sample);
 
             ui::UiState ui_state{};
-            ui_state.scene_world = active_scene_world;
-            ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
-            ui_state.viewport_color_texture = renderer_outputs.color;
-            ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0;
-            ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;
-            ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
-            ui_state.viewport_render_extent = frame_context.render_extent;
-            ui_state.viewport_render_view = resolved_view;
-            ui_state.viewport_render_view_valid = resolved_view_valid;
-            ui_state.render_settings = &m_render_settings;
+            {
+                HYBRID_PROFILE_ZONE_N("App::BuildUiState");
+                ui_state.scene_world = active_scene_world;
+                ui::BuildMaterialEntries(active_scene_world, ui_state.materials);
+                ui_state.viewport_color_texture = renderer_outputs.color;
+                ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0;
+                ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;
+                ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
+                ui_state.viewport_render_extent = frame_context.render_extent;
+                ui_state.viewport_render_view = resolved_view;
+                ui_state.viewport_render_view_valid = resolved_view_valid;
+                ui_state.render_settings = &m_render_settings;
+            }
 
-            ui::CommandBuffer commands = ui.Frame(delta_seconds, ui_state);
-            ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
+            ui::CommandBuffer commands;
+            {
+                HYBRID_PROFILE_ZONE_N("App::UiFrame");
+                commands = ui.Frame(delta_seconds, ui_state);
+            }
+            {
+                HYBRID_PROFILE_ZONE_N("App::ProcessUiCommands");
+                ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
+            }
 
             platform.SwapBuffers();
             HYBRID_PROFILE_FRAME();

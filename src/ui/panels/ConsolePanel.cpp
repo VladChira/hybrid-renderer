@@ -1,6 +1,7 @@
 #include "ConsolePanel.h"
 
 #include "core/Log.h"
+#include "core/Profiling.h"
 #include "ui/themes/Themes.h"
 
 #include <imgui.h>
@@ -49,19 +50,28 @@ namespace hybrid::ui
 
     void ConsolePanel::DrawContents(PanelContext &context)
     {
+        HYBRID_PROFILE_ZONE_N("ConsolePanel::DrawContents");
         (void)context;
 
         if (const float bottom_space = ImGui::GetStyle().ItemSpacing.y; ImGui::BeginChild("ScrollRegion##Console", ImVec2(0, -bottom_space), false, 0))
         {
             ImGui::PushTextWrapPos();
 
-            const auto lines = core::Log::GetInMemoryLog();
-            for (const auto &line : lines)
+            std::vector<std::string> lines;
             {
-                const ImVec4 color = ColorForLine(line, context.theme);
-                ImGui::PushStyleColor(ImGuiCol_Text, color);
-                ImGui::TextUnformatted(line.c_str());
-                ImGui::PopStyleColor();
+                HYBRID_PROFILE_ZONE_N("ConsolePanel::GetInMemoryLog");
+                lines = core::Log::GetInMemoryLog();
+            }
+
+            {
+                HYBRID_PROFILE_ZONE_N("ConsolePanel::DrawLines");
+                for (const auto &line : lines)
+                {
+                    const ImVec4 color = ColorForLine(line, context.theme);
+                    ImGui::PushStyleColor(ImGuiCol_Text, color);
+                    ImGui::TextUnformatted(line.c_str());
+                    ImGui::PopStyleColor();
+                }
             }
 
             ImGui::PopTextWrapPos();
