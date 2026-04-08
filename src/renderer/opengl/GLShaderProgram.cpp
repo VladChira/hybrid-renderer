@@ -107,6 +107,45 @@ namespace hybrid::renderer
         return true;
     }
 
+    bool GLShaderProgram::LinkComputeFromSource(std::string_view compute_source)
+    {
+        Destroy();
+
+        GLuint compute_shader = 0;
+        std::string error_log;
+
+        if (!CompileShader(GL_COMPUTE_SHADER, compute_source, compute_shader, error_log))
+        {
+            LOG_ERROR("[GLShaderProgram] Compute shader compilation failed:\n{}", error_log);
+            return false;
+        }
+
+        m_id = glCreateProgram();
+        if (m_id == 0)
+        {
+            glDeleteShader(compute_shader);
+            LOG_ERROR("[GLShaderProgram] glCreateProgram failed");
+            return false;
+        }
+
+        glAttachShader(m_id, compute_shader);
+        glLinkProgram(m_id);
+
+        GLint link_success = GL_FALSE;
+        glGetProgramiv(m_id, GL_LINK_STATUS, &link_success);
+        glDeleteShader(compute_shader);
+
+        if (link_success != GL_TRUE)
+        {
+            const std::string info_log = GetProgramInfoLog(m_id);
+            LOG_ERROR("[GLShaderProgram] Compute program link failed:\n{}", info_log);
+            Destroy();
+            return false;
+        }
+
+        return true;
+    }
+
     void GLShaderProgram::Destroy()
     {
         if (m_id == 0)

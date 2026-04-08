@@ -80,4 +80,30 @@ namespace hybrid::renderer
         return true;
     }
 
+    bool ShaderManager::CompileComputeProgramFromFile(const std::string &compute_shader_name,
+                                                      GLShaderProgram &out_program) const
+    {
+        const std::string compute_path = m_shader_root + "/" + compute_shader_name;
+
+        std::string compute_source;
+        LOG_INFO("[ShaderManager] Loading compute shader from '{}'", compute_path);
+        if (!ReadTextFile(compute_path, compute_source))
+        {
+            return false;
+        }
+
+        LOG_INFO("[ShaderManager] Compiling compute shader program (compute='{}')",
+                 compute_shader_name);
+        if (!out_program.LinkComputeFromSource(compute_source))
+        {
+            LOG_ERROR("[ShaderManager] Compute shader compilation/linking failed (compute='{}')",
+                      compute_path);
+            return false;
+        }
+
+        LOG_INFO("[ShaderManager] Compute shader program compiled successfully (compute='{}')",
+                 compute_shader_name);
+        return true;
+    }
+
 } // namespace hybrid::renderer

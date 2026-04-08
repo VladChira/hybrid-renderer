@@ -15,6 +15,8 @@ namespace hybrid::renderer
         bool CompileProgramFromFiles(const std::string &vertex_shader_name,
                                      const std::string &fragment_shader_name,
                                      GLShaderProgram &out_program) const;
+        bool CompileComputeProgramFromFile(const std::string &compute_shader_name,
+                                           GLShaderProgram &out_program) const;
 
     private:
         std::string m_shader_root;

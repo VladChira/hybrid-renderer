@@ -225,8 +225,6 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
   - scene material model includes UV transform/occlusion/emissive
   - G-buffer path currently resolves baseColor/metallic-roughness/normal only
 - Blended geometry is tracked but not integrated into a ray-tracing strategy.
-- Performance debt:
-  - frame targets are reallocated each frame path; this will hurt headroom needed for ray workloads
 
 ### Recommended implementation order
 

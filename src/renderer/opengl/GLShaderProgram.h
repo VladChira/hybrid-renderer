@@ -23,6 +23,7 @@ namespace hybrid::renderer
         bool LinkFromSource(std::string_view vertex_source,
                             std::string_view fragment_source,
                             std::string_view geometry_source = {});
+        bool LinkComputeFromSource(std::string_view compute_source);
         void Destroy();
 
         void Use() const;
