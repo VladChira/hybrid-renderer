@@ -17,6 +17,7 @@ namespace hybrid::renderer
     {
         constexpr int kMaxDeferredPointLights = 64;
         constexpr int kMaxDeferredDirectionalLights = 16;
+        constexpr int kMaxDeferredAreaLights = 16;
     }
 
     struct DeferredLightingPass::Impl
@@ -110,6 +111,11 @@ namespace hybrid::renderer
                                               static_cast<size_t>(kMaxDeferredDirectionalLights)));
         m_deferred_shader->SetUniform1i("u_directional_light_count", directional_light_count);
 
+        const int area_light_count =
+            static_cast<int>(std::min<size_t>(scene.area_lights.size(),
+                                              static_cast<size_t>(kMaxDeferredAreaLights)));
+        m_deferred_shader->SetUniform1i("u_area_light_count", area_light_count);
+
         std::array<char, 96> uniform_name{};
         for (int light_index = 0; light_index < directional_light_count; ++light_index)
         {
@@ -179,6 +185,49 @@ namespace hybrid::renderer
                           "u_point_lights[%d].attenuation_quadratic",
                           light_index);
             m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_quadratic);
+        }
+
+        for (int light_index = 0; light_index < area_light_count; ++light_index)
+        {
+            const RenderAreaLight &light = scene.area_lights[static_cast<size_t>(light_index)];
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].position",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.position);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].direction",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.direction);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].size",
+                          light_index);
+            glUniform2f(m_deferred_shader->GetUniformLocation(uniform_name.data()),
+                        light.size.x,
+                        light.size.y);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].color",
+                          light_index);
+            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].intensity",
+                          light_index);
+            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
+
+            std::snprintf(uniform_name.data(),
+                          uniform_name.size(),
+                          "u_area_lights[%d].two_sided",
+                          light_index);
+            m_deferred_shader->SetUniform1i(uniform_name.data(), light.two_sided ? 1 : 0);
         }
 
         glActiveTexture(GL_TEXTURE0);

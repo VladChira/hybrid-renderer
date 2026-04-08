@@ -27,6 +27,7 @@ uniform float u_skybox_yaw_radians;
 
 const int MAX_POINT_LIGHTS = 64;
 const int MAX_DIRECTIONAL_LIGHTS = 16;
+const int MAX_AREA_LIGHTS = 16;
 struct PointLight
 {
     vec3 position;
@@ -48,6 +49,18 @@ struct DirectionalLight
 };
 uniform int u_directional_light_count;
 uniform DirectionalLight u_directional_lights[MAX_DIRECTIONAL_LIGHTS];
+
+struct AreaLight
+{
+    vec3 position;
+    vec3 direction;
+    vec2 size;
+    vec3 color;
+    float intensity;
+    int two_sided;
+};
+uniform int u_area_light_count;
+uniform AreaLight u_area_lights[MAX_AREA_LIGHTS];
 
 out vec4 o_color;
 
@@ -159,6 +172,13 @@ vec3 RotateAroundY(vec3 direction, float angle_radians)
                 -s * direction.x + c * direction.z);
 }
 
+void BuildOrthonormalBasis(vec3 n, out vec3 tangent, out vec3 bitangent)
+{
+    vec3 helper = abs(n.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    tangent = normalize(cross(helper, n));
+    bitangent = normalize(cross(n, tangent));
+}
+
 void main()
 {
     vec4 rt0 = texture(u_gbuffer_rt0, v_uv);
@@ -255,6 +275,88 @@ void main()
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
         vec3 diffuse = kD * albedo / PI;
         Lo += (diffuse + specular) * radiance * ndotl;
+    }
+
+    // Deterministic surface sampling for rectangular area lights.
+    const int kAreaLightSampleGridSize = 8;
+    const float kAreaLightSampleGridSizeF = float(kAreaLightSampleGridSize);
+    const float kAreaLightSampleCount = kAreaLightSampleGridSizeF * kAreaLightSampleGridSizeF;
+    for (int light_index = 0; light_index < u_area_light_count; ++light_index)
+    {
+        AreaLight light = u_area_lights[light_index];
+        vec3 light_normal = normalize(light.direction);
+        vec3 light_tangent = vec3(1.0, 0.0, 0.0);
+        vec3 light_bitangent = vec3(0.0, 0.0, 1.0);
+        BuildOrthonormalBasis(light_normal, light_tangent, light_bitangent);
+
+        vec2 clamped_size = max(light.size, vec2(1e-3));
+        vec2 half_size = clamped_size * 0.5;
+        float light_area = clamped_size.x * clamped_size.y;
+
+        vec3 accumulated = vec3(0.0);
+        for (int sample_y = 0; sample_y < kAreaLightSampleGridSize; ++sample_y)
+        {
+            for (int sample_x = 0; sample_x < kAreaLightSampleGridSize; ++sample_x)
+            {
+                vec2 uv = (vec2(sample_x, sample_y) + vec2(0.5)) / kAreaLightSampleGridSizeF;
+                vec2 rect = (uv - 0.5) * 2.0;
+                vec3 sample_position =
+                    light.position +
+                    light_tangent * (rect.x * half_size.x) +
+                    light_bitangent * (rect.y * half_size.y);
+
+                vec3 light_vector = sample_position - world_position;
+                float light_distance = length(light_vector);
+                if (light_distance <= 1e-5)
+                {
+                    continue;
+                }
+
+                vec3 L = light_vector / light_distance;
+                float ndotl = max(dot(normal, L), 0.0);
+                if (ndotl <= 0.0)
+                {
+                    continue;
+                }
+
+                float emitter_cos = dot(light_normal, -L);
+                if (light.two_sided != 0)
+                {
+                    emitter_cos = abs(emitter_cos);
+                }
+                else
+                {
+                    emitter_cos = max(emitter_cos, 0.0);
+                }
+
+                if (emitter_cos <= 0.0)
+                {
+                    continue;
+                }
+
+                float attenuation = 1.0 / max(light_distance * light_distance, 1e-4);
+                vec3 radiance =
+                    light.color *
+                    max(light.intensity, 0.0) *
+                    light_area *
+                    emitter_cos *
+                    attenuation;
+
+                vec3 H = normalize(V + L);
+                vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+                float D = DistributionGGX(normal, H, roughness);
+                float G = GeometrySmith(normal, V, L, roughness);
+                vec3 numerator = D * G * F;
+                float denominator = max(4.0 * ndotv * ndotl, 1e-5);
+                vec3 specular = numerator / denominator;
+                vec3 kS = F;
+                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+                vec3 diffuse = kD * albedo / PI;
+                accumulated += (diffuse + specular) * radiance * ndotl;
+            }
+        }
+
+        Lo += accumulated / kAreaLightSampleCount;
     }
 
     vec3 ambient = vec3(0.0);

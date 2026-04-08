@@ -188,7 +188,7 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
 
 ## Current state vs hybrid target
 
-- Current renderer implements deferred shading partially, missing area lights.
+- Current renderer implements deferred shading.
 - No ray traced effects are in place (shadows would be the first)
 
 ## Ray tracing readiness analysis (2026-04-07)
@@ -217,9 +217,6 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
   - no GPU node/index buffers for traversal
 - No shared geometry GPU database for both raster and ray paths:
   - current mesh upload/cache is scoped inside `GBufferPass`
-- Lighting extraction is ahead of shading usage:
-  - area lights and `cast_shadows` flags exist in frame data
-  - deferred shader currently uses directional + point lights only
 - Reflections are currently IBL-only, not ray traced.
 - Material fidelity gap for ray hits:
   - scene material model includes UV transform/occlusion/emissive
@@ -228,12 +225,10 @@ Avoid introducing dependencies from low-level modules back into `core::App` or U
 
 ### Recommended implementation order
 
-1. Add compute-shader support in shader/runtime abstractions and renderer pass plumbing.
-2. Create shared GPU geometry/material buffers consumable by both raster and ray passes.
-3. Implement BLAS per mesh + TLAS per instance, wired to scene dirty queues.
-4. Add first ray pass: shadow rays (directional/point), output shadow mask, compose in deferred lighting.
-5. Add reflection ray pass with IBL fallback and roughness-aware sampling budget.
-6. Add ray debug UI + telemetry + renderer-focused tests/regression baselines.
+1. Implement BLAS per mesh + TLAS per instance, wired to scene dirty queues.
+2. Add first ray pass: shadow rays (directional/point), output shadow mask, compose in deferred lighting.
+3. Add reflection ray pass with IBL fallback and roughness-aware sampling budget.
+4. Add ray debug UI + telemetry.
 
 ### Immediate tactical guidance
 
