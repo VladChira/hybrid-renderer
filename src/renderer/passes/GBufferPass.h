@@ -7,6 +7,7 @@
 namespace hybrid::renderer
 {
     class GLShaderProgram;
+    class GpuSceneResourceCache;
 
     struct GBufferPassInput
     {
@@ -32,7 +33,7 @@ namespace hybrid::renderer
     class GBufferPass final
     {
     public:
-        explicit GBufferPass(GLShaderProgram *gbuffer_shader);
+        GBufferPass(GLShaderProgram *gbuffer_shader, GpuSceneResourceCache *gpu_resource_cache);
         ~GBufferPass();
 
         const char *Name() const;
@@ -41,6 +42,7 @@ namespace hybrid::renderer
     private:
         struct Impl;
         GLShaderProgram *m_gbuffer_shader = nullptr;
+        GpuSceneResourceCache *m_gpu_resource_cache = nullptr;
         std::unique_ptr<Impl> m_impl;
     };
 

@@ -4,6 +4,7 @@
 #include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
 #include "renderer/FrameResources.h"
+#include "renderer/GpuSceneResourceCache.h"
 #include "renderer/OpenGLRenderBackend.h"
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/ShaderManager.h"
@@ -48,6 +49,7 @@ namespace hybrid::renderer
         GLShaderProgram brdf_lut_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
+        GpuSceneResourceCache gpu_scene_resource_cache{};
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
@@ -147,7 +149,8 @@ namespace hybrid::renderer
             return false;
         }
 
-        m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader);
+        m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader,
+                                                             &m_impl->gpu_scene_resource_cache);
         m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
         m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader,
                                                                              &m_impl->convolute_hdri_shader,
@@ -186,6 +189,7 @@ namespace hybrid::renderer
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
         m_impl->hdri_precompute_pass.reset();
+        m_impl->gpu_scene_resource_cache.Clear();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
         m_impl->equirect_to_cubemap_shader.Destroy();
