@@ -16,8 +16,13 @@ namespace hybrid::renderer
         GBufferEntityId,
         GBufferDepth,
         RaytraceHeatmap,
-        RaytraceAlbedo
+        RaytraceAlbedo,
+        RaytraceShadowMasks
     };
+
+    // Maximum number of shadow-casting lights supported by the ray-traced
+    // shadow mask array. Excess lights fall back to unshadowed.
+    constexpr uint32_t kMaxShadowMaskLayers = 8;
 
     enum class FrameFramebuffer
     {
@@ -57,6 +62,7 @@ namespace hybrid::renderer
 
         GLTexture m_raytrace_heatmap{};
         GLTexture m_raytrace_albedo{};
+        GLTexture m_raytrace_shadow_masks{};
     };
 
 } // namespace hybrid::renderer

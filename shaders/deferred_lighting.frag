@@ -9,6 +9,7 @@ uniform samplerCube u_skybox_cubemap;
 uniform samplerCube u_irradiance_cubemap;
 uniform samplerCube u_prefiltered_env_cubemap;
 uniform sampler2D u_brdf_lut;
+uniform sampler2DArray u_shadow_mask_array;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
@@ -31,7 +32,7 @@ uniform uint u_area_light_count;
 
 struct GpuDirectionalLight
 {
-    vec4 direction_cast_shadows;  // xyz = direction, w = cast_shadows (0/1)
+    vec4 direction_shadow_layer;  // xyz = direction, w = shadow layer (-1 = none)
     vec4 color_intensity;         // xyz = color, w = intensity
 };
 
@@ -39,16 +40,21 @@ struct GpuPointLight
 {
     vec4 position_intensity;   // xyz = position, w = intensity
     vec4 color_range;          // xyz = color,    w = range
-    vec4 attenuation_cast;     // x/y/z = c/l/q,  w = cast_shadows (0/1)
+    vec4 attenuation_shadow;   // x/y/z = c/l/q,  w = shadow layer (-1 = none)
 };
 
 struct GpuAreaLight
 {
-    vec4 position_intensity;   // xyz = position, w = intensity
-    vec4 direction_size_x;     // xyz = direction (unit), w = size.x
-    vec4 color_size_y;         // xyz = color,    w = size.y
-    vec4 two_sided_cast_pad;   // x = two_sided, y = cast_shadows
+    vec4 position_intensity;      // xyz = position, w = intensity
+    vec4 direction_size_x;        // xyz = direction (unit), w = size.x
+    vec4 color_size_y;            // xyz = color,    w = size.y
+    vec4 two_sided_shadow_pad;    // x = two_sided, y = shadow layer (-1 = none)
 };
+
+float SampleShadowMask(vec2 uv, float layer_f)
+{
+    return layer_f >= 0.0 ? texture(u_shadow_mask_array, vec3(uv, layer_f)).r : 1.0;
+}
 
 layout(std430, binding = 4) readonly buffer DirectionalLightBuffer
 {
@@ -235,9 +241,10 @@ void main()
     for (uint i = 0u; i < u_directional_light_count; ++i)
     {
         GpuDirectionalLight light = directional_lights[i];
-        vec3 L = normalize(-light.direction_cast_shadows.xyz);
+        vec3 L = normalize(-light.direction_shadow_layer.xyz);
         vec3 radiance = light.color_intensity.rgb * max(light.color_intensity.w, 0.0);
-        Lo += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
+        vec3 contribution = ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
+        Lo += contribution * SampleShadowMask(v_uv, light.direction_shadow_layer.w);
     }
 
     for (uint i = 0u; i < u_point_light_count; ++i)
@@ -265,11 +272,12 @@ void main()
             continue;
         }
 
-        float attenuation = light.attenuation_cast.x +
-                            light.attenuation_cast.y * light_distance +
-                            light.attenuation_cast.z * light_distance * light_distance;
+        float attenuation = light.attenuation_shadow.x +
+                            light.attenuation_shadow.y * light_distance +
+                            light.attenuation_shadow.z * light_distance * light_distance;
         vec3 radiance = light.color_range.rgb * max(intensity, 0.0) / max(attenuation, 1e-5);
-        Lo += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
+        vec3 contribution = ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
+        Lo += contribution * SampleShadowMask(v_uv, light.attenuation_shadow.w);
     }
 
     const int kAreaLightSampleGridSize = 8;
@@ -283,7 +291,7 @@ void main()
         vec3 light_direction = light.direction_size_x.xyz;
         vec2 clamped_size = max(vec2(light.direction_size_x.w, light.color_size_y.w), vec2(1e-3));
         vec3 light_color = light.color_size_y.rgb;
-        bool two_sided = light.two_sided_cast_pad.x > 0.5;
+        bool two_sided = light.two_sided_shadow_pad.x > 0.5;
 
         vec3 light_normal = normalize(light_direction);
         vec3 light_tangent = vec3(0.0);
@@ -340,7 +348,11 @@ void main()
             }
         }
 
-        Lo += accumulated / kAreaLightSampleCount;
+        // Separable visibility approximation: the deferred integral
+        // quadratures emission × BRDF × geometry, while the ray pass supplies
+        // a single stochastic visibility sample. Multiplying the two is
+        // biased but commonly accepted.
+        Lo += (accumulated / kAreaLightSampleCount) * SampleShadowMask(v_uv, light.two_sided_shadow_pad.y);
     }
 
     vec3 ambient = vec3(0.0);

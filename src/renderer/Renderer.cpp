@@ -18,6 +18,7 @@
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
 #include "renderer/passes/RayTracedAlbedoPass.h"
+#include "renderer/passes/RayTracedShadowPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 
 #include <chrono>
@@ -57,6 +58,7 @@ namespace hybrid::renderer
         GLShaderProgram brdf_lut_shader{};
         GLShaderProgram traversal_heatmap_shader{};
         GLShaderProgram raytrace_albedo_shader{};
+        GLShaderProgram raytrace_shadow_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -69,6 +71,7 @@ namespace hybrid::renderer
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
         std::unique_ptr<RayTracedAlbedoPass>  raytrace_albedo_pass{};
+        std::unique_ptr<RayTracedShadowPass>  raytrace_shadow_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -184,6 +187,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("raytrace_shadow.comp",
+                                                                   m_impl->raytrace_shadow_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: raytrace shadow compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -221,6 +231,9 @@ namespace hybrid::renderer
                                                                                 &m_impl->geometry_store,
                                                                                 &m_impl->material_store,
                                                                                 &m_impl->as_cache);
+        m_impl->raytrace_shadow_pass   = std::make_unique<RayTracedShadowPass>(&m_impl->raytrace_shadow_shader,
+                                                                                &m_impl->geometry_store,
+                                                                                &m_impl->as_cache);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -256,6 +269,7 @@ namespace hybrid::renderer
         m_impl->hdri_precompute_pass.reset();
         m_impl->traversal_heatmap_pass.reset();
         m_impl->raytrace_albedo_pass.reset();
+        m_impl->raytrace_shadow_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
         m_impl->light_store.Clear();
@@ -268,6 +282,7 @@ namespace hybrid::renderer
         m_impl->brdf_lut_shader.Destroy();
         m_impl->traversal_heatmap_shader.Destroy();
         m_impl->raytrace_albedo_shader.Destroy();
+        m_impl->raytrace_shadow_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -437,6 +452,28 @@ namespace hybrid::renderer
             m_impl->as_cache.Upload();
         }
 
+        // Light upload happens before the shadow pass so ShadowCasters() is
+        // populated, and before deferred lighting so light SSBOs are current.
+        m_impl->light_store.Update(m_impl->scene_data,
+                                    m_impl->submitted_settings.enable_raytrace_shadows);
+
+        if (m_impl->raytrace_shadow_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::RayTracedShadowPass");
+            RayTracedShadowPassInput shadow_input{};
+            shadow_input.settings          = &m_impl->submitted_settings;
+            shadow_input.effective_view    = &m_impl->effective_view;
+            shadow_input.light_store       = &m_impl->light_store;
+            shadow_input.gbuffer_depth     = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            shadow_input.gbuffer_rt1       = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+            shadow_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            shadow_input.frame_index       = static_cast<uint32_t>(m_impl->frame_context.frame_index);
+            if (!m_impl->raytrace_shadow_pass->Execute(shadow_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_shadow_pass->Name());
+            }
+        }
+
         if (m_impl->traversal_heatmap_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::TraversalHeatmapPass");
@@ -481,7 +518,6 @@ namespace hybrid::renderer
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
-            m_impl->light_store.Update(m_impl->scene_data);
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
             deferred_input.scene_data = &m_impl->scene_data;
@@ -498,6 +534,7 @@ namespace hybrid::renderer
             deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
+            deferred_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))

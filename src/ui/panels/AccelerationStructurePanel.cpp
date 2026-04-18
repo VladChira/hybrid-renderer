@@ -36,9 +36,29 @@ namespace hybrid::ui
 
         const auto &s = *m_stats;
 
+        renderer::RenderSettings *settings = (context.state != nullptr) ? context.state->render_settings : nullptr;
+
+        if (ImGui::CollapsingHeader("Ray-traced shadows", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (settings != nullptr)
+            {
+                ImGui::Checkbox("Enabled", &settings->enable_raytrace_shadows);
+                ImGui::SliderFloat("Normal bias",
+                                   &settings->raytrace_shadow_normal_bias,
+                                   0.001f,
+                                   0.25f,
+                                   "%.4f",
+                                   ImGuiSliderFlags_Logarithmic);
+                ImGui::TextDisabled("Area lights use 1 stochastic sample per pixel per frame (noisy; no denoiser yet).");
+            }
+            else
+            {
+                ImGui::TextUnformatted("Render settings unavailable.");
+            }
+        }
+
         if (ImGui::CollapsingHeader("Traversal heatmap", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            renderer::RenderSettings *settings = (context.state != nullptr) ? context.state->render_settings : nullptr;
             if (settings != nullptr)
             {
                 ImGui::TextUnformatted(settings->enable_raytrace_heatmap

@@ -71,6 +71,10 @@ namespace hybrid::renderer
         bool  enable_raytrace_heatmap    = false;  // set each frame by the UI when the heatmap target is displayed
         float raytrace_heatmap_scale     = 256.0f; // divisor applied to visit counts before LUT sampling
         bool  enable_raytrace_albedo     = false;  // set each frame by the UI when the albedo target is displayed
+
+        // Ray-traced shadows (Phase 3).
+        bool  enable_raytrace_shadows        = true;
+        float raytrace_shadow_normal_bias    = 0.02f;
     };
 
     struct RenderMeshInstance
