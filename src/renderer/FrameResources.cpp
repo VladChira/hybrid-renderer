@@ -410,11 +410,25 @@ namespace hybrid::renderer
         if (!allocate_scene_radiance(m_scene_radiance[0], "scene radiance[0]")) { return false; }
         if (!allocate_scene_radiance(m_scene_radiance[1], "scene radiance[1]")) { return false; }
 
+        // glClearTexImage on mutable-storage RGBA16F textures has had driver
+        // reliability issues; clear via a scratch FBO + glClear which is
+        // universally supported.
         const float zero_rgba[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        GLuint scratch_fbo = 0;
+        glGenFramebuffers(1, &scratch_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, scratch_fbo);
+        const GLenum single_db[1] = {GL_COLOR_ATTACHMENT0};
+        glDrawBuffers(1, single_db);
         for (GLTexture &t : m_scene_radiance)
         {
-            glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.Id(), 0);
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
+            {
+                glClearBufferfv(GL_COLOR, 0, zero_rgba);
+            }
         }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &scratch_fbo);
 
         // Quarter-res SSGI: one raw output, history ping-pong, filter ping-pong.
         const RenderExtent ssgi_extent = SsgiExtent(extent);
@@ -445,9 +459,25 @@ namespace hybrid::renderer
         if (!allocate_ssgi_rt(m_ssgi_filter[0],  "ssgi filter[0]"))  { return false; }
         if (!allocate_ssgi_rt(m_ssgi_filter[1],  "ssgi filter[1]"))  { return false; }
 
-        glClearTexImage(m_ssgi_raw.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba);
-        for (GLTexture &t : m_ssgi_history) { glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba); }
-        for (GLTexture &t : m_ssgi_filter)  { glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba); }
+        // Same scratch-FBO trick for the SSGI ping-pong buffers.
+        GLuint ssgi_scratch_fbo = 0;
+        glGenFramebuffers(1, &ssgi_scratch_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, ssgi_scratch_fbo);
+        const GLenum ssgi_db[1] = {GL_COLOR_ATTACHMENT0};
+        glDrawBuffers(1, ssgi_db);
+        auto fbo_clear = [&](GLTexture &t)
+        {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.Id(), 0);
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
+            {
+                glClearBufferfv(GL_COLOR, 0, zero_rgba);
+            }
+        };
+        fbo_clear(m_ssgi_raw);
+        for (GLTexture &t : m_ssgi_history) { fbo_clear(t); }
+        for (GLTexture &t : m_ssgi_filter)  { fbo_clear(t); }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &ssgi_scratch_fbo);
 
         // MRT-enable the scene framebuffer: COLOR_ATTACHMENT0 is the already-
         // attached sRGB scene color, COLOR_ATTACHMENT1 is the current frame's
