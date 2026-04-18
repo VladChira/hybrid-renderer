@@ -190,6 +190,7 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/passes/DeferredLightingPass.cpp
   src/renderer/passes/GBufferPass.cpp
   src/renderer/passes/HdriPrecomputePass.cpp
+  src/renderer/passes/RayTracedAlbedoPass.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp

@@ -1,0 +1,49 @@
+#version 460 core
+#extension GL_ARB_bindless_texture : require
+
+// Primary-ray first-hit debug. Writes the hit surface's base colour into an
+// RGBA8 image at the render extent. Visually matches G-buffer RT0 (modulo
+// sub-pixel filtering differences) when the acceleration structure and
+// geometry / material fetch are correct.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba8, binding = 0) uniform writeonly image2D o_albedo;
+
+#include "rt/common.glsl"
+#include "rt/bvh_traversal.glsl"
+#include "rt/geometry_fetch.glsl"
+#include "rt/material_fetch.glsl"
+
+uniform mat4  u_inv_view;
+uniform mat4  u_inv_projection;
+uniform vec3  u_camera_position;
+uniform uint  u_tlas_node_count;
+uniform uvec2 u_output_size;
+uniform vec3  u_miss_color;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
+    vec4 ndc = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec4 view = u_inv_projection * ndc;
+    vec3 view_dir = normalize(view.xyz / max(view.w, 1e-5));
+    vec3 world_dir = normalize((u_inv_view * vec4(view_dir, 0.0)).xyz);
+
+    RayHit hit;
+    vec3 color = u_miss_color;
+    if (TraceClosestHit(u_camera_position, world_dir, u_tlas_node_count, 1e30, hit))
+    {
+        HitGeometry geo = FetchHitGeometry(hit);
+        ShadedSurface surface = FetchSurface(geo.material_index, geo.uv0, geo.uv1);
+        color = surface.albedo;
+    }
+
+    imageStore(o_albedo, pixel, vec4(color, 1.0));
+}

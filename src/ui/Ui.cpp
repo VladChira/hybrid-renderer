@@ -163,6 +163,8 @@ namespace hybrid::ui
         {
             frame_state.render_settings->enable_raytrace_heatmap =
                 (m_viewport_visualization == UiViewportVisualization::RaytraceHeatmap);
+            frame_state.render_settings->enable_raytrace_albedo =
+                (m_viewport_visualization == UiViewportVisualization::RaytraceAlbedo);
         }
 
         PanelContext context{};

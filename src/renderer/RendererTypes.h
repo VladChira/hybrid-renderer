@@ -70,6 +70,7 @@ namespace hybrid::renderer
         // Ray tracing diagnostics.
         bool  enable_raytrace_heatmap    = false;  // set each frame by the UI when the heatmap target is displayed
         float raytrace_heatmap_scale     = 256.0f; // divisor applied to visit counts before LUT sampling
+        bool  enable_raytrace_albedo     = false;  // set each frame by the UI when the albedo target is displayed
     };
 
     struct RenderMeshInstance
@@ -175,6 +176,7 @@ namespace hybrid::renderer
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;
         GlTextureId raytrace_heatmap = 0;
+        GlTextureId raytrace_albedo = 0;
     };
 
 } // namespace hybrid::renderer

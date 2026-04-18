@@ -54,6 +54,7 @@ namespace hybrid::renderer
         m_gbuffer_depth.Destroy();
         m_gbuffer_framebuffer.Destroy();
         m_raytrace_heatmap.Destroy();
+        m_raytrace_albedo.Destroy();
         m_extent = {};
         m_valid = false;
     }
@@ -76,6 +77,8 @@ namespace hybrid::renderer
             return m_gbuffer_depth.Id();
         case FrameTarget::RaytraceHeatmap:
             return m_raytrace_heatmap.Id();
+        case FrameTarget::RaytraceAlbedo:
+            return m_raytrace_albedo.Id();
         default:
             return 0;
         }
@@ -275,24 +278,30 @@ namespace hybrid::renderer
             return false;
         }
 
-        if (!m_raytrace_heatmap.IsValid() && !m_raytrace_heatmap.Create(GL_TEXTURE_2D))
+        auto allocate_compute_rt = [&](GLTexture &texture, const char *label) -> bool
         {
-            LOG_ERROR("[FrameResources] Failed to create raytrace heatmap texture");
-            return false;
-        }
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {} texture", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA8,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               GL_RGBA,
+                               GL_UNSIGNED_BYTE,
+                               nullptr);
+            return true;
+        };
 
-        m_raytrace_heatmap.Bind();
-        m_raytrace_heatmap.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        m_raytrace_heatmap.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        m_raytrace_heatmap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        m_raytrace_heatmap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        m_raytrace_heatmap.SetImage2D(0,
-                                      GL_RGBA8,
-                                      static_cast<GLsizei>(extent.width),
-                                      static_cast<GLsizei>(extent.height),
-                                      GL_RGBA,
-                                      GL_UNSIGNED_BYTE,
-                                      nullptr);
+        if (!allocate_compute_rt(m_raytrace_heatmap, "raytrace heatmap")) { return false; }
+        if (!allocate_compute_rt(m_raytrace_albedo,  "raytrace albedo"))  { return false; }
         return true;
     }
 

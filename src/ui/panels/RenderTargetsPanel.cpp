@@ -20,13 +20,14 @@ namespace hybrid::ui
             UiViewportVisualization visualization;
         };
 
-        constexpr std::array<TargetEntry, 6> kTargets = {{
+        constexpr std::array<TargetEntry, 7> kTargets = {{
             {"Final color",            UiViewportVisualization::FinalColor},
             {"G-buffer RT0 (albedo+metallic)", UiViewportVisualization::GBufferRt0},
             {"G-buffer RT1 (normal+roughness)", UiViewportVisualization::GBufferRt1},
             {"G-buffer depth",         UiViewportVisualization::GBufferDepth},
             {"G-buffer entity id",     UiViewportVisualization::GBufferEntityId},
             {"BVH traversal heatmap",  UiViewportVisualization::RaytraceHeatmap},
+            {"Ray-traced albedo",      UiViewportVisualization::RaytraceAlbedo},
         }};
 
         uint64_t ResolveTextureForPreview(const UiState &state, UiViewportVisualization visualization)
@@ -39,6 +40,7 @@ namespace hybrid::ui
             case UiViewportVisualization::GBufferDepth:    return state.viewport_gbuffer_depth_texture;
             case UiViewportVisualization::GBufferEntityId: return state.viewport_entity_id_texture;
             case UiViewportVisualization::RaytraceHeatmap: return state.viewport_raytrace_heatmap_texture;
+            case UiViewportVisualization::RaytraceAlbedo:  return state.viewport_raytrace_albedo_texture;
             }
             return 0;
         }

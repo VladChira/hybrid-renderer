@@ -17,6 +17,7 @@
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
+#include "renderer/passes/RayTracedAlbedoPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 
 #include <chrono>
@@ -37,6 +38,7 @@ namespace hybrid::renderer
             outputs.gbuffer_rt1 = resources.Get(FrameTarget::GBufferRt1);
             outputs.gbuffer_entity_id = resources.Get(FrameTarget::GBufferEntityId);
             outputs.raytrace_heatmap = resources.Get(FrameTarget::RaytraceHeatmap);
+            outputs.raytrace_albedo = resources.Get(FrameTarget::RaytraceAlbedo);
             return outputs;
         }
     } // namespace
@@ -54,6 +56,7 @@ namespace hybrid::renderer
         GLShaderProgram prefilter_hdri_shader{};
         GLShaderProgram brdf_lut_shader{};
         GLShaderProgram traversal_heatmap_shader{};
+        GLShaderProgram raytrace_albedo_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -65,6 +68,7 @@ namespace hybrid::renderer
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
+        std::unique_ptr<RayTracedAlbedoPass>  raytrace_albedo_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -173,6 +177,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("raytrace_albedo.comp",
+                                                                   m_impl->raytrace_albedo_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: raytrace albedo compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -206,6 +217,10 @@ namespace hybrid::renderer
         m_impl->traversal_heatmap_pass = std::make_unique<TraversalHeatmapPass>(&m_impl->traversal_heatmap_shader,
                                                                                   &m_impl->geometry_store,
                                                                                   &m_impl->as_cache);
+        m_impl->raytrace_albedo_pass   = std::make_unique<RayTracedAlbedoPass>(&m_impl->raytrace_albedo_shader,
+                                                                                &m_impl->geometry_store,
+                                                                                &m_impl->material_store,
+                                                                                &m_impl->as_cache);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -240,6 +255,7 @@ namespace hybrid::renderer
         m_impl->deferred_lighting_pass.reset();
         m_impl->hdri_precompute_pass.reset();
         m_impl->traversal_heatmap_pass.reset();
+        m_impl->raytrace_albedo_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
         m_impl->light_store.Clear();
@@ -251,6 +267,7 @@ namespace hybrid::renderer
         m_impl->prefilter_hdri_shader.Destroy();
         m_impl->brdf_lut_shader.Destroy();
         m_impl->traversal_heatmap_shader.Destroy();
+        m_impl->raytrace_albedo_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -430,6 +447,19 @@ namespace hybrid::renderer
             if (!m_impl->traversal_heatmap_pass->Execute(heatmap_input))
             {
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->traversal_heatmap_pass->Name());
+            }
+        }
+
+        if (m_impl->raytrace_albedo_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::RayTracedAlbedoPass");
+            RayTracedAlbedoPassInput albedo_input{};
+            albedo_input.settings = &m_impl->submitted_settings;
+            albedo_input.effective_view = &m_impl->effective_view;
+            albedo_input.albedo_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceAlbedo);
+            if (!m_impl->raytrace_albedo_pass->Execute(albedo_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_albedo_pass->Name());
             }
         }
 
