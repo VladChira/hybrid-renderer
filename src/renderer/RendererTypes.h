@@ -66,6 +66,10 @@ namespace hybrid::renderer
         uint32_t hdri_prefilter_cubemap_size = 128;
         uint32_t hdri_prefilter_mip_levels = 5;
         uint32_t hdri_brdf_lut_size = 512;
+
+        // Ray tracing diagnostics.
+        bool  enable_raytrace_heatmap    = false;  // set each frame by the UI when the heatmap target is displayed
+        float raytrace_heatmap_scale     = 256.0f; // divisor applied to visit counts before LUT sampling
     };
 
     struct RenderMeshInstance

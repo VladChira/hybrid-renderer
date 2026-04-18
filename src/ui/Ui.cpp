@@ -156,6 +156,15 @@ namespace hybrid::ui
         frame_state.materials = &m_material_entries;
         frame_state.viewport_visualization = m_viewport_visualization;
 
+        // Diagnostic ray passes are gated on whether their render target is
+        // being displayed. Do it here (not in a panel) so the flag stays
+        // accurate even when the Render Targets panel is closed.
+        if (frame_state.render_settings != nullptr)
+        {
+            frame_state.render_settings->enable_raytrace_heatmap =
+                (m_viewport_visualization == UiViewportVisualization::RaytraceHeatmap);
+        }
+
         PanelContext context{};
         context.delta_seconds = delta_seconds;
         context.commands = &commands;

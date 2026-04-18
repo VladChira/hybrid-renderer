@@ -5,6 +5,8 @@
 #include "renderer/raytracing/AccelerationStructureCache.h"
 #include "renderer/opengl/GLShaderProgram.h"
 
+#include <algorithm>
+
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace hybrid::renderer
@@ -53,10 +55,14 @@ namespace hybrid::renderer
             return false;
         }
 
-        const auto &stats = m_as_cache->Stats();
-        // Always dispatch — when the TLAS is empty the shader fills the image
-        // with the zero-visit colour, which keeps the UI from sampling
-        // uninitialised texture contents.
+        if (!settings.enable_raytrace_heatmap)
+        {
+            // Heatmap is purely diagnostic. Only run it when the UI actually
+            // displays the target — compute would otherwise dominate the frame
+            // on large scenes for no visible gain.
+            return true;
+        }
+
         m_program->Use();
 
         // Output image binding.
@@ -75,7 +81,7 @@ namespace hybrid::renderer
         m_program->SetUniformMat4("u_inv_view", glm::affineInverse(view.view));
         m_program->SetUniformMat4("u_inv_projection", glm::inverse(view.projection));
         m_program->SetUniformVec3("u_camera_position", view.position);
-        m_program->SetUniform1ui("u_tlas_node_count", stats.tlas_nodes);
+        m_program->SetUniform1ui("u_tlas_node_count", m_as_cache->Stats().tlas_nodes);
 
         const GLint output_size_loc = m_program->GetUniformLocation("u_output_size");
         if (output_size_loc >= 0)
@@ -84,10 +90,7 @@ namespace hybrid::renderer
                          static_cast<GLuint>(extent.width),
                          static_cast<GLuint>(extent.height));
         }
-        // Scale so a "typical" Sponza pixel lands mid-gradient. Tunable from
-        // the UI later; 256 is a reasonable starting point for heavily-shared
-        // scenes.
-        m_program->SetUniform1f("u_heatmap_scale", 256.0f);
+        m_program->SetUniform1f("u_heatmap_scale", std::max(settings.raytrace_heatmap_scale, 1.0f));
 
         const GLuint groups_x = CeilDiv(extent.width, kWorkgroupSize);
         const GLuint groups_y = CeilDiv(extent.height, kWorkgroupSize);

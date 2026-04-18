@@ -1,5 +1,8 @@
 #include "AccelerationStructurePanel.h"
 
+#include "renderer/RendererTypes.h"
+#include "ui/UiState.h"
+
 #include <imgui.h>
 
 #include <cstddef>
@@ -25,7 +28,6 @@ namespace hybrid::ui
 
     void AccelerationStructurePanel::DrawContents(PanelContext &context)
     {
-        (void)context;
         if (m_stats == nullptr)
         {
             ImGui::TextUnformatted("No stats source bound.");
@@ -33,6 +35,28 @@ namespace hybrid::ui
         }
 
         const auto &s = *m_stats;
+
+        if (ImGui::CollapsingHeader("Traversal heatmap", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            renderer::RenderSettings *settings = (context.state != nullptr) ? context.state->render_settings : nullptr;
+            if (settings != nullptr)
+            {
+                ImGui::TextUnformatted(settings->enable_raytrace_heatmap
+                                           ? "Active — pick another target to stop dispatch."
+                                           : "Inactive — select the heatmap target to enable.");
+                ImGui::SliderFloat("Scale",
+                                   &settings->raytrace_heatmap_scale,
+                                   1.0f,
+                                   4096.0f,
+                                   "%.0f",
+                                   ImGuiSliderFlags_Logarithmic);
+                ImGui::TextDisabled("Visit count divided by this before the colour LUT.");
+            }
+            else
+            {
+                ImGui::TextUnformatted("Render settings unavailable.");
+            }
+        }
 
         if (ImGui::CollapsingHeader("BLAS", ImGuiTreeNodeFlags_DefaultOpen))
         {
