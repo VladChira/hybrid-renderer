@@ -88,6 +88,10 @@ namespace hybrid::renderer
         float ssgi_intensity                 = 1.0f;
         float ssgi_max_ray_distance          = 30.0f;
         float ssgi_screen_thickness          = 0.01f;
+        // Debug: 0 = full 3-tier, 1 = only screen-space hits, 2 = only BVH
+        // hits, 3 = only IBL miss. Use to isolate which tier contributes a
+        // signal you see.
+        int   ssgi_debug_mode                = 0;
         bool  enable_ssgi_denoise            = true;
         float ssgi_denoise_temporal_alpha    = 0.92f;
         int   ssgi_denoise_iterations        = 3;
@@ -200,6 +204,8 @@ namespace hybrid::renderer
         GlTextureId gbuffer_entity_id = 0;
         GlTextureId raytrace_heatmap = 0;
         GlTextureId raytrace_albedo = 0;
+        GlTextureId ssgi_raw = 0;
+        GlTextureId ssgi_filtered = 0;
     };
 
 } // namespace hybrid::renderer

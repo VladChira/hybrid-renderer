@@ -96,6 +96,13 @@ namespace hybrid::ui
                                    &settings->ssgi_screen_thickness,
                                    0.0005f, 0.1f, "%.4f",
                                    ImGuiSliderFlags_Logarithmic);
+                const char *debug_modes[] = {
+                    "All tiers",
+                    "Only screen-space hits",
+                    "Only BVH hits",
+                    "Only IBL misses"};
+                ImGui::Combo("Debug tier##ssgi", &settings->ssgi_debug_mode,
+                             debug_modes, IM_ARRAYSIZE(debug_modes));
 
                 ImGui::Separator();
                 ImGui::Checkbox("Denoise##ssgi", &settings->enable_ssgi_denoise);

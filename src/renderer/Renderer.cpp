@@ -44,6 +44,7 @@ namespace hybrid::renderer
             outputs.gbuffer_entity_id = resources.Get(FrameTarget::GBufferEntityId);
             outputs.raytrace_heatmap = resources.Get(FrameTarget::RaytraceHeatmap);
             outputs.raytrace_albedo = resources.Get(FrameTarget::RaytraceAlbedo);
+            outputs.ssgi_raw = resources.Get(FrameTarget::SsgiRaw);
             return outputs;
         }
     } // namespace
@@ -724,6 +725,7 @@ namespace hybrid::renderer
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
             deferred_input.shadow_mask_array = final_shadow_mask;
             deferred_input.ssgi_texture      = ssgi_filtered_for_deferred;
+            m_impl->outputs.ssgi_filtered    = ssgi_filtered_for_deferred;
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))

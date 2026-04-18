@@ -120,6 +120,7 @@ namespace hybrid::renderer
         m_program->SetUniform1ui("u_has_irradiance",   input.has_irradiance ? 1u : 0u);
         m_program->SetUniform1f ("u_skybox_intensity", input.skybox_intensity);
         m_program->SetUniform1f ("u_skybox_yaw_radians", input.skybox_yaw_radians);
+        m_program->SetUniform1i ("u_debug_mode",       settings.ssgi_debug_mode);
 
         const GLuint groups_x = CeilDiv(ssgi_extent.width,  kWorkgroupSize);
         const GLuint groups_y = CeilDiv(ssgi_extent.height, kWorkgroupSize);

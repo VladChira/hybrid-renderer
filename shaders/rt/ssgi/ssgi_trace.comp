@@ -45,6 +45,7 @@ uniform float u_screen_march_thickness;
 uniform uint  u_has_irradiance;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
+uniform int   u_debug_mode;   // 0 = all tiers, 1 = only screen, 2 = only BVH, 3 = only IBL
 
 const int kMaxScreenMarchSteps = 32;
 
@@ -183,21 +184,28 @@ void main()
     vec3 radiance = vec3(0.0);
 
     vec2 screen_hit_uv;
-    if (ScreenMarch(origin, direction, screen_hit_uv))
+    bool screen_hit = ScreenMarch(origin, direction, screen_hit_uv);
+
+    RayHit hit;
+    bool bvh_hit = false;
+    if (!screen_hit)
+    {
+        bvh_hit = TraceClosestHit(origin, direction, u_tlas_node_count, u_max_ray_distance, hit);
+    }
+
+    // Tier selection. Debug mode nukes whatever isn't being inspected so we
+    // can see which tier is producing the signal we're looking at.
+    if (screen_hit && (u_debug_mode == 0 || u_debug_mode == 1))
     {
         radiance = texture(u_scene_radiance_prev, screen_hit_uv).rgb;
     }
-    else
+    else if (bvh_hit && (u_debug_mode == 0 || u_debug_mode == 2))
     {
-        RayHit hit;
-        if (TraceClosestHit(origin, direction, u_tlas_node_count, u_max_ray_distance, hit))
-        {
-            radiance = ResolveBvhHitColor(hit, direction);
-        }
-        else
-        {
-            radiance = IrradianceIn(direction);
-        }
+        radiance = ResolveBvhHitColor(hit, direction);
+    }
+    else if (!screen_hit && !bvh_hit && (u_debug_mode == 0 || u_debug_mode == 3))
+    {
+        radiance = IrradianceIn(direction);
     }
 
     // Multiply by π so the stored value is directly comparable to the

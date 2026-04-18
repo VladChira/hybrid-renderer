@@ -20,7 +20,7 @@ namespace hybrid::ui
             UiViewportVisualization visualization;
         };
 
-        constexpr std::array<TargetEntry, 7> kTargets = {{
+        constexpr std::array<TargetEntry, 9> kTargets = {{
             {"Final color",            UiViewportVisualization::FinalColor},
             {"G-buffer RT0 (albedo+metallic)", UiViewportVisualization::GBufferRt0},
             {"G-buffer RT1 (normal+roughness)", UiViewportVisualization::GBufferRt1},
@@ -28,6 +28,8 @@ namespace hybrid::ui
             {"G-buffer entity id",     UiViewportVisualization::GBufferEntityId},
             {"BVH traversal heatmap",  UiViewportVisualization::RaytraceHeatmap},
             {"Ray-traced albedo",      UiViewportVisualization::RaytraceAlbedo},
+            {"SSGI raw (pre-denoise)", UiViewportVisualization::SsgiRaw},
+            {"SSGI filtered",          UiViewportVisualization::SsgiFiltered},
         }};
 
         uint64_t ResolveTextureForPreview(const UiState &state, UiViewportVisualization visualization)
@@ -41,6 +43,8 @@ namespace hybrid::ui
             case UiViewportVisualization::GBufferEntityId: return state.viewport_entity_id_texture;
             case UiViewportVisualization::RaytraceHeatmap: return state.viewport_raytrace_heatmap_texture;
             case UiViewportVisualization::RaytraceAlbedo:  return state.viewport_raytrace_albedo_texture;
+            case UiViewportVisualization::SsgiRaw:         return state.viewport_ssgi_raw_texture;
+            case UiViewportVisualization::SsgiFiltered:    return state.viewport_ssgi_filtered_texture;
             }
             return 0;
         }
