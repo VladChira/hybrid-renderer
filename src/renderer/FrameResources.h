@@ -19,7 +19,11 @@ namespace hybrid::renderer
         GBufferDepth,
         RaytraceHeatmap,
         RaytraceAlbedo,
-        RaytraceShadowMasks
+        RaytraceShadowMasks,
+        RaytraceShadowHistory0,
+        RaytraceShadowHistory1,
+        RaytraceShadowFilter0,
+        RaytraceShadowFilter1
     };
 
     // Maximum number of shadow-casting lights supported by the ray-traced
@@ -77,6 +81,8 @@ namespace hybrid::renderer
         GLTexture m_raytrace_heatmap{};
         GLTexture m_raytrace_albedo{};
         GLTexture m_raytrace_shadow_masks{};
+        GLTexture m_raytrace_shadow_history[2]{};  // ping-pong across frames (temporal)
+        GLTexture m_raytrace_shadow_filter[2]{};   // ping-pong within frame (à-trous)
     };
 
 } // namespace hybrid::renderer

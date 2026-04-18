@@ -1,0 +1,74 @@
+#version 460 core
+
+// Temporal accumulation for shadow masks. Reprojects the previous frame's
+// accumulated visibility via the stored prev view/projection matrices, then
+// blends with the current 1-spp raw mask. Out-of-screen reprojection falls
+// back to the current sample (no disocclusion-via-depth check; scene is
+// assumed mostly static).
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(r16f, binding = 0) uniform writeonly image2DArray o_history;
+
+uniform sampler2DArray u_mask_current;
+uniform sampler2DArray u_history_prev;
+uniform sampler2D      u_gbuffer_depth;
+
+uniform mat4  u_inv_view;
+uniform mat4  u_inv_projection;
+uniform mat4  u_prev_view_projection;
+
+uniform uvec2 u_output_size;
+uniform uint  u_layer_count;
+uniform float u_alpha;
+uniform uint  u_history_valid;   // 0 on first frame
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
+
+    float depth = texture(u_gbuffer_depth, uv).r;
+
+    bool reproject = (u_history_valid != 0u) && (depth < 1.0);
+    vec2 prev_uv = vec2(0.0);
+
+    if (reproject)
+    {
+        vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        vec4 view = u_inv_projection * ndc;
+        view /= max(view.w, 1e-5);
+        vec3 world_pos = (u_inv_view * vec4(view.xyz, 1.0)).xyz;
+
+        vec4 prev_clip = u_prev_view_projection * vec4(world_pos, 1.0);
+        if (prev_clip.w > 1e-4)
+        {
+            vec3 prev_ndc = prev_clip.xyz / prev_clip.w;
+            prev_uv = prev_ndc.xy * 0.5 + 0.5;
+            if (any(lessThan(prev_uv, vec2(0.0))) || any(greaterThan(prev_uv, vec2(1.0))))
+            {
+                reproject = false;
+            }
+        }
+        else
+        {
+            reproject = false;
+        }
+    }
+
+    float alpha = reproject ? u_alpha : 0.0;
+
+    for (uint layer = 0u; layer < u_layer_count; ++layer)
+    {
+        float current = texture(u_mask_current, vec3(uv, float(layer))).r;
+        float history = reproject
+                            ? texture(u_history_prev, vec3(prev_uv, float(layer))).r
+                            : current;
+        float accumulated = mix(current, history, alpha);
+        imageStore(o_history, ivec3(pixel, int(layer)), vec4(accumulated));
+    }
+}

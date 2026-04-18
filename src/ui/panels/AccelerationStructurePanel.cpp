@@ -49,7 +49,30 @@ namespace hybrid::ui
                                    0.25f,
                                    "%.4f",
                                    ImGuiSliderFlags_Logarithmic);
-                ImGui::TextDisabled("Area lights use 1 stochastic sample per pixel per frame (noisy; no denoiser yet).");
+
+                ImGui::Separator();
+                ImGui::Checkbox("Denoise", &settings->enable_shadow_denoise);
+                if (settings->enable_shadow_denoise)
+                {
+                    ImGui::SliderFloat("Temporal alpha",
+                                       &settings->shadow_denoise_temporal_alpha,
+                                       0.0f, 0.99f, "%.3f");
+                    ImGui::SliderInt("A-trous iterations",
+                                     &settings->shadow_denoise_iterations,
+                                     0, 5);
+                    ImGui::SliderFloat("Depth sigma",
+                                       &settings->shadow_denoise_depth_sigma,
+                                       0.0001f, 1.0f, "%.4f",
+                                       ImGuiSliderFlags_Logarithmic);
+                    ImGui::SliderFloat("Normal sigma",
+                                       &settings->shadow_denoise_normal_sigma,
+                                       1.0f, 256.0f, "%.1f",
+                                       ImGuiSliderFlags_Logarithmic);
+                }
+                else
+                {
+                    ImGui::TextDisabled("1-spp raw masks; expect per-frame noise on area lights.");
+                }
             }
             else
             {

@@ -75,6 +75,13 @@ namespace hybrid::renderer
         // Ray-traced shadows (Phase 3).
         bool  enable_raytrace_shadows        = true;
         float raytrace_shadow_normal_bias    = 0.02f;
+
+        // Shadow denoising (Phase 3, temporal + à-trous).
+        bool  enable_shadow_denoise          = true;
+        float shadow_denoise_temporal_alpha  = 0.92f;
+        int   shadow_denoise_iterations      = 3;
+        float shadow_denoise_depth_sigma     = 0.01f;
+        float shadow_denoise_normal_sigma    = 32.0f;
     };
 
     struct RenderMeshInstance

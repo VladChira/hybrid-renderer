@@ -192,6 +192,7 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/passes/HdriPrecomputePass.cpp
   src/renderer/passes/RayTracedAlbedoPass.cpp
   src/renderer/passes/RayTracedShadowPass.cpp
+  src/renderer/passes/ShadowDenoisePass.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp

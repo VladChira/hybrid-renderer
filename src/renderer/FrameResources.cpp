@@ -56,6 +56,8 @@ namespace hybrid::renderer
         m_raytrace_heatmap.Destroy();
         m_raytrace_albedo.Destroy();
         m_raytrace_shadow_masks.Destroy();
+        for (GLTexture &t : m_raytrace_shadow_history) { t.Destroy(); }
+        for (GLTexture &t : m_raytrace_shadow_filter)  { t.Destroy(); }
         m_extent = {};
         m_valid = false;
     }
@@ -82,6 +84,14 @@ namespace hybrid::renderer
             return m_raytrace_albedo.Id();
         case FrameTarget::RaytraceShadowMasks:
             return m_raytrace_shadow_masks.Id();
+        case FrameTarget::RaytraceShadowHistory0:
+            return m_raytrace_shadow_history[0].Id();
+        case FrameTarget::RaytraceShadowHistory1:
+            return m_raytrace_shadow_history[1].Id();
+        case FrameTarget::RaytraceShadowFilter0:
+            return m_raytrace_shadow_filter[0].Id();
+        case FrameTarget::RaytraceShadowFilter1:
+            return m_raytrace_shadow_filter[1].Id();
         default:
             return 0;
         }
@@ -325,6 +335,35 @@ namespace hybrid::renderer
                                            GL_RED,
                                            GL_UNSIGNED_BYTE,
                                            nullptr);
+
+        auto allocate_denoise_array = [&](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D_ARRAY))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {} texture", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage3D(0,
+                               GL_R16F,
+                               static_cast<GLsizei>(shadow_extent.width),
+                               static_cast<GLsizei>(shadow_extent.height),
+                               static_cast<GLsizei>(kMaxShadowMaskLayers),
+                               GL_RED,
+                               GL_FLOAT,
+                               nullptr);
+            return true;
+        };
+
+        if (!allocate_denoise_array(m_raytrace_shadow_history[0], "shadow history[0]")) { return false; }
+        if (!allocate_denoise_array(m_raytrace_shadow_history[1], "shadow history[1]")) { return false; }
+        if (!allocate_denoise_array(m_raytrace_shadow_filter[0],  "shadow filter[0]"))  { return false; }
+        if (!allocate_denoise_array(m_raytrace_shadow_filter[1],  "shadow filter[1]"))  { return false; }
+
         return true;
     }
 
