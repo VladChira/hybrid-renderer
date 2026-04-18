@@ -476,27 +476,28 @@ void main()
         Lo += (accumulated / kAreaLightSampleCount) * SampleShadowMask(v_uv, light.two_sided_shadow_pad.y, depth);
     }
 
-    vec3 ambient = vec3(0.0);
     vec3 F_ibl = FresnelSchlickRoughness(ndotv, F0, roughness);
     vec3 kS_ibl = F_ibl;
     vec3 kD_ibl = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
 
+    // Track ambient diffuse (SSGI or IBL) separately so it does NOT feed the
+    // next-frame SSGI source — otherwise the SSGI → deferred_ambient →
+    // SSGI chain is a positive feedback loop with gain kD·albedo·π ≈ 1.4 on
+    // Sponza walls, and any numerical seed grows exponentially.
+    vec3 ambient_diffuse = vec3(0.0);
     if (u_has_ssgi != 0)
     {
-        // SSGI already resolves screen-space, BVH and IBL fallback — always
-        // prefer it when available. Replaces the IBL diffuse term.
         vec3 ssgi_irradiance = SampleSsgi(v_uv, depth);
-        vec3 diffuse_gi = ssgi_irradiance * albedo;
-        ambient += kD_ibl * diffuse_gi;
+        ambient_diffuse = kD_ibl * ssgi_irradiance * albedo;
     }
     else if (u_has_irradiance != 0)
     {
         vec3 irradiance_direction = RotateAroundY(normal, u_skybox_yaw_radians);
         vec3 irradiance = texture(u_irradiance_cubemap, irradiance_direction).rgb * max(u_skybox_intensity, 0.0);
-        vec3 diffuse_ibl = irradiance * albedo;
-        ambient += kD_ibl * diffuse_ibl;
+        ambient_diffuse = kD_ibl * irradiance * albedo;
     }
 
+    vec3 ambient_specular = vec3(0.0);
     if (u_has_specular_ibl != 0)
     {
         vec3 R = reflect(-V, normal);
@@ -506,11 +507,13 @@ void main()
             textureLod(u_prefiltered_env_cubemap, reflection_direction, roughness * MAX_REFLECTION_LOD).rgb *
             max(u_skybox_intensity, 0.0);
         vec2 env_brdf = texture(u_brdf_lut, vec2(ndotv, roughness)).rg;
-        vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
-        ambient += specular_ibl;
+        ambient_specular = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
     }
 
-    vec3 color = ambient + Lo;
-    o_color    = vec4(ToneMapAndEncode(color), 1.0);
-    o_radiance = vec4(color, 1.0);
+    vec3 color = ambient_diffuse + ambient_specular + Lo;
+    o_color = vec4(ToneMapAndEncode(color), 1.0);
+    // SceneRadiance — used by next frame's SSGI — intentionally excludes
+    // `ambient_diffuse` (itself derived from this frame's SSGI). Single-
+    // bounce semantics: SSGI only ever bounces direct light + specular IBL.
+    o_radiance = vec4(Lo + ambient_specular, 1.0);
 }
