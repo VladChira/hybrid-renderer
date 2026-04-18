@@ -13,6 +13,8 @@
 #include "core/PerformanceTelemetry.h"
 #include "core/UiCommandProcessor.h"
 
+#include "ui/panels/AccelerationStructurePanel.h"
+
 #include "utils/Banner.h"
 
 #include <algorithm>
@@ -78,6 +80,11 @@ namespace hybrid::core
             return 3;
         }
         LOG_INFO("UI module started");
+
+        // Cross-module panels that depend on renderer internals.
+        ui.RegisterPanel(std::make_unique<ui::AccelerationStructurePanel>(
+                             renderer.GetAccelerationStructureStats()),
+                         ui::DockTarget::LeftBottom);
 
         LOG_INFO("Starting Asset Manager...");
         m_assets.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
@@ -228,6 +235,7 @@ namespace hybrid::core
                 ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;
                 ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
+                ui_state.viewport_raytrace_heatmap_texture = renderer_outputs.raytrace_heatmap;
                 ui_state.viewport_render_extent = frame_context.render_extent;
                 ui_state.viewport_render_view = resolved_view;
                 ui_state.viewport_render_view_valid = resolved_view_valid;

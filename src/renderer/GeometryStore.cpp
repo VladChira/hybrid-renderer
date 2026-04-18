@@ -184,6 +184,36 @@ namespace hybrid::renderer
         m_primitives_dirty = true;
     }
 
+    void GeometryStore::SetPrimitiveBlas(uint32_t primitive_id, uint32_t blas_root, uint32_t blas_triangle_offset)
+    {
+        if (primitive_id >= m_primitives.size())
+        {
+            return;
+        }
+        GpuPrimitive &desc = m_primitives[primitive_id];
+        if (desc.blas_root == blas_root && desc.blas_triangle_offset == blas_triangle_offset)
+        {
+            return;
+        }
+        desc.blas_root = blas_root;
+        desc.blas_triangle_offset = blas_triangle_offset;
+        m_primitives_dirty = true;
+    }
+
+    bool GeometryStore::FindPrimitiveId(uint64_t mesh_id, uint32_t primitive_index, uint32_t &out_primitive_id) const
+    {
+        PrimitiveKey key{};
+        key.mesh_id = mesh_id;
+        key.primitive_index = primitive_index;
+        const auto it = m_primitive_index.find(key);
+        if (it == m_primitive_index.end())
+        {
+            return false;
+        }
+        out_primitive_id = it->second;
+        return true;
+    }
+
     bool GeometryStore::Sync()
     {
         if (!m_vertex_buffer.IsValid() || !m_index_buffer.IsValid() || !m_primitive_buffer.IsValid())

@@ -7,6 +7,7 @@ add_executable(hybrid_assets_tests
   assets/AssetManagerTest.cpp
   assets/AssimpTextureCacheTest.cpp
   scene/SceneWorldTest.cpp
+  renderer/BvhBuilderTests.cpp
 )
 
 target_link_libraries(hybrid_assets_tests PRIVATE

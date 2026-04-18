@@ -14,7 +14,8 @@ namespace hybrid::renderer
         GBufferRt0,
         GBufferRt1,
         GBufferEntityId,
-        GBufferDepth
+        GBufferDepth,
+        RaytraceHeatmap
     };
 
     enum class FrameFramebuffer
@@ -38,6 +39,7 @@ namespace hybrid::renderer
     private:
         bool AllocateSceneTargets(const RenderExtent &extent);
         bool AllocateGBufferTargets(const RenderExtent &extent);
+        bool AllocateRaytraceTargets(const RenderExtent &extent);
 
         RenderExtent m_extent{};
         bool m_valid = false;
@@ -51,6 +53,8 @@ namespace hybrid::renderer
         GLTexture m_gbuffer_rt1{};
         GLTexture m_gbuffer_entity_id{};
         GLTexture m_gbuffer_depth{};
+
+        GLTexture m_raytrace_heatmap{};
     };
 
 } // namespace hybrid::renderer

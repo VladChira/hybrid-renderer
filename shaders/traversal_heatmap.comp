@@ -1,0 +1,188 @@
+#version 460 core
+
+// Counts BVH node visits for a primary camera ray per pixel and writes a
+// false-color image. Used to validate acceleration-structure correctness end
+// to end — no lighting, no hit shading.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba8, binding = 0) uniform writeonly image2D o_heatmap;
+
+struct BvhNode
+{
+    vec3  bmin;
+    int   left_or_first;
+    vec3  bmax;
+    int   right_or_count;
+};
+
+struct GpuPrimitive
+{
+    uint vertex_offset;
+    uint vertex_count;
+    uint index_offset;
+    uint index_count;
+    uint material_index;
+    uint blas_root;
+    uint blas_triangle_offset;
+    uint _pad;
+};
+
+struct GpuTlasInstance
+{
+    mat4 world_from_local;
+    mat4 local_from_world;
+    uint primitive_id;
+    uint entity_id;
+    uint _pad0;
+    uint _pad1;
+};
+
+layout(std430, binding = 2)  readonly buffer PrimitiveBuffer  { GpuPrimitive primitives[]; };
+layout(std430, binding = 7)  readonly buffer BlasNodes        { BvhNode blas_nodes[]; };
+layout(std430, binding = 9)  readonly buffer TlasNodes        { BvhNode tlas_nodes[]; };
+layout(std430, binding = 10) readonly buffer TlasInstances    { GpuTlasInstance tlas_instances[]; };
+
+uniform mat4  u_inv_view;
+uniform mat4  u_inv_projection;
+uniform vec3  u_camera_position;
+uniform uint  u_tlas_node_count;
+uniform uvec2 u_output_size;
+uniform float u_heatmap_scale;      // divisor applied to visit counts before LUT sampling
+
+const int kMaxStackDepth = 64;
+
+bool IntersectAabb(vec3 origin, vec3 inv_direction, vec3 bmin, vec3 bmax, float t_min, float t_max)
+{
+    vec3 t1 = (bmin - origin) * inv_direction;
+    vec3 t2 = (bmax - origin) * inv_direction;
+    vec3 tmin3 = min(t1, t2);
+    vec3 tmax3 = max(t1, t2);
+    float near_t = max(max(tmin3.x, tmin3.y), max(tmin3.z, t_min));
+    float far_t  = min(min(tmax3.x, tmax3.y), min(tmax3.z, t_max));
+    return near_t <= far_t;
+}
+
+uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
+{
+    GpuPrimitive prim = primitives[primitive_id];
+    if (prim.index_count == 0u)
+    {
+        return 0u;
+    }
+
+    vec3 inv_dir = 1.0 / direction;
+
+    int stack[kMaxStackDepth];
+    int stack_size = 0;
+    stack[stack_size++] = int(prim.blas_root);
+
+    uint visits = 0u;
+    while (stack_size > 0)
+    {
+        int node_index = stack[--stack_size];
+        BvhNode node = blas_nodes[node_index];
+        visits += 1u;
+
+        if (!IntersectAabb(origin, inv_dir, node.bmin, node.bmax, 0.0, 1e30))
+        {
+            continue;
+        }
+
+        if (node.right_or_count < 0)
+        {
+            // Heatmap counts triangles-in-leaf as part of the work, without
+            // actually running triangle intersection.
+            visits += uint(-node.right_or_count);
+        }
+        else if (stack_size + 2 <= kMaxStackDepth)
+        {
+            stack[stack_size++] = node.left_or_first;
+            stack[stack_size++] = node.right_or_count;
+        }
+    }
+    return visits;
+}
+
+uint TraverseTlas(vec3 origin, vec3 direction)
+{
+    if (u_tlas_node_count == 0u)
+    {
+        return 0u;
+    }
+    vec3 inv_dir = 1.0 / direction;
+
+    int stack[kMaxStackDepth];
+    int stack_size = 0;
+    stack[stack_size++] = 0;
+
+    uint visits = 0u;
+    while (stack_size > 0)
+    {
+        int node_index = stack[--stack_size];
+        BvhNode node = tlas_nodes[node_index];
+        visits += 1u;
+
+        if (!IntersectAabb(origin, inv_dir, node.bmin, node.bmax, 0.0, 1e30))
+        {
+            continue;
+        }
+
+        if (node.right_or_count < 0)
+        {
+            int count = -node.right_or_count;
+            int first = node.left_or_first;
+            for (int i = 0; i < count; ++i)
+            {
+                GpuTlasInstance inst = tlas_instances[first + i];
+                vec3 local_origin    = (inst.local_from_world * vec4(origin, 1.0)).xyz;
+                vec3 local_direction = (inst.local_from_world * vec4(direction, 0.0)).xyz;
+                visits += TraverseBlas(local_origin, local_direction, inst.primitive_id);
+            }
+        }
+        else if (stack_size + 2 <= kMaxStackDepth)
+        {
+            stack[stack_size++] = node.left_or_first;
+            stack[stack_size++] = node.right_or_count;
+        }
+    }
+    return visits;
+}
+
+vec3 HeatmapColor(float t)
+{
+    // Cheap cool→warm ramp. Maps [0, 1] to dark blue → cyan → green → yellow → red.
+    t = clamp(t, 0.0, 1.0);
+    vec3 c0 = vec3(0.0, 0.0, 0.15);
+    vec3 c1 = vec3(0.0, 0.5, 0.9);
+    vec3 c2 = vec3(0.1, 0.9, 0.4);
+    vec3 c3 = vec3(1.0, 0.9, 0.0);
+    vec3 c4 = vec3(1.0, 0.2, 0.0);
+    if (t < 0.25) return mix(c0, c1, t / 0.25);
+    if (t < 0.50) return mix(c1, c2, (t - 0.25) / 0.25);
+    if (t < 0.75) return mix(c2, c3, (t - 0.50) / 0.25);
+    return mix(c3, c4, (t - 0.75) / 0.25);
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
+    vec4 ndc = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec4 view = u_inv_projection * ndc;
+    vec3 view_dir = normalize(view.xyz / max(view.w, 1e-5));
+    vec3 world_dir = normalize((u_inv_view * vec4(view_dir, 0.0)).xyz);
+
+    uint visits = TraverseTlas(u_camera_position, world_dir);
+
+    float intensity = float(visits) / max(u_heatmap_scale, 1.0);
+    intensity = log2(1.0 + intensity) / log2(1.0 + 8.0);  // soft log rolloff
+
+    vec3 color = HeatmapColor(intensity);
+    imageStore(o_heatmap, pixel, vec4(color, 1.0));
+}

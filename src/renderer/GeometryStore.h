@@ -32,7 +32,9 @@ namespace hybrid::renderer
     static_assert(sizeof(GpuVertex) == 80, "GpuVertex must match std430 layout (80 bytes)");
 
     // Per-primitive descriptor. Addresses the shared vertex/index buffers and
-    // carries the material-table index. `blas_root` is reserved for Phase 1.
+    // carries the material-table index. `blas_root` / `blas_triangle_offset`
+    // are populated by AccelerationStructureCache once a BLAS is built for
+    // this primitive (0 until then).
     struct GpuPrimitive
     {
         uint32_t vertex_offset;
@@ -41,8 +43,8 @@ namespace hybrid::renderer
         uint32_t index_count;
         uint32_t material_index;
         uint32_t blas_root;
-        uint32_t _pad0;
-        uint32_t _pad1;
+        uint32_t blas_triangle_offset;
+        uint32_t _pad;
     };
     static_assert(sizeof(GpuPrimitive) == 32, "GpuPrimitive must match std430 layout (32 bytes)");
 
@@ -97,6 +99,15 @@ namespace hybrid::renderer
         // Rewrites material_index on an already-stored primitive. Cheap — no
         // geometry data is touched; primitive descriptor is flagged dirty.
         void SetPrimitiveMaterial(uint32_t primitive_id, uint32_t material_index);
+
+        // Patches BLAS offsets on an already-stored primitive. Called by the
+        // AccelerationStructureCache once it has built a BLAS for this
+        // primitive (Phase 1).
+        void SetPrimitiveBlas(uint32_t primitive_id, uint32_t blas_root, uint32_t blas_triangle_offset);
+
+        // Looks up the primitive_id associated with `(mesh_id, primitive_index)`
+        // without triggering an upload. Returns false if not cached yet.
+        bool FindPrimitiveId(uint64_t mesh_id, uint32_t primitive_index, uint32_t &out_primitive_id) const;
 
         // Pushes any pending CPU changes to the GPU buffers. Returns true if
         // buffers are ready to consume.
