@@ -23,7 +23,14 @@ namespace hybrid::renderer
         RaytraceShadowHistory0,
         RaytraceShadowHistory1,
         RaytraceShadowFilter0,
-        RaytraceShadowFilter1
+        RaytraceShadowFilter1,
+        SceneRadiance0,
+        SceneRadiance1,
+        SsgiRaw,
+        SsgiHistory0,
+        SsgiHistory1,
+        SsgiFilter0,
+        SsgiFilter1
     };
 
     // Maximum number of shadow-casting lights supported by the ray-traced
@@ -39,6 +46,18 @@ namespace hybrid::renderer
         RenderExtent out{};
         out.width  = std::max<uint32_t>(1u, render_extent.width  / kShadowMaskResolutionDivisor);
         out.height = std::max<uint32_t>(1u, render_extent.height / kShadowMaskResolutionDivisor);
+        return out;
+    }
+
+    // SSGI runs at quarter resolution (both axes), then a depth-aware
+    // upsample in the composite pass brings it back to full res.
+    constexpr uint32_t kSsgiResolutionDivisor = 4;
+
+    inline RenderExtent SsgiExtent(const RenderExtent &render_extent)
+    {
+        RenderExtent out{};
+        out.width  = std::max<uint32_t>(1u, render_extent.width  / kSsgiResolutionDivisor);
+        out.height = std::max<uint32_t>(1u, render_extent.height / kSsgiResolutionDivisor);
         return out;
     }
 
@@ -83,6 +102,11 @@ namespace hybrid::renderer
         GLTexture m_raytrace_shadow_masks{};
         GLTexture m_raytrace_shadow_history[2]{};  // ping-pong across frames (temporal)
         GLTexture m_raytrace_shadow_filter[2]{};   // ping-pong within frame (à-trous)
+
+        GLTexture m_scene_radiance[2]{};           // RGBA16F linear HDR, ping-pong across frames
+        GLTexture m_ssgi_raw{};                    // RGBA16F quarter-res, raw SSGI
+        GLTexture m_ssgi_history[2]{};             // quarter-res, ping-pong across frames
+        GLTexture m_ssgi_filter[2]{};              // quarter-res, ping-pong within frame
     };
 
 } // namespace hybrid::renderer

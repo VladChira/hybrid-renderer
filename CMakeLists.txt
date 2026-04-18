@@ -194,6 +194,8 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/passes/RayTracedAlbedoPass.cpp
   src/renderer/passes/RayTracedShadowPass.cpp
   src/renderer/passes/ShadowDenoisePass.cpp
+  src/renderer/passes/SsgiDenoisePass.cpp
+  src/renderer/passes/SsgiTracePass.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp

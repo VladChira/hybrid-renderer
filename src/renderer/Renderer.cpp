@@ -21,6 +21,8 @@
 #include "renderer/passes/RayTracedAlbedoPass.h"
 #include "renderer/passes/RayTracedShadowPass.h"
 #include "renderer/passes/ShadowDenoisePass.h"
+#include "renderer/passes/SsgiDenoisePass.h"
+#include "renderer/passes/SsgiTracePass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 
 #include <chrono>
@@ -64,6 +66,9 @@ namespace hybrid::renderer
         GLShaderProgram shadow_temporal_shader{};
         GLShaderProgram shadow_atrous_shader{};
         GLShaderProgram area_light_debug_shader{};
+        GLShaderProgram ssgi_trace_shader{};
+        GLShaderProgram ssgi_temporal_shader{};
+        GLShaderProgram ssgi_atrous_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -79,6 +84,8 @@ namespace hybrid::renderer
         std::unique_ptr<RayTracedShadowPass>  raytrace_shadow_pass{};
         std::unique_ptr<ShadowDenoisePass>    shadow_denoise_pass{};
         std::unique_ptr<AreaLightDebugPass>   area_light_debug_pass{};
+        std::unique_ptr<SsgiTracePass>        ssgi_trace_pass{};
+        std::unique_ptr<SsgiDenoisePass>      ssgi_denoise_pass{};
         SceneFrameCache scene_frame_cache{};
 
         // Temporal reprojection state. On frame 0 `prev_view_valid` is false
@@ -227,6 +234,25 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("rt/ssgi/ssgi_trace.comp",
+                                                                   m_impl->ssgi_trace_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: SSGI trace program build failed");
+            return false;
+        }
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("rt/ssgi/ssgi_temporal.comp",
+                                                                   m_impl->ssgi_temporal_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: SSGI temporal program build failed");
+            return false;
+        }
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("rt/ssgi/ssgi_atrous.comp",
+                                                                   m_impl->ssgi_atrous_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: SSGI à-trous program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -270,6 +296,12 @@ namespace hybrid::renderer
         m_impl->shadow_denoise_pass    = std::make_unique<ShadowDenoisePass>(&m_impl->shadow_temporal_shader,
                                                                               &m_impl->shadow_atrous_shader);
         m_impl->area_light_debug_pass  = std::make_unique<AreaLightDebugPass>(&m_impl->area_light_debug_shader);
+        m_impl->ssgi_trace_pass        = std::make_unique<SsgiTracePass>(&m_impl->ssgi_trace_shader,
+                                                                           &m_impl->geometry_store,
+                                                                           &m_impl->material_store,
+                                                                           &m_impl->as_cache);
+        m_impl->ssgi_denoise_pass      = std::make_unique<SsgiDenoisePass>(&m_impl->ssgi_temporal_shader,
+                                                                             &m_impl->ssgi_atrous_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -308,6 +340,8 @@ namespace hybrid::renderer
         m_impl->raytrace_shadow_pass.reset();
         m_impl->shadow_denoise_pass.reset();
         m_impl->area_light_debug_pass.reset();
+        m_impl->ssgi_trace_pass.reset();
+        m_impl->ssgi_denoise_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
         m_impl->light_store.Clear();
@@ -324,6 +358,9 @@ namespace hybrid::renderer
         m_impl->shadow_temporal_shader.Destroy();
         m_impl->shadow_atrous_shader.Destroy();
         m_impl->area_light_debug_shader.Destroy();
+        m_impl->ssgi_trace_shader.Destroy();
+        m_impl->ssgi_temporal_shader.Destroy();
+        m_impl->ssgi_atrous_shader.Destroy();
         m_impl->prev_view_valid = false;
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
@@ -552,15 +589,6 @@ namespace hybrid::renderer
             {
                 final_shadow_mask = denoise_output.filtered_mask_array;
             }
-
-            m_impl->prev_view_projection = m_impl->effective_view.projection * m_impl->effective_view.view;
-            m_impl->prev_view_valid      = true;
-        }
-        else
-        {
-            // Reset history continuity when the denoiser is off so the next
-            // re-enable doesn't pull in stale reprojection.
-            m_impl->prev_view_valid = false;
         }
 
         if (m_impl->traversal_heatmap_pass)
@@ -604,6 +632,77 @@ namespace hybrid::renderer
             }
         }
         
+        // Scene radiance ping-pong. `current` is the slot deferred lighting
+        // writes this frame; `prev` is what SSGI samples as last-frame
+        // radiance.
+        const uint32_t radiance_ping = static_cast<uint32_t>(m_impl->frame_context.frame_index) & 1u;
+        const FrameTarget radiance_current_target = (radiance_ping == 0u) ? FrameTarget::SceneRadiance0 : FrameTarget::SceneRadiance1;
+        const FrameTarget radiance_prev_target    = (radiance_ping == 0u) ? FrameTarget::SceneRadiance1 : FrameTarget::SceneRadiance0;
+
+        const GLuint radiance_current_id = static_cast<GLuint>(m_impl->frame_resources.Get(radiance_current_target));
+        const GLuint radiance_prev_id    = static_cast<GLuint>(m_impl->frame_resources.Get(radiance_prev_target));
+        const GLuint scene_fbo_id        = static_cast<GLuint>(m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene));
+        if (radiance_current_id != 0 && scene_fbo_id != 0)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo_id);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, radiance_current_id, 0);
+        }
+
+        // ---- SSGI: trace → denoise → feed to deferred lighting -----------
+        GlTextureId ssgi_filtered_for_deferred = 0;
+        if (m_impl->submitted_settings.enable_ssgi && m_impl->ssgi_trace_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::SsgiTracePass");
+            SsgiTracePassInput ssgi_input{};
+            ssgi_input.settings            = &m_impl->submitted_settings;
+            ssgi_input.effective_view      = &m_impl->effective_view;
+            ssgi_input.gbuffer_depth       = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            ssgi_input.gbuffer_rt1         = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+            ssgi_input.scene_radiance_prev = radiance_prev_id;
+            ssgi_input.irradiance_cubemap  = hdri_output.convoluted_cubemap;
+            ssgi_input.has_irradiance      = hdri_output.has_skybox && hdri_output.convoluted_cubemap != 0;
+            ssgi_input.skybox_intensity    = hdri_output.skybox_intensity;
+            ssgi_input.skybox_yaw_radians  = hdri_output.skybox_yaw_radians;
+            ssgi_input.ssgi_raw_texture    = m_impl->frame_resources.Get(FrameTarget::SsgiRaw);
+            ssgi_input.frame_index         = static_cast<uint32_t>(m_impl->frame_context.frame_index);
+            if (!m_impl->ssgi_trace_pass->Execute(ssgi_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->ssgi_trace_pass->Name());
+            }
+
+            if (m_impl->submitted_settings.enable_ssgi_denoise && m_impl->ssgi_denoise_pass)
+            {
+                HYBRID_PROFILE_ZONE_N("Renderer::SsgiDenoisePass");
+                const uint32_t ssgi_ping = static_cast<uint32_t>(m_impl->frame_context.frame_index) & 1u;
+                const FrameTarget ssgi_hist_curr = (ssgi_ping == 0u) ? FrameTarget::SsgiHistory0 : FrameTarget::SsgiHistory1;
+                const FrameTarget ssgi_hist_prev = (ssgi_ping == 0u) ? FrameTarget::SsgiHistory1 : FrameTarget::SsgiHistory0;
+
+                SsgiDenoisePassInput dn_input{};
+                dn_input.settings        = &m_impl->submitted_settings;
+                dn_input.effective_view  = &m_impl->effective_view;
+                dn_input.gbuffer_depth   = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+                dn_input.gbuffer_rt1     = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+                dn_input.ssgi_raw        = m_impl->frame_resources.Get(FrameTarget::SsgiRaw);
+                dn_input.history_current = m_impl->frame_resources.Get(ssgi_hist_curr);
+                dn_input.history_prev    = m_impl->frame_resources.Get(ssgi_hist_prev);
+                dn_input.filter_ping[0]  = m_impl->frame_resources.Get(FrameTarget::SsgiFilter0);
+                dn_input.filter_ping[1]  = m_impl->frame_resources.Get(FrameTarget::SsgiFilter1);
+                dn_input.prev_view_projection = m_impl->prev_view_projection;
+                dn_input.history_valid   = m_impl->prev_view_valid;
+
+                SsgiDenoisePassOutput dn_output{};
+                if (!m_impl->ssgi_denoise_pass->Execute(dn_input, dn_output))
+                {
+                    LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->ssgi_denoise_pass->Name());
+                }
+                ssgi_filtered_for_deferred = dn_output.filtered;
+            }
+            else
+            {
+                ssgi_filtered_for_deferred = m_impl->frame_resources.Get(FrameTarget::SsgiRaw);
+            }
+        }
+
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
@@ -624,6 +723,7 @@ namespace hybrid::renderer
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
             deferred_input.shadow_mask_array = final_shadow_mask;
+            deferred_input.ssgi_texture      = ssgi_filtered_for_deferred;
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))
@@ -651,6 +751,11 @@ namespace hybrid::renderer
                 }
             }
         }
+
+        // Record this frame's view matrices for next-frame reprojection in
+        // any temporal denoiser (shadows, SSGI, etc.).
+        m_impl->prev_view_projection = m_impl->effective_view.projection * m_impl->effective_view.view;
+        m_impl->prev_view_valid      = true;
 
         m_impl->backend.EndFrame();
         HYBRID_PROFILE_GL_COLLECT();

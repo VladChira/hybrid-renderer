@@ -27,6 +27,7 @@ namespace hybrid::renderer
         float skybox_intensity = 1.0f;
         float skybox_yaw_radians = 0.0f;
         GlTextureId shadow_mask_array = 0;
+        GlTextureId ssgi_texture = 0;     // quarter-res linear HDR (denoised), 0 if unavailable
     };
 
     struct DeferredLightingPassOutput

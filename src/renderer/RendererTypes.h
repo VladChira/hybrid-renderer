@@ -82,6 +82,17 @@ namespace hybrid::renderer
         int   shadow_denoise_iterations      = 3;
         float shadow_denoise_depth_sigma     = 0.01f;
         float shadow_denoise_normal_sigma    = 32.0f;
+
+        // Screen-space global illumination with BVH fallback.
+        bool  enable_ssgi                    = true;
+        float ssgi_intensity                 = 1.0f;
+        float ssgi_max_ray_distance          = 30.0f;
+        float ssgi_screen_thickness          = 0.01f;
+        bool  enable_ssgi_denoise            = true;
+        float ssgi_denoise_temporal_alpha    = 0.92f;
+        int   ssgi_denoise_iterations        = 3;
+        float ssgi_denoise_depth_sigma       = 0.02f;
+        float ssgi_denoise_normal_sigma      = 32.0f;
     };
 
     struct RenderMeshInstance

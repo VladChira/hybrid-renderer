@@ -58,6 +58,10 @@ namespace hybrid::renderer
         m_raytrace_shadow_masks.Destroy();
         for (GLTexture &t : m_raytrace_shadow_history) { t.Destroy(); }
         for (GLTexture &t : m_raytrace_shadow_filter)  { t.Destroy(); }
+        for (GLTexture &t : m_scene_radiance)          { t.Destroy(); }
+        m_ssgi_raw.Destroy();
+        for (GLTexture &t : m_ssgi_history) { t.Destroy(); }
+        for (GLTexture &t : m_ssgi_filter)  { t.Destroy(); }
         m_extent = {};
         m_valid = false;
     }
@@ -92,6 +96,20 @@ namespace hybrid::renderer
             return m_raytrace_shadow_filter[0].Id();
         case FrameTarget::RaytraceShadowFilter1:
             return m_raytrace_shadow_filter[1].Id();
+        case FrameTarget::SceneRadiance0:
+            return m_scene_radiance[0].Id();
+        case FrameTarget::SceneRadiance1:
+            return m_scene_radiance[1].Id();
+        case FrameTarget::SsgiRaw:
+            return m_ssgi_raw.Id();
+        case FrameTarget::SsgiHistory0:
+            return m_ssgi_history[0].Id();
+        case FrameTarget::SsgiHistory1:
+            return m_ssgi_history[1].Id();
+        case FrameTarget::SsgiFilter0:
+            return m_ssgi_filter[0].Id();
+        case FrameTarget::SsgiFilter1:
+            return m_ssgi_filter[1].Id();
         default:
             return 0;
         }
@@ -363,6 +381,88 @@ namespace hybrid::renderer
         if (!allocate_denoise_array(m_raytrace_shadow_history[1], "shadow history[1]")) { return false; }
         if (!allocate_denoise_array(m_raytrace_shadow_filter[0],  "shadow filter[0]"))  { return false; }
         if (!allocate_denoise_array(m_raytrace_shadow_filter[1],  "shadow filter[1]"))  { return false; }
+
+        // Full-res linear HDR scene radiance (ping-pong across frames). The
+        // current frame's slot is attached to the scene framebuffer as
+        // COLOR_ATTACHMENT1 via BindSceneRadianceAttachment; the other slot
+        // is the previous-frame source for SSGI.
+        auto allocate_scene_radiance = [&](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {} texture", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA16F,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               GL_RGBA,
+                               GL_FLOAT,
+                               nullptr);
+            return true;
+        };
+        if (!allocate_scene_radiance(m_scene_radiance[0], "scene radiance[0]")) { return false; }
+        if (!allocate_scene_radiance(m_scene_radiance[1], "scene radiance[1]")) { return false; }
+
+        const float zero_rgba[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        for (GLTexture &t : m_scene_radiance)
+        {
+            glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba);
+        }
+
+        // Quarter-res SSGI: one raw output, history ping-pong, filter ping-pong.
+        const RenderExtent ssgi_extent = SsgiExtent(extent);
+        auto allocate_ssgi_rt = [&](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {} texture", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA16F,
+                               static_cast<GLsizei>(ssgi_extent.width),
+                               static_cast<GLsizei>(ssgi_extent.height),
+                               GL_RGBA,
+                               GL_FLOAT,
+                               nullptr);
+            return true;
+        };
+        if (!allocate_ssgi_rt(m_ssgi_raw,        "ssgi raw"))        { return false; }
+        if (!allocate_ssgi_rt(m_ssgi_history[0], "ssgi history[0]")) { return false; }
+        if (!allocate_ssgi_rt(m_ssgi_history[1], "ssgi history[1]")) { return false; }
+        if (!allocate_ssgi_rt(m_ssgi_filter[0],  "ssgi filter[0]"))  { return false; }
+        if (!allocate_ssgi_rt(m_ssgi_filter[1],  "ssgi filter[1]"))  { return false; }
+
+        glClearTexImage(m_ssgi_raw.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba);
+        for (GLTexture &t : m_ssgi_history) { glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba); }
+        for (GLTexture &t : m_ssgi_filter)  { glClearTexImage(t.Id(), 0, GL_RGBA, GL_FLOAT, zero_rgba); }
+
+        // MRT-enable the scene framebuffer: COLOR_ATTACHMENT0 is the already-
+        // attached sRGB scene color, COLOR_ATTACHMENT1 is the current frame's
+        // linear HDR radiance (ping-pong index 0 is the default; the Renderer
+        // re-attaches the other slot on odd frames).
+        m_scene_framebuffer.Bind(GL_FRAMEBUFFER);
+        m_scene_framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT1, m_scene_radiance[0]);
+        m_scene_framebuffer.SetDrawBuffers({GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1});
+        const bool mrt_complete = m_scene_framebuffer.CheckComplete(GL_FRAMEBUFFER);
+        GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+        if (!mrt_complete)
+        {
+            LOG_ERROR("[FrameResources] Scene framebuffer is incomplete after MRT setup");
+            return false;
+        }
 
         return true;
     }

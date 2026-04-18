@@ -80,6 +80,53 @@ namespace hybrid::ui
             }
         }
 
+        if (ImGui::CollapsingHeader("Screen-space GI (BVH-hybrid)", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (settings != nullptr)
+            {
+                ImGui::Checkbox("Enabled##ssgi", &settings->enable_ssgi);
+                ImGui::SliderFloat("Intensity##ssgi",
+                                   &settings->ssgi_intensity,
+                                   0.0f, 4.0f, "%.2f");
+                ImGui::SliderFloat("Max ray distance##ssgi",
+                                   &settings->ssgi_max_ray_distance,
+                                   0.5f, 200.0f, "%.1f",
+                                   ImGuiSliderFlags_Logarithmic);
+                ImGui::SliderFloat("Screen thickness##ssgi",
+                                   &settings->ssgi_screen_thickness,
+                                   0.0005f, 0.1f, "%.4f",
+                                   ImGuiSliderFlags_Logarithmic);
+
+                ImGui::Separator();
+                ImGui::Checkbox("Denoise##ssgi", &settings->enable_ssgi_denoise);
+                if (settings->enable_ssgi_denoise)
+                {
+                    ImGui::SliderFloat("Temporal alpha##ssgi",
+                                       &settings->ssgi_denoise_temporal_alpha,
+                                       0.0f, 0.99f, "%.3f");
+                    ImGui::SliderInt("A-trous iterations##ssgi",
+                                     &settings->ssgi_denoise_iterations,
+                                     0, 5);
+                    ImGui::SliderFloat("Depth sigma##ssgi",
+                                       &settings->ssgi_denoise_depth_sigma,
+                                       0.0001f, 1.0f, "%.4f",
+                                       ImGuiSliderFlags_Logarithmic);
+                    ImGui::SliderFloat("Normal sigma##ssgi",
+                                       &settings->ssgi_denoise_normal_sigma,
+                                       1.0f, 256.0f, "%.1f",
+                                       ImGuiSliderFlags_Logarithmic);
+                }
+                else
+                {
+                    ImGui::TextDisabled("1-spp raw GI; expect per-frame noise.");
+                }
+            }
+            else
+            {
+                ImGui::TextUnformatted("Render settings unavailable.");
+            }
+        }
+
         if (ImGui::CollapsingHeader("Traversal heatmap", ImGuiTreeNodeFlags_DefaultOpen))
         {
             if (settings != nullptr)

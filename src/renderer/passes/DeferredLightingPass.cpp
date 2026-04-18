@@ -58,6 +58,10 @@ namespace hybrid::renderer
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, input.scene_framebuffer_id);
+        // MRT: color 0 = tonemapped sRGB for display, color 1 = linear HDR
+        // radiance consumed by next frame's SSGI trace.
+        const GLenum deferred_draw_buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(2, deferred_draw_buffers);
         glViewport(0, 0,
                    static_cast<GLsizei>(settings.render_extent.width),
                    static_cast<GLsizei>(settings.render_extent.height));
@@ -74,6 +78,8 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_prefiltered_env_cubemap", 5);
         m_deferred_shader->SetUniform1i("u_brdf_lut", 6);
         m_deferred_shader->SetUniform1i("u_shadow_mask_array", 7);
+        m_deferred_shader->SetUniform1i("u_ssgi",              8);
+        m_deferred_shader->SetUniform1i("u_has_ssgi",          input.ssgi_texture != 0 ? 1 : 0);
         m_deferred_shader->SetUniformMat4("u_inv_view", glm::affineInverse(effective_view.view));
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
@@ -117,12 +123,16 @@ namespace hybrid::renderer
         glBindTexture(GL_TEXTURE_2D, has_specular_ibl ? input.brdf_lut : 0);
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, input.shadow_mask_array);
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, input.ssgi_texture);
 
         m_impl->fullscreen_vao.Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
         glActiveTexture(GL_TEXTURE6);

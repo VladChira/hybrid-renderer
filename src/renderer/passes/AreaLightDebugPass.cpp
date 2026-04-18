@@ -156,6 +156,11 @@ namespace hybrid::renderer
         GLBuffer::Unbind(GL_ARRAY_BUFFER);
 
         glBindFramebuffer(GL_FRAMEBUFFER, input.scene_framebuffer_id);
+        // Write only the sRGB display buffer; the HDR radiance attachment
+        // stays as whatever deferred lighting produced so this frame's SSGI
+        // source is not corrupted by debug overlays.
+        const GLenum draw_buffers[1] = { GL_COLOR_ATTACHMENT0 };
+        glDrawBuffers(1, draw_buffers);
         glViewport(0, 0,
                    static_cast<GLsizei>(extent.width),
                    static_cast<GLsizei>(extent.height));

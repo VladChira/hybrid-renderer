@@ -10,6 +10,8 @@ uniform samplerCube u_irradiance_cubemap;
 uniform samplerCube u_prefiltered_env_cubemap;
 uniform sampler2D u_brdf_lut;
 uniform sampler2DArray u_shadow_mask_array;
+uniform sampler2D u_ssgi;           // quarter-res, linear HDR (Irradiance-comparable)
+uniform int u_has_ssgi;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
@@ -56,6 +58,55 @@ struct GpuAreaLight
 // foreground surface, its neighbour sees the background), which produces
 // lit outlines around shadowed silhouettes. Weight each tap by how closely
 // its representative depth matches the centre pixel's depth.
+// Depth-aware 4-tap upsample of the quarter-res SSGI. Same reasoning as the
+// shadow upsample — hardware bilinear bleeds across depth discontinuities.
+vec3 SampleSsgi(vec2 uv, float center_depth)
+{
+    vec2 ssgi_size_f = vec2(textureSize(u_ssgi, 0));
+    ivec2 ssgi_size  = ivec2(ssgi_size_f);
+
+    vec2 coord = uv * ssgi_size_f - vec2(0.5);
+    ivec2 base = ivec2(floor(coord));
+    vec2 frac  = coord - vec2(base);
+
+    float bilinear[4] = float[4](
+        (1.0 - frac.x) * (1.0 - frac.y),
+        frac.x        * (1.0 - frac.y),
+        (1.0 - frac.x) * frac.y,
+        frac.x        * frac.y
+    );
+    ivec2 offsets[4] = ivec2[4](ivec2(0, 0), ivec2(1, 0), ivec2(0, 1), ivec2(1, 1));
+
+    const float kDepthSigma = 0.01;
+
+    vec3  weighted   = vec3(0.0);
+    float weight_sum = 0.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        ivec2 tap = base + offsets[i];
+        if (tap.x < 0 || tap.y < 0 || tap.x >= ssgi_size.x || tap.y >= ssgi_size.y)
+        {
+            continue;
+        }
+        vec2 tap_uv = (vec2(tap) + vec2(0.5)) / ssgi_size_f;
+        float tap_depth = texture(u_gbuffer_depth, tap_uv).r;
+        float depth_diff = abs(tap_depth - center_depth);
+        float w_depth = exp(-depth_diff / kDepthSigma);
+        float w = bilinear[i] * w_depth;
+
+        vec3 value = texelFetch(u_ssgi, tap, 0).rgb;
+        weighted   += value * w;
+        weight_sum += w;
+    }
+
+    if (weight_sum < 1e-5)
+    {
+        ivec2 nearest = clamp(ivec2(round(coord)), ivec2(0), ssgi_size - ivec2(1));
+        return texelFetch(u_ssgi, nearest, 0).rgb;
+    }
+    return weighted / weight_sum;
+}
+
 float SampleShadowMask(vec2 uv, float layer_f, float center_depth)
 {
     if (layer_f < 0.0)
@@ -134,7 +185,8 @@ layout(std430, binding = 6) readonly buffer AreaLightBuffer
     GpuAreaLight area_lights[];
 };
 
-out vec4 o_color;
+layout(location = 0) out vec4 o_color;     // tonemapped sRGB, drives the display
+layout(location = 1) out vec4 o_radiance;  // linear HDR radiance, sampled next frame by SSGI
 
 const float PI = 3.14159265359;
 
@@ -280,11 +332,13 @@ void main()
             vec3 world_direction = ReconstructWorldDirection(v_uv);
             world_direction = RotateAroundY(world_direction, u_skybox_yaw_radians);
             vec3 sky_color = texture(u_skybox_cubemap, world_direction).rgb * max(u_skybox_intensity, 0.0);
-            o_color = vec4(ToneMapAndEncode(sky_color), 1.0);
+            o_color    = vec4(ToneMapAndEncode(sky_color), 1.0);
+            o_radiance = vec4(sky_color, 1.0);
         }
         else
         {
-            o_color = vec4(0.0, 0.0, 0.0, 1.0);
+            o_color    = vec4(0.0, 0.0, 0.0, 1.0);
+            o_radiance = vec4(0.0);
         }
         return;
     }
@@ -427,7 +481,15 @@ void main()
     vec3 kS_ibl = F_ibl;
     vec3 kD_ibl = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
 
-    if (u_has_irradiance != 0)
+    if (u_has_ssgi != 0)
+    {
+        // SSGI already resolves screen-space, BVH and IBL fallback — always
+        // prefer it when available. Replaces the IBL diffuse term.
+        vec3 ssgi_irradiance = SampleSsgi(v_uv, depth);
+        vec3 diffuse_gi = ssgi_irradiance * albedo;
+        ambient += kD_ibl * diffuse_gi;
+    }
+    else if (u_has_irradiance != 0)
     {
         vec3 irradiance_direction = RotateAroundY(normal, u_skybox_yaw_radians);
         vec3 irradiance = texture(u_irradiance_cubemap, irradiance_direction).rgb * max(u_skybox_intensity, 0.0);
@@ -449,5 +511,6 @@ void main()
     }
 
     vec3 color = ambient + Lo;
-    o_color = vec4(ToneMapAndEncode(color), 1.0);
+    o_color    = vec4(ToneMapAndEncode(color), 1.0);
+    o_radiance = vec4(color, 1.0);
 }
