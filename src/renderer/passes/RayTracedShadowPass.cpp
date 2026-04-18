@@ -1,6 +1,7 @@
 #include "renderer/passes/RayTracedShadowPass.h"
 
 #include "core/Profiling.h"
+#include "renderer/FrameResources.h"
 #include "renderer/GeometryStore.h"
 #include "renderer/LightStore.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
@@ -53,8 +54,9 @@ namespace hybrid::renderer
 
         const RenderSettings &settings = *input.settings;
         const RenderView &view = *input.effective_view;
-        const auto &extent = settings.render_extent;
-        if (!extent.IsValid())
+        const RenderExtent full_extent   = settings.render_extent;
+        const RenderExtent shadow_extent = ShadowMaskExtent(full_extent);
+        if (!full_extent.IsValid() || !shadow_extent.IsValid())
         {
             return false;
         }
@@ -94,12 +96,12 @@ namespace hybrid::renderer
         if (output_size_loc >= 0)
         {
             glUniform2ui(output_size_loc,
-                         static_cast<GLuint>(extent.width),
-                         static_cast<GLuint>(extent.height));
+                         static_cast<GLuint>(shadow_extent.width),
+                         static_cast<GLuint>(shadow_extent.height));
         }
 
-        const GLuint groups_x = CeilDiv(extent.width, kWorkgroupSize);
-        const GLuint groups_y = CeilDiv(extent.height, kWorkgroupSize);
+        const GLuint groups_x = CeilDiv(shadow_extent.width, kWorkgroupSize);
+        const GLuint groups_y = CeilDiv(shadow_extent.height, kWorkgroupSize);
 
         for (const ShadowCaster &caster : casters)
         {

@@ -280,7 +280,11 @@ void main()
         Lo += contribution * SampleShadowMask(v_uv, light.attenuation_shadow.w);
     }
 
-    const int kAreaLightSampleGridSize = 8;
+    // 4x4 stratified quadrature over the area light rectangle. Previously 8x8
+    // (64 samples), but since ray-traced visibility is a single stochastic
+    // sample per pixel the fine-grained radiance quadrature no longer pays
+    // off — the shadow noise dominates.
+    const int kAreaLightSampleGridSize = 4;
     const float kAreaLightSampleGridSizeF = float(kAreaLightSampleGridSize);
     const float kAreaLightSampleCount = kAreaLightSampleGridSizeF * kAreaLightSampleGridSizeF;
     for (uint area_index = 0u; area_index < u_area_light_count; ++area_index)

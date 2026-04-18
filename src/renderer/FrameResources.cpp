@@ -311,6 +311,7 @@ namespace hybrid::renderer
             LOG_ERROR("[FrameResources] Failed to create raytrace shadow mask array");
             return false;
         }
+        const RenderExtent shadow_extent = ShadowMaskExtent(extent);
         m_raytrace_shadow_masks.Bind();
         m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -318,8 +319,8 @@ namespace hybrid::renderer
         m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         m_raytrace_shadow_masks.SetImage3D(0,
                                            GL_R8,
-                                           static_cast<GLsizei>(extent.width),
-                                           static_cast<GLsizei>(extent.height),
+                                           static_cast<GLsizei>(shadow_extent.width),
+                                           static_cast<GLsizei>(shadow_extent.height),
                                            static_cast<GLsizei>(kMaxShadowMaskLayers),
                                            GL_RED,
                                            GL_UNSIGNED_BYTE,
