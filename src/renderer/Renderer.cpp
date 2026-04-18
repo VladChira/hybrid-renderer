@@ -14,6 +14,7 @@
 #include "renderer/opengl/GLTexture.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
 
+#include "renderer/passes/AreaLightDebugPass.h"
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
@@ -62,6 +63,7 @@ namespace hybrid::renderer
         GLShaderProgram raytrace_shadow_shader{};
         GLShaderProgram shadow_temporal_shader{};
         GLShaderProgram shadow_atrous_shader{};
+        GLShaderProgram area_light_debug_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -76,6 +78,7 @@ namespace hybrid::renderer
         std::unique_ptr<RayTracedAlbedoPass>  raytrace_albedo_pass{};
         std::unique_ptr<RayTracedShadowPass>  raytrace_shadow_pass{};
         std::unique_ptr<ShadowDenoisePass>    shadow_denoise_pass{};
+        std::unique_ptr<AreaLightDebugPass>   area_light_debug_pass{};
         SceneFrameCache scene_frame_cache{};
 
         // Temporal reprojection state. On frame 0 `prev_view_valid` is false
@@ -216,6 +219,14 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("area_light_debug.vert",
+                                                             "area_light_debug.frag",
+                                                             m_impl->area_light_debug_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: area light debug program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -258,6 +269,7 @@ namespace hybrid::renderer
                                                                                 &m_impl->as_cache);
         m_impl->shadow_denoise_pass    = std::make_unique<ShadowDenoisePass>(&m_impl->shadow_temporal_shader,
                                                                               &m_impl->shadow_atrous_shader);
+        m_impl->area_light_debug_pass  = std::make_unique<AreaLightDebugPass>(&m_impl->area_light_debug_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
@@ -295,6 +307,7 @@ namespace hybrid::renderer
         m_impl->raytrace_albedo_pass.reset();
         m_impl->raytrace_shadow_pass.reset();
         m_impl->shadow_denoise_pass.reset();
+        m_impl->area_light_debug_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
         m_impl->light_store.Clear();
@@ -310,6 +323,7 @@ namespace hybrid::renderer
         m_impl->raytrace_shadow_shader.Destroy();
         m_impl->shadow_temporal_shader.Destroy();
         m_impl->shadow_atrous_shader.Destroy();
+        m_impl->area_light_debug_shader.Destroy();
         m_impl->prev_view_valid = false;
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
@@ -620,6 +634,21 @@ namespace hybrid::renderer
             {
                 m_impl->outputs.color = deferred_output.color;
                 m_impl->outputs.depth = deferred_output.depth;
+            }
+
+            if (m_impl->area_light_debug_pass)
+            {
+                HYBRID_PROFILE_ZONE_N("Renderer::AreaLightDebugPass");
+                AreaLightDebugPassInput debug_input{};
+                debug_input.settings             = &m_impl->submitted_settings;
+                debug_input.scene_data           = &m_impl->scene_data;
+                debug_input.effective_view       = &m_impl->effective_view;
+                debug_input.scene_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene);
+                debug_input.gbuffer_depth        = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+                if (!m_impl->area_light_debug_pass->Execute(debug_input))
+                {
+                    LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->area_light_debug_pass->Name());
+                }
             }
         }
 

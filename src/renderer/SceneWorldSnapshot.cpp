@@ -375,6 +375,7 @@ namespace hybrid::renderer
             light.intensity = common.intensity;
             light.two_sided = area.two_sided;
             light.cast_shadows = common.cast_shadows;
+            light.visible = area.visible;
 
             const auto it = impl.area_light_records.find(key);
             if (it == impl.area_light_records.end())

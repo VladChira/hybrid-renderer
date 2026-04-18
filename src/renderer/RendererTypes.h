@@ -124,6 +124,7 @@ namespace hybrid::renderer
         float intensity = 1.0f;
         bool two_sided = false;
         bool cast_shadows = true;
+        bool visible = false;
     };
 
     struct RenderHdriLight

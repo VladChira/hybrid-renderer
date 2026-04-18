@@ -194,6 +194,7 @@ namespace hybrid::core
                         updated.size = glm::max(typed_command.size, glm::vec2(0.0f));
                         updated.direction = NormalizeOrFallback(typed_command.direction, glm::vec3(0.0f, -1.0f, 0.0f));
                         updated.two_sided = typed_command.two_sided;
+                        updated.visible = typed_command.visible;
                         active_scene_world->SetAreaLight(typed_command.entity, updated);
                     }
                     else if constexpr (std::is_same_v<T, ui::EditHdriLightCommand>)

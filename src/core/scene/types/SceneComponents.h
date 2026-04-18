@@ -82,6 +82,9 @@ namespace hybrid::core::scene
         glm::vec2 size{1.0f, 1.0f};
         glm::vec3 direction{0.0f, -1.0f, 0.0f};
         bool two_sided = false;
+        // Draw the light's bounds as a debug rectangle in the color of the
+        // light. Purely visual — has no effect on illumination.
+        bool visible = false;
     };
 
     struct HdriLightComponent

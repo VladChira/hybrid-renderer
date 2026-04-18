@@ -51,9 +51,72 @@ struct GpuAreaLight
     vec4 two_sided_shadow_pad;    // x = two_sided, y = shadow layer (-1 = none)
 };
 
-float SampleShadowMask(vec2 uv, float layer_f)
+// Depth-aware 4-tap upsample of the half-res shadow mask. A pure bilinear
+// sample bleeds across depth discontinuities (one half-res texel sees the
+// foreground surface, its neighbour sees the background), which produces
+// lit outlines around shadowed silhouettes. Weight each tap by how closely
+// its representative depth matches the centre pixel's depth.
+float SampleShadowMask(vec2 uv, float layer_f, float center_depth)
 {
-    return layer_f >= 0.0 ? texture(u_shadow_mask_array, vec3(uv, layer_f)).r : 1.0;
+    if (layer_f < 0.0)
+    {
+        return 1.0;
+    }
+    int layer = int(layer_f);
+
+    vec2 shadow_size_f = vec2(textureSize(u_shadow_mask_array, 0).xy);
+    ivec2 shadow_size  = ivec2(shadow_size_f);
+
+    // Pixel-space coordinate inside the half-res mask, offset so
+    // floor(shadow_coord) gives the lower-left neighbour.
+    vec2 shadow_coord = uv * shadow_size_f - vec2(0.5);
+    ivec2 base = ivec2(floor(shadow_coord));
+    vec2 frac  = shadow_coord - vec2(base);
+
+    float bilinear[4] = float[4](
+        (1.0 - frac.x) * (1.0 - frac.y),
+        frac.x        * (1.0 - frac.y),
+        (1.0 - frac.x) * frac.y,
+        frac.x        * frac.y
+    );
+    ivec2 offsets[4] = ivec2[4](ivec2(0, 0), ivec2(1, 0), ivec2(0, 1), ivec2(1, 1));
+
+    const float kDepthSigma = 0.002;
+
+    float weighted   = 0.0;
+    float weight_sum = 0.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        ivec2 tap = base + offsets[i];
+        if (tap.x < 0 || tap.y < 0 || tap.x >= shadow_size.x || tap.y >= shadow_size.y)
+        {
+            continue;
+        }
+
+        // Depth representative of this half-res texel — the shadow pass
+        // sampled the full-res G-buffer at this UV with GL_NEAREST, so we
+        // do the same.
+        vec2 tap_uv = (vec2(tap) + vec2(0.5)) / shadow_size_f;
+        float tap_depth = texture(u_gbuffer_depth, tap_uv).r;
+
+        float depth_diff = abs(tap_depth - center_depth);
+        float w_depth = exp(-depth_diff / kDepthSigma);
+        float w = bilinear[i] * w_depth;
+
+        float mask = texelFetch(u_shadow_mask_array, ivec3(tap, layer), 0).r;
+        weighted   += mask * w;
+        weight_sum += w;
+    }
+
+    if (weight_sum < 1e-5)
+    {
+        // Every neighbour disagrees on depth — fall back to the nearest
+        // sample so the result stays bounded.
+        ivec2 nearest = clamp(ivec2(round(shadow_coord)), ivec2(0), shadow_size - ivec2(1));
+        return texelFetch(u_shadow_mask_array, ivec3(nearest, layer), 0).r;
+    }
+
+    return weighted / weight_sum;
 }
 
 layout(std430, binding = 4) readonly buffer DirectionalLightBuffer
@@ -244,7 +307,7 @@ void main()
         vec3 L = normalize(-light.direction_shadow_layer.xyz);
         vec3 radiance = light.color_intensity.rgb * max(light.color_intensity.w, 0.0);
         vec3 contribution = ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
-        Lo += contribution * SampleShadowMask(v_uv, light.direction_shadow_layer.w);
+        Lo += contribution * SampleShadowMask(v_uv, light.direction_shadow_layer.w, depth);
     }
 
     for (uint i = 0u; i < u_point_light_count; ++i)
@@ -277,7 +340,7 @@ void main()
                             light.attenuation_shadow.z * light_distance * light_distance;
         vec3 radiance = light.color_range.rgb * max(intensity, 0.0) / max(attenuation, 1e-5);
         vec3 contribution = ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
-        Lo += contribution * SampleShadowMask(v_uv, light.attenuation_shadow.w);
+        Lo += contribution * SampleShadowMask(v_uv, light.attenuation_shadow.w, depth);
     }
 
     // 4x4 stratified quadrature over the area light rectangle. Previously 8x8
@@ -356,7 +419,7 @@ void main()
         // quadratures emission × BRDF × geometry, while the ray pass supplies
         // a single stochastic visibility sample. Multiplying the two is
         // biased but commonly accepted.
-        Lo += (accumulated / kAreaLightSampleCount) * SampleShadowMask(v_uv, light.two_sided_shadow_pad.y);
+        Lo += (accumulated / kAreaLightSampleCount) * SampleShadowMask(v_uv, light.two_sided_shadow_pad.y, depth);
     }
 
     vec3 ambient = vec3(0.0);

@@ -187,6 +187,7 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/OpenGLRenderBackend.cpp
   src/renderer/raytracing/AccelerationStructureCache.cpp
   src/renderer/raytracing/BvhBuilder.cpp
+  src/renderer/passes/AreaLightDebugPass.cpp
   src/renderer/passes/DeferredLightingPass.cpp
   src/renderer/passes/GBufferPass.cpp
   src/renderer/passes/HdriPrecomputePass.cpp
