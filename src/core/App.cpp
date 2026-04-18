@@ -239,6 +239,7 @@ namespace hybrid::core
                 ui_state.viewport_raytrace_albedo_texture = renderer_outputs.raytrace_albedo;
                 ui_state.viewport_ssgi_raw_texture = renderer_outputs.ssgi_raw;
                 ui_state.viewport_ssgi_filtered_texture = renderer_outputs.ssgi_filtered;
+                ui_state.viewport_scene_radiance_texture = renderer_outputs.scene_radiance;
                 ui_state.viewport_render_extent = frame_context.render_extent;
                 ui_state.viewport_render_view = resolved_view;
                 ui_state.viewport_render_view_valid = resolved_view_valid;

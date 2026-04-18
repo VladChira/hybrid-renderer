@@ -206,6 +206,7 @@ namespace hybrid::renderer
         GlTextureId raytrace_albedo = 0;
         GlTextureId ssgi_raw = 0;
         GlTextureId ssgi_filtered = 0;
+        GlTextureId scene_radiance = 0;
     };
 
 } // namespace hybrid::renderer

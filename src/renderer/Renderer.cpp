@@ -726,6 +726,7 @@ namespace hybrid::renderer
             deferred_input.shadow_mask_array = final_shadow_mask;
             deferred_input.ssgi_texture      = ssgi_filtered_for_deferred;
             m_impl->outputs.ssgi_filtered    = ssgi_filtered_for_deferred;
+            m_impl->outputs.scene_radiance   = static_cast<GlTextureId>(radiance_current_id);
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))
