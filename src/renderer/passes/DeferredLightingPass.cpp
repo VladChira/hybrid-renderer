@@ -1,32 +1,23 @@
 #include "renderer/passes/DeferredLightingPass.h"
 
 #include "core/Profiling.h"
+#include "renderer/LightStore.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLVertexArray.h"
-
-#include <algorithm>
-#include <array>
-#include <cstdio>
 
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace hybrid::renderer
 {
 
-    namespace
-    {
-        constexpr int kMaxDeferredPointLights = 64;
-        constexpr int kMaxDeferredDirectionalLights = 16;
-        constexpr int kMaxDeferredAreaLights = 16;
-    }
-
     struct DeferredLightingPass::Impl
     {
         GLVertexArray fullscreen_vao{};
     };
 
-    DeferredLightingPass::DeferredLightingPass(GLShaderProgram *deferred_shader)
+    DeferredLightingPass::DeferredLightingPass(GLShaderProgram *deferred_shader, LightStore *light_store)
         : m_deferred_shader(deferred_shader),
+          m_light_store(light_store),
           m_impl(std::make_unique<Impl>())
     {
     }
@@ -44,6 +35,7 @@ namespace hybrid::renderer
         HYBRID_PROFILE_GL_ZONE("DeferredLightingPass");
 
         if (m_deferred_shader == nullptr ||
+            m_light_store == nullptr ||
             m_impl == nullptr ||
             input.settings == nullptr ||
             input.scene_data == nullptr ||
@@ -58,7 +50,6 @@ namespace hybrid::renderer
         }
 
         const RenderSettings &settings = *input.settings;
-        const FrameSceneData &scene = *input.scene_data;
         const RenderView &effective_view = *input.effective_view;
 
         if (!m_impl->fullscreen_vao.IsValid() && !m_impl->fullscreen_vao.Create())
@@ -91,6 +82,7 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1f("u_legacy_gamma", settings.legacy_gamma);
         m_deferred_shader->SetUniform1f("u_aces_input_scale", settings.aces_input_scale);
         m_deferred_shader->SetUniform1f("u_aces_saturation", settings.aces_saturation);
+
         const bool has_skybox_cubemap = input.has_skybox && input.skybox_cubemap != 0;
         const bool has_irradiance_cubemap = input.has_skybox && input.convoluted_cubemap != 0;
         const bool has_specular_ibl = input.has_skybox &&
@@ -102,133 +94,11 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1f("u_skybox_intensity", input.skybox_intensity);
         m_deferred_shader->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
 
-        const int point_light_count = static_cast<int>(std::min<size_t>(scene.point_lights.size(),
-                                                                         static_cast<size_t>(kMaxDeferredPointLights)));
-        m_deferred_shader->SetUniform1i("u_point_light_count", point_light_count);
+        m_deferred_shader->SetUniform1ui("u_directional_light_count", m_light_store->DirectionalCount());
+        m_deferred_shader->SetUniform1ui("u_point_light_count",       m_light_store->PointCount());
+        m_deferred_shader->SetUniform1ui("u_area_light_count",        m_light_store->AreaCount());
 
-        const int directional_light_count =
-            static_cast<int>(std::min<size_t>(scene.directional_lights.size(),
-                                              static_cast<size_t>(kMaxDeferredDirectionalLights)));
-        m_deferred_shader->SetUniform1i("u_directional_light_count", directional_light_count);
-
-        const int area_light_count =
-            static_cast<int>(std::min<size_t>(scene.area_lights.size(),
-                                              static_cast<size_t>(kMaxDeferredAreaLights)));
-        m_deferred_shader->SetUniform1i("u_area_light_count", area_light_count);
-
-        std::array<char, 96> uniform_name{};
-        for (int light_index = 0; light_index < directional_light_count; ++light_index)
-        {
-            const RenderDirectionalLight &light = scene.directional_lights[static_cast<size_t>(light_index)];
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_directional_lights[%d].direction",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.direction);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_directional_lights[%d].color",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_directional_lights[%d].intensity",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
-        }
-
-        for (int light_index = 0; light_index < point_light_count; ++light_index)
-        {
-            const RenderPointLight &light = scene.point_lights[static_cast<size_t>(light_index)];
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].position",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.position);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].color",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].intensity",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].range",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.range);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].attenuation_constant",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_constant);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].attenuation_linear",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_linear);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_point_lights[%d].attenuation_quadratic",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.attenuation_quadratic);
-        }
-
-        for (int light_index = 0; light_index < area_light_count; ++light_index)
-        {
-            const RenderAreaLight &light = scene.area_lights[static_cast<size_t>(light_index)];
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].position",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.position);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].direction",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.direction);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].size",
-                          light_index);
-            glUniform2f(m_deferred_shader->GetUniformLocation(uniform_name.data()),
-                        light.size.x,
-                        light.size.y);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].color",
-                          light_index);
-            m_deferred_shader->SetUniformVec3(uniform_name.data(), light.color);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].intensity",
-                          light_index);
-            m_deferred_shader->SetUniform1f(uniform_name.data(), light.intensity);
-
-            std::snprintf(uniform_name.data(),
-                          uniform_name.size(),
-                          "u_area_lights[%d].two_sided",
-                          light_index);
-            m_deferred_shader->SetUniform1i(uniform_name.data(), light.two_sided ? 1 : 0);
-        }
+        m_light_store->BindSsbos();
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_rt0);

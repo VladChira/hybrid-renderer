@@ -21,7 +21,9 @@ namespace hybrid::ui
     {
         FinalColor = 0,
         GBufferRt0 = 1,
-        GBufferRt1 = 2
+        GBufferRt1 = 2,
+        GBufferDepth = 3,
+        GBufferEntityId = 4
     };
 
     struct UiMaterialEntry
@@ -66,6 +68,7 @@ namespace hybrid::ui
         uint64_t viewport_color_texture = 0;
         uint64_t viewport_gbuffer_rt0_texture = 0;
         uint64_t viewport_gbuffer_rt1_texture = 0;
+        uint64_t viewport_gbuffer_depth_texture = 0;
         uint64_t viewport_entity_id_texture = 0;
         UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
         renderer::RenderExtent viewport_render_extent{};

@@ -45,6 +45,14 @@ namespace hybrid::ui
                 return state.viewport_gbuffer_rt1_texture != 0
                            ? state.viewport_gbuffer_rt1_texture
                            : state.viewport_color_texture;
+            case UiViewportVisualization::GBufferDepth:
+                return state.viewport_gbuffer_depth_texture != 0
+                           ? state.viewport_gbuffer_depth_texture
+                           : state.viewport_color_texture;
+            case UiViewportVisualization::GBufferEntityId:
+                return state.viewport_entity_id_texture != 0
+                           ? state.viewport_entity_id_texture
+                           : state.viewport_color_texture;
             }
 
             return state.viewport_color_texture;

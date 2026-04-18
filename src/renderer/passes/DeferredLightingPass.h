@@ -7,6 +7,7 @@
 namespace hybrid::renderer
 {
     class GLShaderProgram;
+    class LightStore;
 
     struct DeferredLightingPassInput
     {
@@ -36,7 +37,7 @@ namespace hybrid::renderer
     class DeferredLightingPass final
     {
     public:
-        explicit DeferredLightingPass(GLShaderProgram *deferred_shader);
+        DeferredLightingPass(GLShaderProgram *deferred_shader, LightStore *light_store);
         ~DeferredLightingPass();
 
         const char *Name() const;
@@ -45,6 +46,7 @@ namespace hybrid::renderer
     private:
         struct Impl;
         GLShaderProgram *m_deferred_shader = nullptr;
+        LightStore      *m_light_store = nullptr;
         std::unique_ptr<Impl> m_impl;
     };
 

@@ -226,6 +226,7 @@ namespace hybrid::core
                 ui_state.viewport_color_texture = renderer_outputs.color;
                 ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0;
                 ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;
+                ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
                 ui_state.viewport_render_extent = frame_context.render_extent;
                 ui_state.viewport_render_view = resolved_view;

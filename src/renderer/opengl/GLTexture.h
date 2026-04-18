@@ -46,13 +46,25 @@ namespace hybrid::renderer
                            const void *pixels) const;
         void GenerateMipmap() const;
 
+        // Bindless texture helpers (GL_ARB_bindless_texture). Returns 0 if the
+        // extension is unavailable or the handle could not be acquired.
+        GLuint64 GetOrCreateBindlessHandle();
+        bool MakeBindlessResident();
+        void MakeBindlessNonResident();
+        GLuint64 BindlessHandle() const { return m_bindless_handle; }
+        bool IsBindlessResident() const { return m_bindless_resident; }
+
         GLuint Id() const { return m_id; }
         GLenum Target() const { return m_target; }
         bool IsValid() const { return m_id != 0; }
 
+        static bool IsBindlessTextureSupported();
+
     private:
         GLuint m_id = 0;
         GLenum m_target = 0;
+        GLuint64 m_bindless_handle = 0;
+        bool m_bindless_resident = false;
     };
 
 } // namespace hybrid::renderer

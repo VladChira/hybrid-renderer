@@ -151,6 +151,7 @@ target_sources(hybrid_engine PRIVATE
   src/ui/panels/MaterialsPanel.cpp
   src/ui/panels/PropertiesPanel.cpp
   src/ui/panels/PerformancePanel.cpp
+  src/ui/panels/RenderTargetsPanel.cpp
   src/ui/panels/SettingsPanel.cpp
   src/ui/panels/ToolbarPanel.cpp
   src/ui/panels/Panel.cpp
@@ -179,7 +180,9 @@ target_sources(hybrid_engine PRIVATE
 
   src/renderer/Renderer.cpp
   src/renderer/FrameResources.cpp
-  src/renderer/GpuSceneResourceCache.cpp
+  src/renderer/GeometryStore.cpp
+  src/renderer/LightStore.cpp
+  src/renderer/MaterialStore.cpp
   src/renderer/OpenGLRenderBackend.cpp
   src/renderer/passes/DeferredLightingPass.cpp
   src/renderer/passes/GBufferPass.cpp

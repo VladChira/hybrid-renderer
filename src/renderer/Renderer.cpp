@@ -4,11 +4,14 @@
 #include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
 #include "renderer/FrameResources.h"
-#include "renderer/GpuSceneResourceCache.h"
+#include "renderer/GeometryStore.h"
+#include "renderer/LightStore.h"
+#include "renderer/MaterialStore.h"
 #include "renderer/OpenGLRenderBackend.h"
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/ShaderManager.h"
 #include "renderer/opengl/GLShaderProgram.h"
+#include "renderer/opengl/GLTexture.h"
 
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
@@ -49,7 +52,9 @@ namespace hybrid::renderer
         GLShaderProgram brdf_lut_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
-        GpuSceneResourceCache gpu_scene_resource_cache{};
+        GeometryStore geometry_store{};
+        MaterialStore material_store{};
+        LightStore    light_store{};
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
@@ -91,6 +96,12 @@ namespace hybrid::renderer
         if (!graphics::EnsureOpenGLInitialized(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
         {
             LOG_ERROR("[Renderer] Init failed: OpenGL runtime initialization failed");
+            return false;
+        }
+
+        if (!GLTexture::IsBindlessTextureSupported())
+        {
+            LOG_ERROR("[Renderer] Init failed: GL_ARB_bindless_texture is required for the unified material path");
             return false;
         }
 
@@ -149,9 +160,27 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->geometry_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
+            return false;
+        }
+        if (!m_impl->material_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: material store initialization failed");
+            return false;
+        }
+        if (!m_impl->light_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: light store initialization failed");
+            return false;
+        }
+
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader,
-                                                             &m_impl->gpu_scene_resource_cache);
-        m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
+                                                             &m_impl->geometry_store,
+                                                             &m_impl->material_store);
+        m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader,
+                                                                                 &m_impl->light_store);
         m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader,
                                                                              &m_impl->convolute_hdri_shader,
                                                                              &m_impl->prefilter_hdri_shader,
@@ -189,7 +218,9 @@ namespace hybrid::renderer
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
         m_impl->hdri_precompute_pass.reset();
-        m_impl->gpu_scene_resource_cache.Clear();
+        m_impl->geometry_store.Clear();
+        m_impl->material_store.Clear();
+        m_impl->light_store.Clear();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
         m_impl->equirect_to_cubemap_shader.Destroy();
@@ -373,6 +404,7 @@ namespace hybrid::renderer
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
+            m_impl->light_store.Update(m_impl->scene_data);
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
             deferred_input.scene_data = &m_impl->scene_data;
