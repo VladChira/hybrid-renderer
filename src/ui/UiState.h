@@ -28,7 +28,8 @@ namespace hybrid::ui
         RaytraceAlbedo = 6,
         SsgiRaw = 7,
         SsgiFiltered = 8,
-        SceneRadiance = 9
+        SceneRadiance = 9,
+        SceneRadiancePrev = 10
     };
 
     struct UiMaterialEntry
@@ -80,6 +81,7 @@ namespace hybrid::ui
         uint64_t viewport_ssgi_raw_texture = 0;
         uint64_t viewport_ssgi_filtered_texture = 0;
         uint64_t viewport_scene_radiance_texture = 0;
+        uint64_t viewport_scene_radiance_prev_texture = 0;
         UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
         renderer::RenderExtent viewport_render_extent{};
         renderer::RenderView viewport_render_view{};

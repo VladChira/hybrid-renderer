@@ -723,10 +723,11 @@ namespace hybrid::renderer
             deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
-            deferred_input.shadow_mask_array = final_shadow_mask;
-            deferred_input.ssgi_texture      = ssgi_filtered_for_deferred;
-            m_impl->outputs.ssgi_filtered    = ssgi_filtered_for_deferred;
-            m_impl->outputs.scene_radiance   = static_cast<GlTextureId>(radiance_current_id);
+            deferred_input.shadow_mask_array     = final_shadow_mask;
+            deferred_input.ssgi_texture          = ssgi_filtered_for_deferred;
+            m_impl->outputs.ssgi_filtered        = ssgi_filtered_for_deferred;
+            m_impl->outputs.scene_radiance       = static_cast<GlTextureId>(radiance_current_id);
+            m_impl->outputs.scene_radiance_prev  = static_cast<GlTextureId>(radiance_prev_id);
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))

@@ -20,7 +20,7 @@ namespace hybrid::ui
             UiViewportVisualization visualization;
         };
 
-        constexpr std::array<TargetEntry, 10> kTargets = {{
+        constexpr std::array<TargetEntry, 11> kTargets = {{
             {"Final color",            UiViewportVisualization::FinalColor},
             {"G-buffer RT0 (albedo+metallic)", UiViewportVisualization::GBufferRt0},
             {"G-buffer RT1 (normal+roughness)", UiViewportVisualization::GBufferRt1},
@@ -30,7 +30,8 @@ namespace hybrid::ui
             {"Ray-traced albedo",      UiViewportVisualization::RaytraceAlbedo},
             {"SSGI raw (pre-denoise)", UiViewportVisualization::SsgiRaw},
             {"SSGI filtered",          UiViewportVisualization::SsgiFiltered},
-            {"Scene radiance (HDR)",   UiViewportVisualization::SceneRadiance},
+            {"Scene radiance (HDR, curr)", UiViewportVisualization::SceneRadiance},
+            {"Scene radiance (HDR, prev)", UiViewportVisualization::SceneRadiancePrev},
         }};
 
         uint64_t ResolveTextureForPreview(const UiState &state, UiViewportVisualization visualization)
@@ -47,6 +48,7 @@ namespace hybrid::ui
             case UiViewportVisualization::SsgiRaw:         return state.viewport_ssgi_raw_texture;
             case UiViewportVisualization::SsgiFiltered:    return state.viewport_ssgi_filtered_texture;
             case UiViewportVisualization::SceneRadiance:   return state.viewport_scene_radiance_texture;
+            case UiViewportVisualization::SceneRadiancePrev: return state.viewport_scene_radiance_prev_texture;
             }
             return 0;
         }

@@ -206,7 +206,8 @@ namespace hybrid::renderer
         GlTextureId raytrace_albedo = 0;
         GlTextureId ssgi_raw = 0;
         GlTextureId ssgi_filtered = 0;
-        GlTextureId scene_radiance = 0;
+        GlTextureId scene_radiance = 0;        // current-frame slot (what deferred just wrote)
+        GlTextureId scene_radiance_prev = 0;   // previous-frame slot (what SSGI samples)
     };
 
 } // namespace hybrid::renderer
