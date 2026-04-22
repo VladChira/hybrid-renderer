@@ -17,7 +17,9 @@ namespace hybrid::renderer
 
     GLTexture::GLTexture(GLTexture &&other) noexcept
         : m_id(std::exchange(other.m_id, 0)),
-          m_target(std::exchange(other.m_target, 0))
+          m_target(std::exchange(other.m_target, 0)),
+          m_bindless_handle(std::exchange(other.m_bindless_handle, 0)),
+          m_bindless_resident(std::exchange(other.m_bindless_resident, false))
     {
     }
 
@@ -31,6 +33,8 @@ namespace hybrid::renderer
         Destroy();
         m_id = std::exchange(other.m_id, 0);
         m_target = std::exchange(other.m_target, 0);
+        m_bindless_handle = std::exchange(other.m_bindless_handle, 0);
+        m_bindless_resident = std::exchange(other.m_bindless_resident, false);
         return *this;
     }
 
@@ -48,6 +52,9 @@ namespace hybrid::renderer
         {
             return;
         }
+
+        MakeBindlessNonResident();
+        m_bindless_handle = 0;
 
         glDeleteTextures(1, &m_id);
         m_id = 0;
@@ -106,6 +113,58 @@ namespace hybrid::renderer
     void GLTexture::GenerateMipmap() const
     {
         glGenerateMipmap(m_target);
+    }
+
+    bool GLTexture::IsBindlessTextureSupported()
+    {
+        return glGetTextureHandleARB != nullptr &&
+               glMakeTextureHandleResidentARB != nullptr &&
+               glMakeTextureHandleNonResidentARB != nullptr;
+    }
+
+    GLuint64 GLTexture::GetOrCreateBindlessHandle()
+    {
+        if (m_id == 0 || !IsBindlessTextureSupported())
+        {
+            return 0;
+        }
+        if (m_bindless_handle != 0)
+        {
+            return m_bindless_handle;
+        }
+
+        // Sampler state must be finalized before the handle is acquired — once
+        // a texture handle exists, subsequent glTexParameter calls on the same
+        // texture are ignored by the handle. Callers upload and configure
+        // sampler params first, then request the handle.
+        m_bindless_handle = glGetTextureHandleARB(m_id);
+        return m_bindless_handle;
+    }
+
+    bool GLTexture::MakeBindlessResident()
+    {
+        if (m_bindless_resident)
+        {
+            return true;
+        }
+        if (GetOrCreateBindlessHandle() == 0)
+        {
+            return false;
+        }
+        glMakeTextureHandleResidentARB(m_bindless_handle);
+        m_bindless_resident = true;
+        return true;
+    }
+
+    void GLTexture::MakeBindlessNonResident()
+    {
+        if (!m_bindless_resident || m_bindless_handle == 0 || !IsBindlessTextureSupported())
+        {
+            m_bindless_resident = false;
+            return;
+        }
+        glMakeTextureHandleNonResidentARB(m_bindless_handle);
+        m_bindless_resident = false;
     }
 
 } // namespace hybrid::renderer

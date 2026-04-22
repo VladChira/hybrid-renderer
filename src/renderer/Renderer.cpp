@@ -4,7 +4,9 @@
 #include "core/Profiling.h"
 #include "graphics/GraphicsRuntime.h"
 #include "renderer/FrameResources.h"
-#include "renderer/GpuSceneResourceCache.h"
+#include "renderer/stores/GeometryStore.h"
+#include "renderer/stores/MaterialStore.h"
+#include "renderer/stores/LightStore.h"
 #include "renderer/OpenGLRenderBackend.h"
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/ShaderManager.h"
@@ -13,6 +15,7 @@
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
+#include "renderer/passes/RenderTargetChannelsPass.h"
 
 #include <chrono>
 
@@ -31,6 +34,21 @@ namespace hybrid::renderer
             outputs.gbuffer_rt0 = resources.Get(FrameTarget::GBufferRt0);
             outputs.gbuffer_rt1 = resources.Get(FrameTarget::GBufferRt1);
             outputs.gbuffer_entity_id = resources.Get(FrameTarget::GBufferEntityId);
+            outputs.color_channels.rgb = resources.Get(FrameTarget::SceneColorRgb);
+            outputs.color_channels.r = resources.Get(FrameTarget::SceneColorR);
+            outputs.color_channels.g = resources.Get(FrameTarget::SceneColorG);
+            outputs.color_channels.b = resources.Get(FrameTarget::SceneColorB);
+            outputs.color_channels.a = resources.Get(FrameTarget::SceneColorA);
+            outputs.gbuffer_rt0_channels.rgb = resources.Get(FrameTarget::GBufferRt0Rgb);
+            outputs.gbuffer_rt0_channels.r = resources.Get(FrameTarget::GBufferRt0R);
+            outputs.gbuffer_rt0_channels.g = resources.Get(FrameTarget::GBufferRt0G);
+            outputs.gbuffer_rt0_channels.b = resources.Get(FrameTarget::GBufferRt0B);
+            outputs.gbuffer_rt0_channels.a = resources.Get(FrameTarget::GBufferRt0A);
+            outputs.gbuffer_rt1_channels.rgb = resources.Get(FrameTarget::GBufferRt1Rgb);
+            outputs.gbuffer_rt1_channels.r = resources.Get(FrameTarget::GBufferRt1R);
+            outputs.gbuffer_rt1_channels.g = resources.Get(FrameTarget::GBufferRt1G);
+            outputs.gbuffer_rt1_channels.b = resources.Get(FrameTarget::GBufferRt1B);
+            outputs.gbuffer_rt1_channels.a = resources.Get(FrameTarget::GBufferRt1A);
             return outputs;
         }
     } // namespace
@@ -47,13 +65,17 @@ namespace hybrid::renderer
         GLShaderProgram convolute_hdri_shader{};
         GLShaderProgram prefilter_hdri_shader{};
         GLShaderProgram brdf_lut_shader{};
+        GLShaderProgram extract_channel_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
-        GpuSceneResourceCache gpu_scene_resource_cache{};
+        GeometryStore geometry_store{};
+        MaterialStore material_store{};
+        LightStore light_store{};
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
+        std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -91,6 +113,12 @@ namespace hybrid::renderer
         if (!graphics::EnsureOpenGLInitialized(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
         {
             LOG_ERROR("[Renderer] Init failed: OpenGL runtime initialization failed");
+            return false;
+        }
+
+        if (!GLTexture::IsBindlessTextureSupported())
+        {
+            LOG_ERROR("[Renderer] Init failed: GL_ARB_bindless_texture is required for the unified material path");
             return false;
         }
 
@@ -149,17 +177,46 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("deferred_lighting.vert",
+                                                            "extract_channel.frag",
+                                                            m_impl->extract_channel_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: channel extraction shader program build failed");
+            return false;
+        }
+
+        if (!m_impl->geometry_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
+            return false;
+        }
+        if (!m_impl->material_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: material store initialization failed");
+            return false;
+        }
+        if (!m_impl->light_store.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: light store initialization failed");
+            return false;
+        }
+
+
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader,
-                                                             &m_impl->gpu_scene_resource_cache);
-        m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader);
+                                                             &m_impl->geometry_store,
+                                                             &m_impl->material_store);
+        m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader,
+                                                                                 &m_impl->light_store);
         m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader,
                                                                              &m_impl->convolute_hdri_shader,
                                                                              &m_impl->prefilter_hdri_shader,
                                                                              &m_impl->brdf_lut_shader);
+        m_impl->render_target_channels_pass = std::make_unique<RenderTargetChannelsPass>(&m_impl->extract_channel_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Fullscreen]");
+        LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Fullscreen]");
 
         if (m_impl->current_extent.IsValid())
         {
@@ -189,13 +246,17 @@ namespace hybrid::renderer
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
         m_impl->hdri_precompute_pass.reset();
-        m_impl->gpu_scene_resource_cache.Clear();
+        m_impl->render_target_channels_pass.reset();
+        m_impl->geometry_store.Clear();
+        m_impl->material_store.Clear();
+        m_impl->light_store.Clear();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
         m_impl->equirect_to_cubemap_shader.Destroy();
         m_impl->convolute_hdri_shader.Destroy();
         m_impl->prefilter_hdri_shader.Destroy();
         m_impl->brdf_lut_shader.Destroy();
+        m_impl->extract_channel_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -373,6 +434,7 @@ namespace hybrid::renderer
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
+            m_impl->light_store.Update(m_impl->scene_data);
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
             deferred_input.scene_data = &m_impl->scene_data;
@@ -399,6 +461,24 @@ namespace hybrid::renderer
             {
                 m_impl->outputs.color = deferred_output.color;
                 m_impl->outputs.depth = deferred_output.depth;
+            }
+        }
+
+        if (m_impl->render_target_channels_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::RenderTargetChannelsPass");
+            RenderTargetChannelsPassInput channel_input{};
+            channel_input.extent = m_impl->current_extent;
+            channel_input.debug_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::DebugChannelExtract);
+            channel_input.source_color = m_impl->outputs.color;
+            channel_input.source_gbuffer_rt0 = m_impl->outputs.gbuffer_rt0;
+            channel_input.source_gbuffer_rt1 = m_impl->outputs.gbuffer_rt1;
+            channel_input.out_color_channels = m_impl->outputs.color_channels;
+            channel_input.out_gbuffer_rt0_channels = m_impl->outputs.gbuffer_rt0_channels;
+            channel_input.out_gbuffer_rt1_channels = m_impl->outputs.gbuffer_rt1_channels;
+            if (!m_impl->render_target_channels_pass->Execute(channel_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->render_target_channels_pass->Name());
             }
         }
 

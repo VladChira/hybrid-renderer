@@ -163,6 +163,15 @@ namespace hybrid::renderer
 
     using GlTextureId = uint32_t;
 
+    struct RenderChannelOutputs
+    {
+        GlTextureId rgb = 0;
+        GlTextureId r = 0;
+        GlTextureId g = 0;
+        GlTextureId b = 0;
+        GlTextureId a = 0;
+    };
+
     struct RendererOutputs
     {
         GlTextureId color = 0;
@@ -170,6 +179,9 @@ namespace hybrid::renderer
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;
+        RenderChannelOutputs color_channels{};
+        RenderChannelOutputs gbuffer_rt0_channels{};
+        RenderChannelOutputs gbuffer_rt1_channels{};
     };
 
 } // namespace hybrid::renderer

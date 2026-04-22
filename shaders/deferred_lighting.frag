@@ -1,4 +1,4 @@
-#version 330 core
+#version 460 core
 
 in vec2 v_uv;
 
@@ -25,42 +25,45 @@ uniform int u_has_specular_ibl;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 
-const int MAX_POINT_LIGHTS = 64;
-const int MAX_DIRECTIONAL_LIGHTS = 16;
-const int MAX_AREA_LIGHTS = 16;
-struct PointLight
-{
-    vec3 position;
-    vec3 color;
-    float intensity;
-    float range;
-    float attenuation_constant;
-    float attenuation_linear;
-    float attenuation_quadratic;
-};
-uniform int u_point_light_count;
-uniform PointLight u_point_lights[MAX_POINT_LIGHTS];
+uniform uint u_directional_light_count;
+uniform uint u_point_light_count;
+uniform uint u_area_light_count;
 
-struct DirectionalLight
+struct GpuDirectionalLight
 {
-    vec3 direction;
-    vec3 color;
-    float intensity;
+    vec4 direction_cast_shadows;  // xyz = direction, w = cast_shadows (0/1)
+    vec4 color_intensity;         // xyz = color, w = intensity
 };
-uniform int u_directional_light_count;
-uniform DirectionalLight u_directional_lights[MAX_DIRECTIONAL_LIGHTS];
 
-struct AreaLight
+struct GpuPointLight
 {
-    vec3 position;
-    vec3 direction;
-    vec2 size;
-    vec3 color;
-    float intensity;
-    int two_sided;
+    vec4 position_intensity;   // xyz = position, w = intensity
+    vec4 color_range;          // xyz = color,    w = range
+    vec4 attenuation_cast;     // x/y/z = c/l/q,  w = cast_shadows (0/1)
 };
-uniform int u_area_light_count;
-uniform AreaLight u_area_lights[MAX_AREA_LIGHTS];
+
+struct GpuAreaLight
+{
+    vec4 position_intensity;   // xyz = position, w = intensity
+    vec4 direction_size_x;     // xyz = direction (unit), w = size.x
+    vec4 color_size_y;         // xyz = color,    w = size.y
+    vec4 two_sided_cast_pad;   // x = two_sided, y = cast_shadows
+};
+
+layout(std430, binding = 4) readonly buffer DirectionalLightBuffer
+{
+    GpuDirectionalLight directional_lights[];
+};
+
+layout(std430, binding = 5) readonly buffer PointLightBuffer
+{
+    GpuPointLight point_lights[];
+};
+
+layout(std430, binding = 6) readonly buffer AreaLightBuffer
+{
+    GpuAreaLight area_lights[];
+};
 
 out vec4 o_color;
 
@@ -114,7 +117,6 @@ float DistributionGGX(vec3 N, vec3 H, float roughness)
     float a2 = a * a;
     float ndoth = max(dot(N, H), 0.0);
     float ndoth2 = ndoth * ndoth;
-
     float denom = (ndoth2 * (a2 - 1.0) + 1.0);
     return a2 / max(PI * denom * denom, 1e-5);
 }
@@ -130,9 +132,7 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 {
     float ndotv = max(dot(N, V), 0.0);
     float ndotl = max(dot(N, L), 0.0);
-    float ggx2 = GeometrySchlickGGX(ndotv, roughness);
-    float ggx1 = GeometrySchlickGGX(ndotl, roughness);
-    return ggx1 * ggx2;
+    return GeometrySchlickGGX(ndotl, roughness) * GeometrySchlickGGX(ndotv, roughness);
 }
 
 vec3 FresnelSchlick(float cosTheta, vec3 F0)
@@ -179,6 +179,27 @@ void BuildOrthonormalBasis(vec3 n, out vec3 tangent, out vec3 bitangent)
     bitangent = normalize(cross(n, tangent));
 }
 
+vec3 ShadeCookTorrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float roughness, vec3 F0)
+{
+    float ndotv = max(dot(N, V), 0.0);
+    float ndotl = max(dot(N, L), 0.0);
+    if (ndotl <= 0.0)
+    {
+        return vec3(0.0);
+    }
+    vec3 H = normalize(V + L);
+    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+    float D = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    vec3 numerator = D * G * F;
+    float denominator = max(4.0 * ndotv * ndotl, 1e-5);
+    vec3 specular = numerator / denominator;
+    vec3 kS = F;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+    vec3 diffuse = kD * albedo / PI;
+    return (diffuse + specular) * radiance * ndotl;
+}
+
 void main()
 {
     vec4 rt0 = texture(u_gbuffer_rt0, v_uv);
@@ -213,44 +234,30 @@ void main()
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
 
-    for (int light_index = 0; light_index < u_directional_light_count; ++light_index)
+    for (uint i = 0u; i < u_directional_light_count; ++i)
     {
-        DirectionalLight light = u_directional_lights[light_index];
-        vec3 L = normalize(-light.direction);
-        float ndotl = max(dot(normal, L), 0.0);
-        if (ndotl <= 0.0)
-        {
-            continue;
-        }
-
-        vec3 radiance = light.color * max(light.intensity, 0.0);
-        vec3 H = normalize(V + L);
-        vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-        float D = DistributionGGX(normal, H, roughness);
-        float G = GeometrySmith(normal, V, L, roughness);
-        vec3 numerator = D * G * F;
-        float denominator = max(4.0 * ndotv * ndotl, 1e-5);
-        vec3 specular = numerator / denominator;
-        vec3 kS = F;
-        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-        vec3 diffuse = kD * albedo / PI;
-        Lo += (diffuse + specular) * radiance * ndotl;
+        GpuDirectionalLight light = directional_lights[i];
+        vec3 L = normalize(-light.direction_cast_shadows.xyz);
+        vec3 radiance = light.color_intensity.rgb * max(light.color_intensity.w, 0.0);
+        Lo += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
     }
 
-    for (int light_index = 0; light_index < u_point_light_count; ++light_index)
+    for (uint i = 0u; i < u_point_light_count; ++i)
     {
-        PointLight light = u_point_lights[light_index];
-        vec3 light_vector = light.position - world_position;
+        GpuPointLight light = point_lights[i];
+        vec3 light_position = light.position_intensity.xyz;
+        vec3 light_vector = light_position - world_position;
         float light_distance = length(light_vector);
         if (light_distance <= 1e-5)
         {
             continue;
         }
 
-        if (light.range > 0.0 && light_distance > light.range)
+        float intensity = light.position_intensity.w;
+        float range = light.color_range.w;
+        if (range > 0.0 && light_distance > range)
         {
-            // Any range > 0 is not physically based, but it still looks cool, so let's just add a nice falloff
-            light.intensity *= smoothstep(1.75 * light.range, light.range, light_distance);
+            intensity *= smoothstep(1.75 * range, range, light_distance);
         }
 
         vec3 L = light_vector / light_distance;
@@ -260,36 +267,31 @@ void main()
             continue;
         }
 
-        float attenuation = light.attenuation_constant +
-                            light.attenuation_linear * light_distance +
-                            light.attenuation_quadratic * light_distance * light_distance;
-        vec3 radiance = light.color * max(light.intensity, 0.0) / max(attenuation, 1e-5);
-        vec3 H = normalize(V + L);
-        vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-        float D = DistributionGGX(normal, H, roughness);
-        float G = GeometrySmith(normal, V, L, roughness);
-        vec3 numerator = D * G * F;
-        float denominator = max(4.0 * ndotv * ndotl, 1e-5);
-        vec3 specular = numerator / denominator;
-        vec3 kS = F;
-        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-        vec3 diffuse = kD * albedo / PI;
-        Lo += (diffuse + specular) * radiance * ndotl;
+        float attenuation = light.attenuation_cast.x +
+                            light.attenuation_cast.y * light_distance +
+                            light.attenuation_cast.z * light_distance * light_distance;
+        vec3 radiance = light.color_range.rgb * max(intensity, 0.0) / max(attenuation, 1e-5);
+        Lo += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
     }
 
-    // Deterministic surface sampling for rectangular area lights.
     const int kAreaLightSampleGridSize = 8;
     const float kAreaLightSampleGridSizeF = float(kAreaLightSampleGridSize);
     const float kAreaLightSampleCount = kAreaLightSampleGridSizeF * kAreaLightSampleGridSizeF;
-    for (int light_index = 0; light_index < u_area_light_count; ++light_index)
+    for (uint area_index = 0u; area_index < u_area_light_count; ++area_index)
     {
-        AreaLight light = u_area_lights[light_index];
-        vec3 light_normal = normalize(light.direction);
-        vec3 light_tangent = vec3(1.0, 0.0, 0.0);
-        vec3 light_bitangent = vec3(0.0, 0.0, 1.0);
+        GpuAreaLight light = area_lights[area_index];
+        vec3 light_position = light.position_intensity.xyz;
+        float intensity = light.position_intensity.w;
+        vec3 light_direction = light.direction_size_x.xyz;
+        vec2 clamped_size = max(vec2(light.direction_size_x.w, light.color_size_y.w), vec2(1e-3));
+        vec3 light_color = light.color_size_y.rgb;
+        bool two_sided = light.two_sided_cast_pad.x > 0.5;
+
+        vec3 light_normal = normalize(light_direction);
+        vec3 light_tangent = vec3(0.0);
+        vec3 light_bitangent = vec3(0.0);
         BuildOrthonormalBasis(light_normal, light_tangent, light_bitangent);
 
-        vec2 clamped_size = max(light.size, vec2(1e-3));
         vec2 half_size = clamped_size * 0.5;
         float light_area = clamped_size.x * clamped_size.y;
 
@@ -301,7 +303,7 @@ void main()
                 vec2 uv = (vec2(sample_x, sample_y) + vec2(0.5)) / kAreaLightSampleGridSizeF;
                 vec2 rect = (uv - 0.5) * 2.0;
                 vec3 sample_position =
-                    light.position +
+                    light_position +
                     light_tangent * (rect.x * half_size.x) +
                     light_bitangent * (rect.y * half_size.y);
 
@@ -313,14 +315,8 @@ void main()
                 }
 
                 vec3 L = light_vector / light_distance;
-                float ndotl = max(dot(normal, L), 0.0);
-                if (ndotl <= 0.0)
-                {
-                    continue;
-                }
-
                 float emitter_cos = dot(light_normal, -L);
-                if (light.two_sided != 0)
+                if (two_sided)
                 {
                     emitter_cos = abs(emitter_cos);
                 }
@@ -336,23 +332,13 @@ void main()
 
                 float attenuation = 1.0 / max(light_distance * light_distance, 1e-4);
                 vec3 radiance =
-                    light.color *
-                    max(light.intensity, 0.0) *
+                    light_color *
+                    max(intensity, 0.0) *
                     light_area *
                     emitter_cos *
                     attenuation;
 
-                vec3 H = normalize(V + L);
-                vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-                float D = DistributionGGX(normal, H, roughness);
-                float G = GeometrySmith(normal, V, L, roughness);
-                vec3 numerator = D * G * F;
-                float denominator = max(4.0 * ndotv * ndotl, 1e-5);
-                vec3 specular = numerator / denominator;
-                vec3 kS = F;
-                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-                vec3 diffuse = kD * albedo / PI;
-                accumulated += (diffuse + specular) * radiance * ndotl;
+                accumulated += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
             }
         }
 

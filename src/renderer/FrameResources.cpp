@@ -33,6 +33,12 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!AllocateDebugChannelTargets(m_extent))
+        {
+            m_valid = false;
+            return false;
+        }
+
         m_valid = true;
         return true;
     }
@@ -47,6 +53,22 @@ namespace hybrid::renderer
         m_gbuffer_entity_id.Destroy();
         m_gbuffer_depth.Destroy();
         m_gbuffer_framebuffer.Destroy();
+        m_scene_color_rgb.Destroy();
+        m_scene_color_r.Destroy();
+        m_scene_color_g.Destroy();
+        m_scene_color_b.Destroy();
+        m_scene_color_a.Destroy();
+        m_gbuffer_rt0_rgb.Destroy();
+        m_gbuffer_rt0_r.Destroy();
+        m_gbuffer_rt0_g.Destroy();
+        m_gbuffer_rt0_b.Destroy();
+        m_gbuffer_rt0_a.Destroy();
+        m_gbuffer_rt1_rgb.Destroy();
+        m_gbuffer_rt1_r.Destroy();
+        m_gbuffer_rt1_g.Destroy();
+        m_gbuffer_rt1_b.Destroy();
+        m_gbuffer_rt1_a.Destroy();
+        m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
     }
@@ -59,10 +81,40 @@ namespace hybrid::renderer
             return m_scene_color.Id();
         case FrameTarget::SceneDepth:
             return m_scene_depth.Id();
+        case FrameTarget::SceneColorRgb:
+            return m_scene_color_rgb.Id();
+        case FrameTarget::SceneColorR:
+            return m_scene_color_r.Id();
+        case FrameTarget::SceneColorG:
+            return m_scene_color_g.Id();
+        case FrameTarget::SceneColorB:
+            return m_scene_color_b.Id();
+        case FrameTarget::SceneColorA:
+            return m_scene_color_a.Id();
         case FrameTarget::GBufferRt0:
             return m_gbuffer_rt0.Id();
         case FrameTarget::GBufferRt1:
             return m_gbuffer_rt1.Id();
+        case FrameTarget::GBufferRt0Rgb:
+            return m_gbuffer_rt0_rgb.Id();
+        case FrameTarget::GBufferRt0R:
+            return m_gbuffer_rt0_r.Id();
+        case FrameTarget::GBufferRt0G:
+            return m_gbuffer_rt0_g.Id();
+        case FrameTarget::GBufferRt0B:
+            return m_gbuffer_rt0_b.Id();
+        case FrameTarget::GBufferRt0A:
+            return m_gbuffer_rt0_a.Id();
+        case FrameTarget::GBufferRt1Rgb:
+            return m_gbuffer_rt1_rgb.Id();
+        case FrameTarget::GBufferRt1R:
+            return m_gbuffer_rt1_r.Id();
+        case FrameTarget::GBufferRt1G:
+            return m_gbuffer_rt1_g.Id();
+        case FrameTarget::GBufferRt1B:
+            return m_gbuffer_rt1_b.Id();
+        case FrameTarget::GBufferRt1A:
+            return m_gbuffer_rt1_a.Id();
         case FrameTarget::GBufferEntityId:
             return m_gbuffer_entity_id.Id();
         case FrameTarget::GBufferDepth:
@@ -80,6 +132,8 @@ namespace hybrid::renderer
             return m_scene_framebuffer.Id();
         case FrameFramebuffer::GBuffer:
             return m_gbuffer_framebuffer.Id();
+        case FrameFramebuffer::DebugChannelExtract:
+            return m_debug_channel_extract_framebuffer.Id();
         default:
             return 0;
         }
@@ -253,6 +307,76 @@ namespace hybrid::renderer
         if (!complete)
         {
             LOG_ERROR("[FrameResources] GBuffer framebuffer is incomplete");
+            return false;
+        }
+
+        return true;
+    }
+
+    bool FrameResources::AllocateDebugChannelTargets(const RenderExtent &extent)
+    {
+        if (!extent.IsValid())
+        {
+            return false;
+        }
+
+        if (!m_debug_channel_extract_framebuffer.IsValid() && !m_debug_channel_extract_framebuffer.Create())
+        {
+            LOG_ERROR("[FrameResources] Failed to create debug channel extract framebuffer");
+            return false;
+        }
+
+        auto allocate_debug_texture = [extent](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {}", label);
+                return false;
+            }
+
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA8,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               GL_RGBA,
+                               GL_UNSIGNED_BYTE,
+                               nullptr);
+            return true;
+        };
+
+        if (!allocate_debug_texture(m_scene_color_rgb, "scene color RGB preview texture") ||
+            !allocate_debug_texture(m_scene_color_r, "scene color R channel texture") ||
+            !allocate_debug_texture(m_scene_color_g, "scene color G channel texture") ||
+            !allocate_debug_texture(m_scene_color_b, "scene color B channel texture") ||
+            !allocate_debug_texture(m_scene_color_a, "scene color A channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt0_rgb, "gbuffer rt0 RGB preview texture") ||
+            !allocate_debug_texture(m_gbuffer_rt0_r, "gbuffer rt0 R channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt0_g, "gbuffer rt0 G channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt0_b, "gbuffer rt0 B channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt0_a, "gbuffer rt0 A channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt1_rgb, "gbuffer rt1 RGB preview texture") ||
+            !allocate_debug_texture(m_gbuffer_rt1_r, "gbuffer rt1 R channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt1_g, "gbuffer rt1 G channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt1_b, "gbuffer rt1 B channel texture") ||
+            !allocate_debug_texture(m_gbuffer_rt1_a, "gbuffer rt1 A channel texture"))
+        {
+            return false;
+        }
+
+        m_debug_channel_extract_framebuffer.Bind(GL_FRAMEBUFFER);
+        m_debug_channel_extract_framebuffer.AttachTexture2D(GL_COLOR_ATTACHMENT0, m_scene_color_r);
+        m_debug_channel_extract_framebuffer.SetDrawBuffers({GL_COLOR_ATTACHMENT0});
+        const bool complete = m_debug_channel_extract_framebuffer.CheckComplete(GL_FRAMEBUFFER);
+        GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+
+        if (!complete)
+        {
+            LOG_ERROR("[FrameResources] Debug channel extract framebuffer is incomplete");
             return false;
         }
 

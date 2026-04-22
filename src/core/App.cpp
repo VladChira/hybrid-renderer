@@ -84,7 +84,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/sponza_low/Sponza.gltf");
+        RequestSceneLoad("scenes/helmet/DamagedHelmet.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -224,9 +224,25 @@ namespace hybrid::core
                 HYBRID_PROFILE_ZONE_N("App::BuildUiState");
                 ui_state.scene_world = active_scene_world;
                 ui_state.viewport_color_texture = renderer_outputs.color;
+                ui_state.viewport_color_channels.rgb = renderer_outputs.color_channels.rgb;
+                ui_state.viewport_color_channels.r = renderer_outputs.color_channels.r;
+                ui_state.viewport_color_channels.g = renderer_outputs.color_channels.g;
+                ui_state.viewport_color_channels.b = renderer_outputs.color_channels.b;
+                ui_state.viewport_color_channels.a = renderer_outputs.color_channels.a;
                 ui_state.viewport_gbuffer_rt0_texture = renderer_outputs.gbuffer_rt0;
+                ui_state.viewport_gbuffer_rt0_channels.rgb = renderer_outputs.gbuffer_rt0_channels.rgb;
+                ui_state.viewport_gbuffer_rt0_channels.r = renderer_outputs.gbuffer_rt0_channels.r;
+                ui_state.viewport_gbuffer_rt0_channels.g = renderer_outputs.gbuffer_rt0_channels.g;
+                ui_state.viewport_gbuffer_rt0_channels.b = renderer_outputs.gbuffer_rt0_channels.b;
+                ui_state.viewport_gbuffer_rt0_channels.a = renderer_outputs.gbuffer_rt0_channels.a;
                 ui_state.viewport_gbuffer_rt1_texture = renderer_outputs.gbuffer_rt1;
+                ui_state.viewport_gbuffer_rt1_channels.rgb = renderer_outputs.gbuffer_rt1_channels.rgb;
+                ui_state.viewport_gbuffer_rt1_channels.r = renderer_outputs.gbuffer_rt1_channels.r;
+                ui_state.viewport_gbuffer_rt1_channels.g = renderer_outputs.gbuffer_rt1_channels.g;
+                ui_state.viewport_gbuffer_rt1_channels.b = renderer_outputs.gbuffer_rt1_channels.b;
+                ui_state.viewport_gbuffer_rt1_channels.a = renderer_outputs.gbuffer_rt1_channels.a;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
+                ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
                 ui_state.viewport_render_extent = frame_context.render_extent;
                 ui_state.viewport_render_view = resolved_view;
                 ui_state.viewport_render_view_valid = resolved_view_valid;
