@@ -103,10 +103,12 @@ namespace hybrid::renderer
         uint64_t instance_id = 0;
         glm::vec3 position{0.0f};
         glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        glm::vec3 right{1.0f, 0.0f, 0.0f};
         glm::vec2 size{1.0f, 1.0f};
         glm::vec3 color{1.0f};
         float intensity = 1.0f;
         bool two_sided = false;
+        bool visible = true;
         bool cast_shadows = true;
     };
 

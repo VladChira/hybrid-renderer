@@ -16,6 +16,7 @@ namespace hybrid::renderer
     {
         // The directional light's direction is derived from its local transform.
         const glm::vec3 kDirectionalLightLocalAxis = glm::vec3(0.0f, -1.0f, 0.0f);
+        const glm::vec3 kAreaLightLocalRightAxis = glm::vec3(1.0f, 0.0f, 0.0f);
 
         enum class InstanceBucket
         {
@@ -370,10 +371,12 @@ namespace hybrid::renderer
             light.instance_id = static_cast<uint64_t>(entt::to_integral(entity));
             light.position = TransformPoint(transform.world, glm::vec3(0.0f));
             light.direction = TransformDirection(transform.world, area.direction);
+            light.right = TransformDirection(transform.world, kAreaLightLocalRightAxis);
             light.size = area.size;
             light.color = common.color;
             light.intensity = common.intensity;
             light.two_sided = area.two_sided;
+            light.visible = area.visible;
             light.cast_shadows = common.cast_shadows;
 
             const auto it = impl.area_light_records.find(key);
@@ -684,10 +687,12 @@ namespace hybrid::renderer
             light.instance_id = static_cast<uint64_t>(entt::to_integral(entity));
             light.position = TransformPoint(transform.world, glm::vec3(0.0f));
             light.direction = TransformDirection(transform.world, area.direction);
+            light.right = TransformDirection(transform.world, kAreaLightLocalRightAxis);
             light.size = area.size;
             light.color = common.color;
             light.intensity = common.intensity;
             light.two_sided = area.two_sided;
+            light.visible = area.visible;
             light.cast_shadows = common.cast_shadows;
             frame_data.area_lights.push_back(light);
         }

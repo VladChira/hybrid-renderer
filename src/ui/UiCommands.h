@@ -89,6 +89,7 @@ namespace hybrid::ui
         glm::vec2 size{1.0f, 1.0f};
         glm::vec3 direction{0.0f, -1.0f, 0.0f};
         bool two_sided = false;
+        bool visible = true;
     };
 
     struct EditHdriLightCommand

@@ -15,6 +15,7 @@
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
+#include "renderer/passes/AreaLightVisualizationPass.h"
 #include "renderer/passes/RenderTargetChannelsPass.h"
 
 #include <chrono>
@@ -66,6 +67,7 @@ namespace hybrid::renderer
         GLShaderProgram prefilter_hdri_shader{};
         GLShaderProgram brdf_lut_shader{};
         GLShaderProgram extract_channel_shader{};
+        GLShaderProgram area_light_visualization_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -75,6 +77,7 @@ namespace hybrid::renderer
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
+        std::unique_ptr<AreaLightVisualizationPass> area_light_visualization_pass{};
         std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
         SceneFrameCache scene_frame_cache{};
 
@@ -185,6 +188,14 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileProgramFromFiles("area_light_visualization.vert",
+                                                            "area_light_visualization.frag",
+                                                            m_impl->area_light_visualization_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: area-light visualization shader program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -211,11 +222,13 @@ namespace hybrid::renderer
                                                                              &m_impl->convolute_hdri_shader,
                                                                              &m_impl->prefilter_hdri_shader,
                                                                              &m_impl->brdf_lut_shader);
+        m_impl->area_light_visualization_pass = std::make_unique<AreaLightVisualizationPass>(&m_impl->area_light_visualization_shader);
         m_impl->render_target_channels_pass = std::make_unique<RenderTargetChannelsPass>(&m_impl->extract_channel_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Fullscreen]");
+        LOG_INFO("[Renderer] \t - Area Light Visualization Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Fullscreen]");
 
         if (m_impl->current_extent.IsValid())
@@ -246,6 +259,7 @@ namespace hybrid::renderer
         m_impl->gbuffer_pass.reset();
         m_impl->deferred_lighting_pass.reset();
         m_impl->hdri_precompute_pass.reset();
+        m_impl->area_light_visualization_pass.reset();
         m_impl->render_target_channels_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
@@ -257,6 +271,7 @@ namespace hybrid::renderer
         m_impl->prefilter_hdri_shader.Destroy();
         m_impl->brdf_lut_shader.Destroy();
         m_impl->extract_channel_shader.Destroy();
+        m_impl->area_light_visualization_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
@@ -461,6 +476,21 @@ namespace hybrid::renderer
             {
                 m_impl->outputs.color = deferred_output.color;
                 m_impl->outputs.depth = deferred_output.depth;
+            }
+        }
+
+        if (m_impl->area_light_visualization_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::AreaLightVisualizationPass");
+            AreaLightVisualizationPassInput area_light_visualization_input{};
+            area_light_visualization_input.settings = &m_impl->submitted_settings;
+            area_light_visualization_input.scene_data = &m_impl->scene_data;
+            area_light_visualization_input.effective_view = &m_impl->effective_view;
+            area_light_visualization_input.scene_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::Scene);
+            area_light_visualization_input.gbuffer_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::GBuffer);
+            if (!m_impl->area_light_visualization_pass->Execute(area_light_visualization_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->area_light_visualization_pass->Name());
             }
         }
 
