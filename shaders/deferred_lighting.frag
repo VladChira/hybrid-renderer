@@ -179,15 +179,22 @@ void BuildOrthonormalBasis(vec3 n, out vec3 tangent, out vec3 bitangent)
     bitangent = normalize(cross(n, tangent));
 }
 
-vec3 ShadeCookTorrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float roughness, vec3 F0)
+vec3 EvaluateCookTorranceBRDF(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness, vec3 F0)
 {
     float ndotv = max(dot(N, V), 0.0);
     float ndotl = max(dot(N, L), 0.0);
-    if (ndotl <= 0.0)
+    if (ndotl <= 0.0 || ndotv <= 0.0)
     {
         return vec3(0.0);
     }
-    vec3 H = normalize(V + L);
+
+    vec3 half_vector = V + L;
+    float half_vector_length_sq = dot(half_vector, half_vector);
+    if (half_vector_length_sq <= 1e-8)
+    {
+        return vec3(0.0);
+    }
+    vec3 H = half_vector * inversesqrt(half_vector_length_sq);
     vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
     float D = DistributionGGX(N, H, roughness);
     float G = GeometrySmith(N, V, L, roughness);
@@ -197,7 +204,178 @@ vec3 ShadeCookTorrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float
     vec3 kS = F;
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     vec3 diffuse = kD * albedo / PI;
-    return (diffuse + specular) * radiance * ndotl;
+    return diffuse + specular;
+}
+
+vec3 ShadeCookTorrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float roughness, vec3 F0)
+{
+    float ndotl = max(dot(N, L), 0.0);
+    if (ndotl <= 0.0)
+    {
+        return vec3(0.0);
+    }
+    vec3 brdf = EvaluateCookTorranceBRDF(N, V, L, albedo, metallic, roughness, F0);
+    return brdf * radiance * ndotl;
+}
+
+float Hash1(vec2 p)
+{
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+vec2 Hash2(vec2 p)
+{
+    return vec2(Hash1(p), Hash1(p + vec2(269.5, 183.3)));
+}
+
+vec2 QuasiRandom2D(uint sample_index, vec2 seed)
+{
+    return fract(seed + vec2(0.7548776662466927, 0.5698402909980532) * float(sample_index + 1u));
+}
+
+vec3 SampleCosineHemisphere(vec2 xi, vec3 N)
+{
+    float phi = 2.0 * PI * xi.x;
+    float radius = sqrt(xi.y);
+    float x = radius * cos(phi);
+    float y = radius * sin(phi);
+    float z = sqrt(max(1.0 - xi.y, 0.0));
+
+    vec3 tangent = vec3(0.0);
+    vec3 bitangent = vec3(0.0);
+    BuildOrthonormalBasis(N, tangent, bitangent);
+    return normalize(tangent * x + bitangent * y + N * z);
+}
+
+vec3 SampleGGXSpecular(vec2 xi, vec3 N, vec3 V, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float phi = 2.0 * PI * xi.x;
+    float cos_theta = sqrt(max((1.0 - xi.y) / max(1.0 + (a2 - 1.0) * xi.y, 1e-5), 0.0));
+    float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+
+    vec3 tangent = vec3(0.0);
+    vec3 bitangent = vec3(0.0);
+    BuildOrthonormalBasis(N, tangent, bitangent);
+    vec3 H = normalize(tangent * (cos(phi) * sin_theta) +
+                       bitangent * (sin(phi) * sin_theta) +
+                       N * cos_theta);
+    return normalize(reflect(-V, H));
+}
+
+float PdfGGXSpecular(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    float ndotl = max(dot(N, L), 0.0);
+    if (ndotl <= 0.0)
+    {
+        return 0.0;
+    }
+
+    vec3 half_vector = V + L;
+    float half_vector_length_sq = dot(half_vector, half_vector);
+    if (half_vector_length_sq <= 1e-8)
+    {
+        return 0.0;
+    }
+    vec3 H = half_vector * inversesqrt(half_vector_length_sq);
+    float ndoth = max(dot(N, H), 0.0);
+    float vdoth = max(dot(V, H), 0.0);
+    if (ndoth <= 0.0 || vdoth <= 0.0)
+    {
+        return 0.0;
+    }
+
+    float D = DistributionGGX(N, H, roughness);
+    float pdf_h = D * ndoth;
+    return pdf_h / max(4.0 * vdoth, 1e-5);
+}
+
+float PdfCosineHemisphere(vec3 N, vec3 L)
+{
+    float ndotl = max(dot(N, L), 0.0);
+    return ndotl / PI;
+}
+
+float PdfBrdfMixture(vec3 N, vec3 V, vec3 L, float roughness, float specular_probability)
+{
+    float diffuse_probability = 1.0 - specular_probability;
+    float diffuse_pdf = PdfCosineHemisphere(N, L);
+    float specular_pdf = PdfGGXSpecular(N, V, L, roughness);
+    return diffuse_probability * diffuse_pdf + specular_probability * specular_pdf;
+}
+
+vec3 SampleBrdfMixture(float selector,
+                       vec2 sample_xi,
+                       vec3 N,
+                       vec3 V,
+                       float roughness,
+                       float specular_probability)
+{
+    if (selector < specular_probability)
+    {
+        return SampleGGXSpecular(sample_xi, N, V, roughness);
+    }
+
+    return SampleCosineHemisphere(sample_xi, N);
+}
+
+float PowerHeuristic(float pdf_a, float pdf_b)
+{
+    float a2 = pdf_a * pdf_a;
+    float b2 = pdf_b * pdf_b;
+    return a2 / max(a2 + b2, 1e-5);
+}
+
+bool IntersectAreaLightRect(vec3 ray_origin,
+                            vec3 ray_direction,
+                            vec3 light_position,
+                            vec3 light_normal,
+                            vec3 light_tangent,
+                            vec3 light_bitangent,
+                            vec2 half_size,
+                            bool two_sided,
+                            out float distance_squared,
+                            out float emitter_cos)
+{
+    float denominator = dot(ray_direction, light_normal);
+    if (abs(denominator) <= 1e-5)
+    {
+        return false;
+    }
+
+    float t = dot(light_position - ray_origin, light_normal) / denominator;
+    if (t <= 1e-5)
+    {
+        return false;
+    }
+
+    vec3 hit = ray_origin + ray_direction * t;
+    vec3 local = hit - light_position;
+    float local_x = dot(local, light_tangent);
+    float local_y = dot(local, light_bitangent);
+    if (abs(local_x) > half_size.x || abs(local_y) > half_size.y)
+    {
+        return false;
+    }
+
+    emitter_cos = dot(light_normal, -ray_direction);
+    if (two_sided)
+    {
+        emitter_cos = abs(emitter_cos);
+    }
+    else
+    {
+        emitter_cos = max(emitter_cos, 0.0);
+    }
+
+    if (emitter_cos <= 0.0)
+    {
+        return false;
+    }
+
+    distance_squared = t * t;
+    return true;
 }
 
 void main()
@@ -274,9 +452,10 @@ void main()
         Lo += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
     }
 
-    const int kAreaLightSampleGridSize = 8;
-    const float kAreaLightSampleGridSizeF = float(kAreaLightSampleGridSize);
-    const float kAreaLightSampleCount = kAreaLightSampleGridSizeF * kAreaLightSampleGridSizeF;
+    const int kAreaLightMisSampleCount = 2;
+    const float kAreaLightMisSampleCountF = float(kAreaLightMisSampleCount);
+    float specular_probability = clamp(0.25 + 0.5 * metallic + 0.25 * (1.0 - roughness), 0.1, 0.9);
+
     for (uint area_index = 0u; area_index < u_area_light_count; ++area_index)
     {
         GpuAreaLight light = area_lights[area_index];
@@ -294,55 +473,91 @@ void main()
 
         vec2 half_size = clamped_size * 0.5;
         float light_area = clamped_size.x * clamped_size.y;
+        vec3 emitted_radiance = light_color * max(intensity, 0.0);
+
+        vec2 base_seed = Hash2(v_uv * vec2(4096.0, 2048.0) +
+                               vec2(float(area_index) * 17.0, float(area_index) * 97.0));
 
         vec3 accumulated = vec3(0.0);
-        for (int sample_y = 0; sample_y < kAreaLightSampleGridSize; ++sample_y)
+        for (int sample_index = 0; sample_index < kAreaLightMisSampleCount; ++sample_index)
         {
-            for (int sample_x = 0; sample_x < kAreaLightSampleGridSize; ++sample_x)
+            uint sample_u = uint(sample_index);
+
+            // Strategy A: sample the light surface, convert to solid-angle pdf, and MIS against BRDF pdf.
             {
-                vec2 uv = (vec2(sample_x, sample_y) + vec2(0.5)) / kAreaLightSampleGridSizeF;
-                vec2 rect = (uv - 0.5) * 2.0;
-                vec3 sample_position =
-                    light_position +
-                    light_tangent * (rect.x * half_size.x) +
-                    light_bitangent * (rect.y * half_size.y);
+                vec2 xi_light = QuasiRandom2D(sample_u * 4u, base_seed + vec2(0.11, 0.37));
+                vec2 rect = (xi_light - 0.5) * 2.0;
+                vec3 sampled_position = light_position +
+                                        light_tangent * (rect.x * half_size.x) +
+                                        light_bitangent * (rect.y * half_size.y);
 
-                vec3 light_vector = sample_position - world_position;
-                float light_distance = length(light_vector);
-                if (light_distance <= 1e-5)
+                vec3 light_vector = sampled_position - world_position;
+                float distance_squared = dot(light_vector, light_vector);
+                if (distance_squared > 1e-8)
                 {
-                    continue;
-                }
+                    float light_distance = sqrt(distance_squared);
+                    vec3 L = light_vector / light_distance;
+                    float ndotl = max(dot(normal, L), 0.0);
+                    if (ndotl > 0.0)
+                    {
+                        float emitter_cos = dot(light_normal, -L);
+                        if (two_sided)
+                        {
+                            emitter_cos = abs(emitter_cos);
+                        }
+                        else
+                        {
+                            emitter_cos = max(emitter_cos, 0.0);
+                        }
 
-                vec3 L = light_vector / light_distance;
-                float emitter_cos = dot(light_normal, -L);
-                if (two_sided)
+                        if (emitter_cos > 0.0)
+                        {
+                            float light_pdf = distance_squared / max(emitter_cos * light_area, 1e-5);
+                            float brdf_pdf = PdfBrdfMixture(normal, V, L, roughness, specular_probability);
+                            float mis_weight = PowerHeuristic(light_pdf, brdf_pdf);
+                            vec3 brdf = EvaluateCookTorranceBRDF(normal, V, L, albedo, metallic, roughness, F0);
+                            accumulated += brdf * emitted_radiance * ndotl * mis_weight / max(light_pdf, 1e-5);
+                        }
+                    }
+                }
+            }
+
+            // Strategy B: sample BRDF, test if the sampled direction hits the area light, then MIS against light pdf.
+            {
+                vec2 xi_selector = QuasiRandom2D(sample_u * 4u + 1u, base_seed + vec2(0.53, 0.19));
+                vec2 xi_brdf = QuasiRandom2D(sample_u * 4u + 2u, base_seed + vec2(0.71, 0.89));
+                vec3 L = SampleBrdfMixture(xi_selector.x, xi_brdf, normal, V, roughness, specular_probability);
+                float ndotl = max(dot(normal, L), 0.0);
+                if (ndotl > 0.0)
                 {
-                    emitter_cos = abs(emitter_cos);
+                    float brdf_pdf = PdfBrdfMixture(normal, V, L, roughness, specular_probability);
+                    if (brdf_pdf > 0.0)
+                    {
+                        float distance_squared = 0.0;
+                        float emitter_cos = 0.0;
+                        bool hit = IntersectAreaLightRect(world_position,
+                                                          L,
+                                                          light_position,
+                                                          light_normal,
+                                                          light_tangent,
+                                                          light_bitangent,
+                                                          half_size,
+                                                          two_sided,
+                                                          distance_squared,
+                                                          emitter_cos);
+                        if (hit)
+                        {
+                            float light_pdf = distance_squared / max(emitter_cos * light_area, 1e-5);
+                            float mis_weight = PowerHeuristic(brdf_pdf, light_pdf);
+                            vec3 brdf = EvaluateCookTorranceBRDF(normal, V, L, albedo, metallic, roughness, F0);
+                            accumulated += brdf * emitted_radiance * ndotl * mis_weight / max(brdf_pdf, 1e-5);
+                        }
+                    }
                 }
-                else
-                {
-                    emitter_cos = max(emitter_cos, 0.0);
-                }
-
-                if (emitter_cos <= 0.0)
-                {
-                    continue;
-                }
-
-                float attenuation = 1.0 / max(light_distance * light_distance, 1e-4);
-                vec3 radiance =
-                    light_color *
-                    max(intensity, 0.0) *
-                    light_area *
-                    emitter_cos *
-                    attenuation;
-
-                accumulated += ShadeCookTorrance(normal, V, L, radiance, albedo, metallic, roughness, F0);
             }
         }
 
-        Lo += accumulated / kAreaLightSampleCount;
+        Lo += accumulated / kAreaLightMisSampleCountF;
     }
 
     vec3 ambient = vec3(0.0);
