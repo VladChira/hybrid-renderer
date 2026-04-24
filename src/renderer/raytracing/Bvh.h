@@ -29,7 +29,7 @@ namespace hybrid::renderer::raytracing
     inline uint32_t LeafFirst(const BvhNode &n) { return static_cast<uint32_t>(n.left_or_first); }
     inline uint32_t LeafCount(const BvhNode &n) { return static_cast<uint32_t>(-n.right_or_count); }
 
-    enum class BvhBuildStrategyKind : uint8_t
+    enum class BvhSplitStrategyKind : uint8_t
     {
         MiddleSplit,
         Sah
@@ -37,7 +37,7 @@ namespace hybrid::renderer::raytracing
 
     struct BvhBuildStats
     {
-        BvhBuildStrategyKind strategy = BvhBuildStrategyKind::MiddleSplit;
+        BvhSplitStrategyKind split_strategy = BvhSplitStrategyKind::MiddleSplit;
         uint32_t node_count      = 0;
         uint32_t leaf_count      = 0;
         uint32_t max_depth       = 0;

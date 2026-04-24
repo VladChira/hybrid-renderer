@@ -1,66 +1,68 @@
 #include "renderer/raytracing/BvhBuilder.h"
-#include "renderer/raytracing/MiddleSplitBvhBuildStrategy.h"
-#include "renderer/raytracing/SahBvhBuildStrategy.h"
+#include "renderer/raytracing/MiddleSplitStrategy.h"
+#include "renderer/raytracing/SahSplitStrategy.h"
 
 #include <memory>
 
 namespace hybrid::renderer::raytracing
 {
 
-    const IBvhBuildStrategy &GetBvhBuildStrategy(BvhBuildStrategyKind kind)
+    const IBvhSplitStrategy &GetBvhSplitStrategy(BvhSplitStrategyKind kind)
     {
-        static const MiddleSplitBvhBuildStrategy middle_split_strategy{};
-        static const SahBvhBuildStrategy sah_strategy{};
+        static const MiddleSplitStrategy middle_split_strategy{};
+        static const SahSplitStrategy sah_strategy{};
 
         switch (kind)
         {
-        case BvhBuildStrategyKind::MiddleSplit:
+        case BvhSplitStrategyKind::MiddleSplit:
             return middle_split_strategy;
-        case BvhBuildStrategyKind::Sah:
+        case BvhSplitStrategyKind::Sah:
             return sah_strategy;
         default:
             return middle_split_strategy;
         }
     }
 
-    std::unique_ptr<IBvhBuildStrategy> CreateBvhBuildStrategy(BvhBuildStrategyKind kind)
+    std::unique_ptr<IBvhSplitStrategy> CreateBvhSplitStrategy(BvhSplitStrategyKind kind)
     {
         switch (kind)
         {
-        case BvhBuildStrategyKind::MiddleSplit:
-            return std::make_unique<MiddleSplitBvhBuildStrategy>();
-        case BvhBuildStrategyKind::Sah:
-            return std::make_unique<SahBvhBuildStrategy>();
+        case BvhSplitStrategyKind::MiddleSplit:
+            return std::make_unique<MiddleSplitStrategy>();
+        case BvhSplitStrategyKind::Sah:
+            return std::make_unique<SahSplitStrategy>();
         default:
-            return std::make_unique<MiddleSplitBvhBuildStrategy>();
+            return std::make_unique<MiddleSplitStrategy>();
         }
     }
 
     BvhBuildResult BuildBvh(const std::vector<BvhInput> &inputs,
                             const BvhBuildConfig &config,
-                            const IBvhBuildStrategy *strategy_override)
+                            const IBvhSplitStrategy *split_strategy_override)
     {
-        const IBvhBuildStrategy &strategy = strategy_override != nullptr
-                                                ? *strategy_override
-                                                : GetBvhBuildStrategy(config.strategy);
+        const IBvhSplitStrategy &split_strategy = split_strategy_override != nullptr
+                                                      ? *split_strategy_override
+                                                      : GetBvhSplitStrategy(config.split_strategy);
 
-        BvhBuildResult result = strategy.Build(inputs, config);
-        result.stats.strategy = strategy.Kind();
+        (void)inputs;
+
+        BvhBuildResult result{};
+        result.stats.split_strategy = split_strategy.Kind();
         return result;
     }
 
     Blas BuildBlas(const core::scene::MeshPrimitive &primitive,
                    const BvhBuildConfig &config,
-                   const IBvhBuildStrategy *strategy_override)
+                   const IBvhSplitStrategy *split_strategy_override)
     {
         (void)primitive;
 
-        const IBvhBuildStrategy &strategy = strategy_override != nullptr
-                                                ? *strategy_override
-                                                : GetBvhBuildStrategy(config.strategy);
+        const IBvhSplitStrategy &split_strategy = split_strategy_override != nullptr
+                                                      ? *split_strategy_override
+                                                      : GetBvhSplitStrategy(config.split_strategy);
 
         Blas out{};
-        out.stats.strategy = strategy.Kind();
+        out.stats.split_strategy = split_strategy.Kind();
         return out;
     }
 
