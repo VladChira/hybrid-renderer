@@ -39,6 +39,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!AllocateRaytraceTargets(m_extent))
+        {
+            m_valid = false;
+            return false;
+        }
+
+
         m_valid = true;
         return true;
     }
@@ -68,6 +75,7 @@ namespace hybrid::renderer
         m_gbuffer_rt1_g.Destroy();
         m_gbuffer_rt1_b.Destroy();
         m_gbuffer_rt1_a.Destroy();
+        m_raytrace_heatmap.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -119,6 +127,8 @@ namespace hybrid::renderer
             return m_gbuffer_entity_id.Id();
         case FrameTarget::GBufferDepth:
             return m_gbuffer_depth.Id();
+        case FrameTarget::RaytraceHeatmap:
+            return m_raytrace_heatmap.Id();
         default:
             return 0;
         }
@@ -382,5 +392,34 @@ namespace hybrid::renderer
 
         return true;
     }
+
+     bool FrameResources::AllocateRaytraceTargets(const RenderExtent &extent)
+    {
+        if (!extent.IsValid())
+        {
+            return false;
+        }
+
+        if (!m_raytrace_heatmap.IsValid() && !m_raytrace_heatmap.Create(GL_TEXTURE_2D))
+        {
+            LOG_ERROR("[FrameResources] Failed to create raytrace heatmap texture");
+            return false;
+        }
+
+        m_raytrace_heatmap.Bind();
+        m_raytrace_heatmap.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        m_raytrace_heatmap.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_raytrace_heatmap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_raytrace_heatmap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_raytrace_heatmap.SetImage2D(0,
+                                      GL_RGBA8,
+                                      static_cast<GLsizei>(extent.width),
+                                      static_cast<GLsizei>(extent.height),
+                                      GL_RGBA,
+                                      GL_UNSIGNED_BYTE,
+                                      nullptr);
+        return true;
+    }
+
 
 } // namespace hybrid::renderer

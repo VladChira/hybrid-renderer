@@ -197,6 +197,13 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/opengl/GLShaderProgram.cpp
   src/renderer/opengl/GLVertexArray.cpp
 
+  src/renderer/raytracing/BvhBuilder.cpp
+  src/renderer/raytracing/MiddleSplitStrategy.cpp
+  src/renderer/raytracing/SahSplitStrategy.cpp
+  src/renderer/raytracing/AccelerationStructureCache.cpp
+  src/renderer/passes/TraversalHeatmapPass.cpp
+  src/ui/panels/AccelerationStructurePanel.cpp
+
   src/utils/PathUtils.cpp
   src/utils/Banner.cpp
 )

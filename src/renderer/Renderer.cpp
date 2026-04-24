@@ -11,12 +11,14 @@
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/ShaderManager.h"
 #include "renderer/opengl/GLShaderProgram.h"
+#include "renderer/raytracing/AccelerationStructureCache.h"
 
 #include "renderer/passes/DeferredLightingPass.h"
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
 #include "renderer/passes/AreaLightVisualizationPass.h"
 #include "renderer/passes/RenderTargetChannelsPass.h"
+#include "renderer/passes/TraversalHeatmapPass.h"
 
 #include <chrono>
 
@@ -50,6 +52,7 @@ namespace hybrid::renderer
             outputs.gbuffer_rt1_channels.g = resources.Get(FrameTarget::GBufferRt1G);
             outputs.gbuffer_rt1_channels.b = resources.Get(FrameTarget::GBufferRt1B);
             outputs.gbuffer_rt1_channels.a = resources.Get(FrameTarget::GBufferRt1A);
+            outputs.raytrace_heatmap = resources.Get(FrameTarget::RaytraceHeatmap);
             return outputs;
         }
     } // namespace
@@ -68,17 +71,20 @@ namespace hybrid::renderer
         GLShaderProgram brdf_lut_shader{};
         GLShaderProgram extract_channel_shader{};
         GLShaderProgram area_light_visualization_shader{};
+        GLShaderProgram traversal_heatmap_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
         MaterialStore material_store{};
         LightStore light_store{};
+        raytracing::AccelerationStructureCache as_cache{};
 
         std::unique_ptr<GBufferPass> gbuffer_pass{};
         std::unique_ptr<DeferredLightingPass> deferred_lighting_pass{};
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
         std::unique_ptr<AreaLightVisualizationPass> area_light_visualization_pass{};
         std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
+        std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -196,6 +202,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/traversal_heatmap.comp",
+                                                                   m_impl->traversal_heatmap_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: traversal heatmap compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -212,6 +225,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->as_cache.Init())
+        {
+            LOG_ERROR("[Renderer] Init failed: acceleration structure cache initialization failed");
+            return false;
+        }
+
+
 
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader,
                                                              &m_impl->geometry_store,
@@ -224,12 +244,17 @@ namespace hybrid::renderer
                                                                              &m_impl->brdf_lut_shader);
         m_impl->area_light_visualization_pass = std::make_unique<AreaLightVisualizationPass>(&m_impl->area_light_visualization_shader);
         m_impl->render_target_channels_pass = std::make_unique<RenderTargetChannelsPass>(&m_impl->extract_channel_shader);
+        m_impl->traversal_heatmap_pass = std::make_unique<TraversalHeatmapPass>(&m_impl->traversal_heatmap_shader,
+                                                                                  &m_impl->geometry_store,
+                                                                                  &m_impl->as_cache);
 
         LOG_INFO("[Renderer] Current rendering passes:");
+        LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - GBuffer Pass [OpenGL Raster]");
-        LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Fullscreen]");
+        LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Area Light Visualization Pass [OpenGL Raster]");
-        LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Fullscreen]");
+        LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Raster]");
+        LOG_INFO("[Renderer] \t - Ray tracing heatmap visualization [OpenGL Compute Shader]");
 
         if (m_impl->current_extent.IsValid())
         {
@@ -263,6 +288,7 @@ namespace hybrid::renderer
         m_impl->render_target_channels_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
+        m_impl->as_cache.Clear();
         m_impl->light_store.Clear();
         m_impl->gbuffer_shader.Destroy();
         m_impl->deferred_lighting_shader.Destroy();
@@ -272,7 +298,9 @@ namespace hybrid::renderer
         m_impl->brdf_lut_shader.Destroy();
         m_impl->extract_channel_shader.Destroy();
         m_impl->area_light_visualization_shader.Destroy();
+        m_impl->traversal_heatmap_shader.Destroy();
         m_impl->frame_resources.Reset();
+        m_impl->traversal_heatmap_pass.reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -431,6 +459,29 @@ namespace hybrid::renderer
             }
         }
 
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
+            m_impl->as_cache.SyncBlas(m_impl->scene_data, m_impl->geometry_store);
+            m_impl->as_cache.SyncTlas(m_impl->scene_data, m_impl->geometry_store);
+            // Primitive descriptors may have been patched with BLAS offsets —
+            // re-sync so the SSBO reflects those fields for the ray pass.
+            m_impl->geometry_store.Sync();
+            m_impl->as_cache.Upload();
+        }
+
+        if (m_impl->traversal_heatmap_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::TraversalHeatmapPass");
+            TraversalHeatmapPassInput heatmap_input{};
+            heatmap_input.settings = &m_impl->submitted_settings;
+            heatmap_input.effective_view = &m_impl->effective_view;
+            heatmap_input.heatmap_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceHeatmap);
+            if (!m_impl->traversal_heatmap_pass->Execute(heatmap_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->traversal_heatmap_pass->Name());
+            }
+        }
+
         // Precompute any new/stale HDRIs here before we shade.
         HdriPrecomputePassOutput hdri_output{};
         if (m_impl->hdri_precompute_pass)
@@ -525,5 +576,11 @@ namespace hybrid::renderer
     {
         return m_impl->stats;
     }
+
+    const raytracing::AccelerationStructureStats *Renderer::GetAccelerationStructureStats() const
+    {
+        return &m_impl->as_cache.Stats();
+    }
+
 
 } // namespace hybrid::renderer

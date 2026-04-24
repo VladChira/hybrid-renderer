@@ -5,9 +5,13 @@
 
 #include <memory>
 
+namespace hybrid::renderer::raytracing
+{
+    struct AccelerationStructureStats;
+}
+
 namespace hybrid::renderer
 {
-
     class Renderer
     {
     public:
@@ -33,6 +37,10 @@ namespace hybrid::renderer
         RendererOutputs EndFrame();
 
         const RendererStats &GetStats() const;
+
+        // Pointer to the live acceleration-structure stats block owned by the
+        // renderer. Valid for the renderer's lifetime.
+        const raytracing::AccelerationStructureStats *GetAccelerationStructureStats() const;
 
     private:
         std::unique_ptr<Impl> m_impl;

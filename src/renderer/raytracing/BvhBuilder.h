@@ -17,7 +17,6 @@ namespace hybrid::renderer::raytracing
         BvhSplitStrategyKind split_strategy = BvhSplitStrategyKind::MiddleSplit;
         uint32_t max_leaf_primitives = 4;
         uint32_t max_depth           = 64;
-        uint32_t sah_bucket_count    = 16;
     };
 
     // Input record for the generic builder. `payload_index` is the caller's
@@ -55,6 +54,14 @@ namespace hybrid::renderer::raytracing
         bool     valid          = false;
         uint32_t axis           = 0;      // 0=x, 1=y, 2=z
         float    split_position = 0.0f;   // world-space along `axis`
+    };
+
+    struct BuildWorkItem
+    {
+        uint32_t begin;
+        uint32_t end;        // exclusive
+        uint32_t node_index;
+        uint32_t depth;
     };
 
     class IBvhSplitStrategy

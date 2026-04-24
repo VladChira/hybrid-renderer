@@ -13,6 +13,8 @@
 #include "core/PerformanceTelemetry.h"
 #include "core/UiCommandProcessor.h"
 
+#include "ui/panels/AccelerationStructurePanel.h"
+
 #include "utils/Banner.h"
 
 #include <algorithm>
@@ -79,12 +81,18 @@ namespace hybrid::core
         }
         LOG_INFO("UI module started");
 
+        // Cross-module panels that depend on renderer internals.
+        // TODO: Don't call this here, bad!
+        ui.RegisterPanel(std::make_unique<ui::AccelerationStructurePanel>(
+                             renderer.GetAccelerationStructureStats()),
+                         ui::DockTarget::LeftBottom);
+
         LOG_INFO("Starting Asset Manager...");
         m_assets.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/sponza_low/Sponza.gltf");
+        RequestSceneLoad("scenes/helmet/DamagedHelmet.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
@@ -241,6 +249,7 @@ namespace hybrid::core
                 ui_state.viewport_gbuffer_rt1_channels.g = renderer_outputs.gbuffer_rt1_channels.g;
                 ui_state.viewport_gbuffer_rt1_channels.b = renderer_outputs.gbuffer_rt1_channels.b;
                 ui_state.viewport_gbuffer_rt1_channels.a = renderer_outputs.gbuffer_rt1_channels.a;
+                ui_state.viewport_raytrace_heatmap_texture = renderer_outputs.raytrace_heatmap;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
                 ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
                 ui_state.viewport_render_extent = frame_context.render_extent;
