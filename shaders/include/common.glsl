@@ -1,8 +1,6 @@
 #ifndef HYBRID_COMMON_GLSL
 #define HYBRID_COMMON_GLSL
 
-const int kRayStackDepth = 64;
-
 struct BvhNode
 {
     vec3  bmin;
