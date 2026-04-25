@@ -154,10 +154,10 @@ namespace hybrid::assets
             assets::AssetHandle<assets::ImageAsset> default_hdri{};
             if (assets != nullptr)
             {
-                default_hdri = assets->LoadHandle<assets::ImageAsset>("hdris/quattro_canti_2k.hdr");
+                default_hdri = assets->LoadHandle<assets::ImageAsset>("hdris/shanghai_bund_2k.hdr");
                 if (!default_hdri.IsValid())
                 {
-                    LOG_WARN("[AssimpSceneLoader] Failed to load default HDRI: hdris/quattro_canti_2k.hdr");
+                    LOG_WARN("[AssimpSceneLoader] Failed to load default HDRI");
                 }
             }
 

@@ -284,6 +284,7 @@ namespace hybrid::renderer
                  selected_light->instance_id,
                  source_texture_id);
 
+        const uint32_t env_cubemap_mip_levels = MaxMipLevelsForSize(bake_settings.env_cubemap_size);
         if (!cached.environment_cubemap.IsValid())
         {
             if (!cached.environment_cubemap.Create(GL_TEXTURE_CUBE_MAP))
@@ -294,14 +295,16 @@ namespace hybrid::renderer
 
             cached.environment_cubemap.Bind();
             glTexStorage2D(GL_TEXTURE_CUBE_MAP,
-                           1,
+                           static_cast<GLsizei>(env_cubemap_mip_levels),
                            GL_RGBA16F,
                            static_cast<GLsizei>(bake_settings.env_cubemap_size),
                            static_cast<GLsizei>(bake_settings.env_cubemap_size));
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             cached.environment_cubemap.SetParameter(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-            cached.environment_cubemap.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            cached.environment_cubemap.SetParameter(GL_TEXTURE_BASE_LEVEL, 0);
+            cached.environment_cubemap.SetParameter(GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(env_cubemap_mip_levels - 1u));
+            cached.environment_cubemap.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
             cached.environment_cubemap.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
             if (const GLenum allocation_error = glGetError(); allocation_error != GL_NO_ERROR)
@@ -379,9 +382,13 @@ namespace hybrid::renderer
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
 
+        cached.environment_cubemap.Bind();
+        cached.environment_cubemap.GenerateMipmap();
+
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
         GLTexture::Unbind(GL_TEXTURE_2D);
+        GLTexture::Unbind(GL_TEXTURE_CUBE_MAP);
         GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
         glDepthMask(GL_TRUE);
 
@@ -505,6 +512,8 @@ namespace hybrid::renderer
         m_prefilter_shader->Use();
         m_prefilter_shader->SetUniform1i("u_env_map", 0);
         m_prefilter_shader->SetUniformMat4("u_projection", capture_projection);
+        m_prefilter_shader->SetUniform1f("u_env_map_resolution", static_cast<float>(bake_settings.env_cubemap_size));
+        m_prefilter_shader->SetUniform1f("u_env_map_max_mip", static_cast<float>(env_cubemap_mip_levels - 1u));
         cached.environment_cubemap.BindToUnit(0);
         m_impl->cube_vao.Bind();
 

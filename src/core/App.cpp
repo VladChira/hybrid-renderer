@@ -92,7 +92,7 @@ namespace hybrid::core
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/helmet/DamagedHelmet.gltf");
+        RequestSceneLoad("scenes/coffee_cart/CoffeeCart_01_2k.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
