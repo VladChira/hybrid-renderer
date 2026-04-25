@@ -18,6 +18,11 @@ namespace hybrid::ui
     {
     };
 
+    struct RequestSceneLoadCommand
+    {
+        std::string path;
+    };
+
     struct EntityRenameCommand
     {
         entt::entity entity = entt::null;
@@ -153,6 +158,7 @@ namespace hybrid::ui
     };
 
     using UiCommand = std::variant<QuitCommand,
+                                   RequestSceneLoadCommand,
                                    EntityRenameCommand,
                                    EntitySetLocalTransformCommand,
                                    CameraSetLensCommand,

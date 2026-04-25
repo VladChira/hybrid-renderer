@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@ namespace hybrid::core::scene
 
     struct SceneLoadResult
     {
+        uint64_t request_id = 0;
         std::string path;
         assets::AssetId scene_id{};
         bool success = false;
@@ -42,6 +44,12 @@ namespace hybrid::core::scene
         State GetState() const;
 
     private:
+        struct SceneLoadRequest
+        {
+            uint64_t request_id = 0;
+            std::string path;
+        };
+
         void WorkerLoop();
 
         assets::AssetManager *m_assets = nullptr;
@@ -49,7 +57,8 @@ namespace hybrid::core::scene
 
         std::mutex m_mutex;
         std::condition_variable m_condition;
-        std::optional<std::string> m_pending_path;
+        uint64_t m_latest_request_id = 0;
+        std::optional<SceneLoadRequest> m_pending_request;
         std::optional<SceneLoadResult> m_completed;
         bool m_shutdown = false;
 

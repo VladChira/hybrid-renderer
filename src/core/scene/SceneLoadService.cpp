@@ -30,7 +30,19 @@ namespace hybrid::core::scene
     {
         {
             std::lock_guard lock(m_mutex);
-            m_pending_path = std::move(path);
+            ++m_latest_request_id;
+
+            if (m_completed.has_value() && m_completed->request_id < m_latest_request_id)
+            {
+                if (m_completed->success && m_completed->scene_id.IsValid() && m_assets != nullptr)
+                {
+                    m_assets->Unload(m_completed->scene_id);
+                }
+                m_completed.reset();
+            }
+
+            m_pending_request = SceneLoadRequest{m_latest_request_id, std::move(path)};
+            m_state.store(State::Loading, std::memory_order_relaxed);
         }
         m_condition.notify_one();
     }
@@ -56,17 +68,17 @@ namespace hybrid::core::scene
     {
         for (;;)
         {
-            std::string path;
+            SceneLoadRequest request{};
             {
                 std::unique_lock lock(m_mutex);
                 m_condition.wait(lock, [&]
-                                 { return m_shutdown || m_pending_path.has_value(); });
+                                 { return m_shutdown || m_pending_request.has_value(); });
                 if (m_shutdown)
                 {
                     return;
                 }
-                path = std::move(*m_pending_path);
-                m_pending_path.reset();
+                request = std::move(*m_pending_request);
+                m_pending_request.reset();
                 m_state.store(State::Loading, std::memory_order_relaxed);
             }
 
@@ -74,18 +86,33 @@ namespace hybrid::core::scene
             {
                 LOG_ERROR("[SceneLoadService] No asset manager available");
                 std::lock_guard lock(m_mutex);
-                m_completed = SceneLoadResult{std::move(path), {}, false};
+                m_completed = SceneLoadResult{request.request_id, std::move(request.path), {}, false};
                 m_state.store(State::Failed, std::memory_order_relaxed);
                 continue;
             }
 
-            LOG_INFO("[SceneLoadService] Loading scene: " + path);
-            assets::AssetId id = m_assets->Load<SceneWorld>(path);
+            LOG_INFO("[SceneLoadService] Loading scene: " + request.path);
+            assets::AssetId id = m_assets->Load<SceneWorld>(request.path);
             const bool success = id.IsValid();
 
             {
                 std::lock_guard lock(m_mutex);
-                m_completed = SceneLoadResult{std::move(path), id, success};
+                if (request.request_id != m_latest_request_id)
+                {
+                    if (success)
+                    {
+                        m_assets->Unload(id);
+                    }
+
+                    LOG_INFO("[SceneLoadService] Ignoring stale scene load result: " + request.path);
+                    if (!m_pending_request.has_value())
+                    {
+                        m_state.store(State::Idle, std::memory_order_relaxed);
+                    }
+                    continue;
+                }
+
+                m_completed = SceneLoadResult{request.request_id, std::move(request.path), id, success};
                 m_state.store(success ? State::Loaded : State::Failed, std::memory_order_relaxed);
             }
         }

@@ -3,6 +3,8 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <string>
 
 namespace hybrid::ui
@@ -17,6 +19,17 @@ namespace hybrid::ui
         {
             return std::string(HYBRID_PROJECT_ROOT) + "/assets/scenes";
         }
+
+        bool IsGltfScenePath(const std::string &path)
+        {
+            std::string extension = std::filesystem::path(path).extension().string();
+            std::transform(extension.begin(),
+                           extension.end(),
+                           extension.begin(),
+                           [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+            return extension == ".gltf";
+        }
     } // namespace
 
     ContentBrowserPanel::ContentBrowserPanel()
@@ -26,8 +39,6 @@ namespace hybrid::ui
 
     void ContentBrowserPanel::DrawContents(PanelContext &context)
     {
-        (void)context;
-
         if (!m_dialog_initialized)
         {
             IGFD::FileDialogConfig config;
@@ -44,6 +55,10 @@ namespace hybrid::ui
             if (m_file_dialog.IsOk())
             {
                 m_selected_path = m_file_dialog.GetFilePathName();
+                if (context.commands != nullptr && IsGltfScenePath(m_selected_path))
+                {
+                    EnqueueCommand(*context.commands, RequestSceneLoadCommand{m_selected_path});
+                }
             }
 
             m_file_dialog.Close();

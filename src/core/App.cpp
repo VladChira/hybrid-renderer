@@ -18,6 +18,7 @@
 #include "utils/Banner.h"
 
 #include <algorithm>
+#include <optional>
 #include <thread>
 
 namespace hybrid::core
@@ -263,12 +264,51 @@ namespace hybrid::core
                 HYBRID_PROFILE_ZONE_N("App::UiFrame");
                 commands = ui.Frame(delta_seconds, ui_state);
             }
+
+            std::optional<std::string> requested_scene_path;
             {
                 HYBRID_PROFILE_ZONE_N("App::ProcessUiCommands");
-                ProcessUiCommands(commands, m_assets, m_active_scene, m_should_quit);
-                if (active_scene_world && !commands.empty())
+                ui::CommandBuffer mutation_commands;
+                mutation_commands.reserve(commands.size());
+                for (const ui::UiCommand &command : commands)
+                {
+                    if (const auto *scene_load_command = ui::GetCommandIf<ui::RequestSceneLoadCommand>(&command))
+                    {
+                        if (!scene_load_command->path.empty())
+                        {
+                            requested_scene_path = scene_load_command->path;
+                        }
+                        continue;
+                    }
+
+                    mutation_commands.push_back(command);
+                }
+
+                ProcessUiCommands(mutation_commands, m_assets, m_active_scene, m_should_quit);
+                if (active_scene_world && !mutation_commands.empty())
                 {
                     active_scene_world->FlushPendingChanges();
+                }
+            }
+            {
+                HYBRID_PROFILE_ZONE_N("App::HandleSceneLoadRequest");
+                if (requested_scene_path.has_value())
+                {
+                    if (m_active_scene.IsValid())
+                    {
+                        const std::string previous_scene_path = m_assets.GetPath(m_active_scene);
+                        if (!m_assets.Unload(m_active_scene))
+                        {
+                            LOG_WARN("[App] Failed to unload active scene before loading a new selection");
+                        }
+                        else if (!previous_scene_path.empty())
+                        {
+                            LOG_INFO("[App] Unloaded scene: " + previous_scene_path);
+                        }
+                        m_active_scene = {};
+                    }
+
+                    RequestSceneLoad(*requested_scene_path);
                 }
             }
 
