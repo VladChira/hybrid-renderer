@@ -110,6 +110,24 @@ target_link_libraries(external_imguizmo PUBLIC
 )
 
 # --------------------
+# ImGuiFileDialog (source) - must use the same ImGui binary/layout
+# --------------------
+add_library(external_imguifiledialog STATIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/imguifiledialog/ImGuiFileDialog.cpp"
+)
+
+add_library(external::imguifiledialog ALIAS external_imguifiledialog)
+
+target_include_directories(external_imguifiledialog SYSTEM PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/imguifiledialog"
+  "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+)
+
+target_link_libraries(external_imguifiledialog PUBLIC
+  external::imgui
+)
+
+# --------------------
 # ImGui backends: GLFW + OpenGL3
 # Requires wrapper targets created in root:
 #   thirdparty::glfw

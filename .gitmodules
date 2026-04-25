@@ -11,3 +11,6 @@
 [submodule "external/imguizmo"]
 	path = external/imguizmo
 	url = https://github.com/CedricGuillemet/ImGuizmo.git
+[submodule "external/imguifiledialog"]
+	path = external/imguifiledialog
+	url = https://github.com/aiekick/ImGuiFileDialog.git

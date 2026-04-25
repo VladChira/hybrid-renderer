@@ -126,6 +126,7 @@ target_link_libraries(hybrid_engine
     external::implot
     thirdparty::spdlog
     external::imguizmo
+    external::imguifiledialog
     $<$<PLATFORM_ID:Windows>:Psapi>
 )
 
@@ -147,6 +148,7 @@ target_sources(hybrid_engine PRIVATE
   src/graphics/GraphicsRuntime.cpp
 
   src/ui/Ui.cpp
+  src/ui/panels/ContentBrowserPanel.cpp
   src/ui/panels/ConsolePanel.cpp
   src/ui/panels/MaterialsPanel.cpp
   src/ui/panels/PropertiesPanel.cpp

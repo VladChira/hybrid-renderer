@@ -6,9 +6,9 @@
 #include "graphics/GraphicsRuntime.h"
 #include "ui/UiStateUtils.h"
 #include "themes/Themes.h"
+#include "panels/ContentBrowserPanel.h"
 #include "panels/ConsolePanel.h"
 #include "panels/MaterialsPanel.h"
-#include "panels/PlaceholderPanel.h"
 #include "panels/PropertiesPanel.h"
 #include "panels/PerformancePanel.h"
 #include "panels/RenderTargetsPanel.h"
@@ -101,7 +101,7 @@ namespace hybrid::ui
             RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
             RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
             RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
-            RegisterPanel(std::make_unique<PlaceholderPanel>("Content Browser"), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<ContentBrowserPanel>(), DockTarget::RightTop);
             RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
             RegisterPanel(std::make_unique<SettingsPanel>(), DockTarget::LeftTop);
             RegisterPanel(std::make_unique<RenderTargetsPanel>(), DockTarget::LeftTop);
