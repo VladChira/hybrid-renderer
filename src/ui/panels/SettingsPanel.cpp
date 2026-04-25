@@ -43,8 +43,6 @@ namespace hybrid::ui
             m_pending_render_settings = *render_settings;
         }
 
-        ImGui::TextUnformatted("Tone Mapping");
-
         auto MarkEdited = [this]()
         {
             m_render_settings_dirty = true;
@@ -54,6 +52,17 @@ namespace hybrid::ui
                 m_commit_requested = true;
             }
         };
+
+        ImGui::TextUnformatted("Ray tracing Settings");
+        
+        if (ImGui::Checkbox("Compute BVH Heatmap", &m_pending_render_settings.compute_bvh_heatmap))
+        {
+            MarkEdited();
+        }
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted("Tone Mapping");
 
         int tone_mapper_index = static_cast<int>(m_pending_render_settings.tone_mapper);
         const char *tone_mapper_options[] = {"Legacy", "ACES"};

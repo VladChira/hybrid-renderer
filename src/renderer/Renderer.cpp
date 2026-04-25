@@ -20,6 +20,7 @@
 #include "renderer/passes/RenderTargetChannelsPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 
+#include <array>
 #include <chrono>
 
 #include <GLFW/glfw3.h>
@@ -459,26 +460,41 @@ namespace hybrid::renderer
             }
         }
 
-        {
-            HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
-            m_impl->as_cache.SyncBlas(m_impl->scene_data, m_impl->geometry_store);
-            m_impl->as_cache.SyncTlas(m_impl->scene_data, m_impl->geometry_store);
-            // Primitive descriptors may have been patched with BLAS offsets —
-            // re-sync so the SSBO reflects those fields for the ray pass.
-            m_impl->geometry_store.Sync();
-            m_impl->as_cache.Upload();
-        }
+        const bool should_compute_bvh_heatmap =
+            m_impl->submitted_settings.compute_bvh_heatmap &&
+            (m_impl->traversal_heatmap_pass != nullptr);
 
-        if (m_impl->traversal_heatmap_pass)
+        if (should_compute_bvh_heatmap)
         {
-            HYBRID_PROFILE_ZONE_N("Renderer::TraversalHeatmapPass");
-            TraversalHeatmapPassInput heatmap_input{};
-            heatmap_input.settings = &m_impl->submitted_settings;
-            heatmap_input.effective_view = &m_impl->effective_view;
-            heatmap_input.heatmap_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceHeatmap);
-            if (!m_impl->traversal_heatmap_pass->Execute(heatmap_input))
             {
-                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->traversal_heatmap_pass->Name());
+                HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
+                m_impl->as_cache.SyncBlas(m_impl->scene_data, m_impl->geometry_store);
+                m_impl->as_cache.SyncTlas(m_impl->scene_data, m_impl->geometry_store);
+                // Primitive descriptors may have been patched with BLAS offsets -
+                // re-sync so the SSBO reflects those fields for the ray pass.
+                m_impl->geometry_store.Sync();
+                m_impl->as_cache.Upload();
+            }
+
+            {
+                HYBRID_PROFILE_ZONE_N("Renderer::TraversalHeatmapPass");
+                TraversalHeatmapPassInput heatmap_input{};
+                heatmap_input.settings = &m_impl->submitted_settings;
+                heatmap_input.effective_view = &m_impl->effective_view;
+                heatmap_input.heatmap_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceHeatmap);
+                if (!m_impl->traversal_heatmap_pass->Execute(heatmap_input))
+                {
+                    LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->traversal_heatmap_pass->Name());
+                }
+            }
+        }
+        else
+        {
+            const GlTextureId heatmap_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceHeatmap);
+            if (heatmap_texture != 0)
+            {
+                constexpr std::array<GLubyte, 4> kZeroHeatmap = {0, 0, 0, 255};
+                glClearTexImage(heatmap_texture, 0, GL_RGBA, GL_UNSIGNED_BYTE, kZeroHeatmap.data());
             }
         }
 
@@ -584,3 +600,4 @@ namespace hybrid::renderer
 
 
 } // namespace hybrid::renderer
+
