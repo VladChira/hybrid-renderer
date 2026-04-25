@@ -11,6 +11,22 @@ layout(std430, binding = 10) readonly buffer TlasInstances    { GpuTlasInstance 
 uniform uint u_tlas_node_count;
 
 const int kMaxStackDepth = 64;
+const float kNoHitDistance = 1e30;
+
+float NodeNearDistance(vec3 origin, vec3 inv_dir, BvhNode node, float closest_t)
+{
+    return IntersectAabbNearT(origin, inv_dir, node.bmin, node.bmax, 0.0, closest_t);
+}
+
+bool ShouldProcessNode(float node_near_t, float closest_t)
+{
+    return node_near_t < closest_t;
+}
+
+void UpdateClosestDistance(inout float closest_t, float candidate_t)
+{
+    closest_t = min(closest_t, candidate_t);
+}
 
 uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
 {
@@ -21,6 +37,7 @@ uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
     }
 
     vec3 inv_dir = 1.0 / direction;
+    float closest_t = kNoHitDistance;
 
     int stack[kMaxStackDepth];
     int stack_size = 0;
@@ -33,7 +50,8 @@ uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
         BvhNode node = blas_nodes[node_index];
         visits += 1u;
 
-        if (!IntersectAabb(origin, inv_dir, node.bmin, node.bmax, 0.0, 1e30))
+        float node_near_t = NodeNearDistance(origin, inv_dir, node, closest_t);
+        if (!ShouldProcessNode(node_near_t, closest_t))
         {
             continue;
         }
@@ -43,6 +61,7 @@ uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
             // This node is a leaf, count how many triangles we *would have* to intersect
             // without actually intersecting
             visits += uint(-node.right_or_count);
+            UpdateClosestDistance(closest_t, node_near_t);
         }
         else if (stack_size + 2 <= kMaxStackDepth)
         {
@@ -61,6 +80,7 @@ uint TraverseTlas(vec3 origin, vec3 direction)
         return 0u;
     }
     vec3 inv_dir = 1.0 / direction;
+    float closest_t = kNoHitDistance;
 
     int stack[kMaxStackDepth];
     int stack_size = 0;
@@ -73,7 +93,8 @@ uint TraverseTlas(vec3 origin, vec3 direction)
         BvhNode node = tlas_nodes[node_index];
         visits += 1u;
 
-        if (!IntersectAabb(origin, inv_dir, node.bmin, node.bmax, 0.0, 1e30))
+        float node_near_t = NodeNearDistance(origin, inv_dir, node, closest_t);
+        if (!ShouldProcessNode(node_near_t, closest_t))
         {
             continue;
         }
@@ -89,6 +110,7 @@ uint TraverseTlas(vec3 origin, vec3 direction)
                 vec3 local_direction = (inst.local_from_world * vec4(direction, 0.0)).xyz;
                 visits += TraverseBlas(local_origin, local_direction, inst.primitive_id);
             }
+            UpdateClosestDistance(closest_t, node_near_t);
         }
         else if (stack_size + 2 <= kMaxStackDepth)
         {

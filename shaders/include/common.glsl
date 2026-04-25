@@ -31,7 +31,7 @@ struct GpuTlasInstance
     uint _pad1;
 };
 
-bool IntersectAabb(vec3 origin, vec3 inv_direction, vec3 bmin, vec3 bmax, float t_min, float t_max)
+float IntersectAabbNearT(vec3 origin, vec3 inv_direction, vec3 bmin, vec3 bmax, float t_min, float t_max)
 {
     vec3 t1 = (bmin - origin) * inv_direction;
     vec3 t2 = (bmax - origin) * inv_direction;
@@ -39,7 +39,7 @@ bool IntersectAabb(vec3 origin, vec3 inv_direction, vec3 bmin, vec3 bmax, float 
     vec3 tmax3 = max(t1, t2);
     float near_t = max(max(tmin3.x, tmin3.y), max(tmin3.z, t_min));
     float far_t  = min(min(tmax3.x, tmax3.y), min(tmax3.z, t_max));
-    return near_t <= far_t;
+    return (near_t <= far_t) ? near_t : 1e30;
 }
 
 #endif
