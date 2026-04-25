@@ -10,7 +10,6 @@ layout(std430, binding = 10) readonly buffer TlasInstances    { GpuTlasInstance 
 
 uniform uint u_tlas_node_count;
 
-const int kMaxStackDepth = 64;
 const float kNoHitDistance = 1e30;
 
 uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
