@@ -123,6 +123,30 @@ namespace hybrid::ui
         ImGui::Separator();
         ImGui::Spacing();
 
+        if (ImGui::Checkbox("Draw HDRI as skybox", &m_pending_render_settings.draw_hdri_as_skybox))
+        {
+            MarkEdited();
+        }
+
+        if (m_pending_render_settings.draw_hdri_as_skybox)
+        {
+            int skybox_texture_source_index = static_cast<int>(m_pending_render_settings.skybox_texture_source);
+            const char *skybox_texture_source_options[] = {"HDRI Image", "Irradiance Map", "Prefilter Map"};
+            if (ImGui::Combo("Skybox Texture",
+                             &skybox_texture_source_index,
+                             skybox_texture_source_options,
+                             IM_ARRAYSIZE(skybox_texture_source_options)))
+            {
+                m_pending_render_settings.skybox_texture_source =
+                    static_cast<renderer::SkyboxTextureSource>(skybox_texture_source_index);
+                MarkEdited();
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
         ImGui::TextUnformatted("HDRI Precompute");
 
         int env_cubemap_size = static_cast<int>(m_pending_render_settings.hdri_env_cubemap_size);

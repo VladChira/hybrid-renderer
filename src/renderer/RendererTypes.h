@@ -48,6 +48,13 @@ namespace hybrid::renderer
         ACES = 1
     };
 
+    enum class SkyboxTextureSource
+    {
+        HdriImage = 0,
+        IrradianceMap = 1,
+        PrefilterMap = 2
+    };
+
     struct RenderSettings
     {
         RenderMode mode = RenderMode::Lit;
@@ -61,6 +68,8 @@ namespace hybrid::renderer
         float legacy_gamma = 2.2f;
         float aces_input_scale = 2.0f;
         float aces_saturation = 1.0f;
+        bool draw_hdri_as_skybox = true;
+        SkyboxTextureSource skybox_texture_source = SkyboxTextureSource::HdriImage;
 
         // HDRI precompute controls (diffuse/specular IBL assets).
         uint32_t hdri_env_cubemap_size = 512;

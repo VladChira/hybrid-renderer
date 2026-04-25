@@ -18,9 +18,12 @@ uniform float u_legacy_curve_strength;
 uniform float u_legacy_gamma;
 uniform float u_aces_input_scale;
 uniform float u_aces_saturation;
+uniform int u_draw_hdri_as_skybox;
+uniform int u_skybox_texture_source;
 
 uniform int u_has_skybox;
 uniform int u_has_irradiance;
+uniform int u_has_prefiltered_env;
 uniform int u_has_specular_ibl;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
@@ -208,12 +211,47 @@ void main()
 
     if (depth >= 1.0)
     {
-        if (u_has_skybox != 0)
+        if (u_draw_hdri_as_skybox != 0)
         {
             vec3 world_direction = ReconstructWorldDirection(v_uv);
             world_direction = RotateAroundY(world_direction, u_skybox_yaw_radians);
-            vec3 sky_color = texture(u_skybox_cubemap, world_direction).rgb * max(u_skybox_intensity, 0.0);
-            o_color = vec4(ToneMapAndEncode(sky_color), 1.0);
+
+            vec3 sky_color = vec3(0.0);
+            bool has_selected_texture = false;
+
+            if (u_skybox_texture_source == 0)
+            {
+                if (u_has_skybox != 0)
+                {
+                    sky_color = texture(u_skybox_cubemap, world_direction).rgb;
+                    has_selected_texture = true;
+                }
+            }
+            else if (u_skybox_texture_source == 1)
+            {
+                if (u_has_irradiance != 0)
+                {
+                    sky_color = texture(u_irradiance_cubemap, world_direction).rgb;
+                    has_selected_texture = true;
+                }
+            }
+            else if (u_skybox_texture_source == 2)
+            {
+                if (u_has_prefiltered_env != 0)
+                {
+                    sky_color = texture(u_prefiltered_env_cubemap, world_direction).rgb;
+                    has_selected_texture = true;
+                }
+            }
+
+            if (has_selected_texture)
+            {
+                o_color = vec4(ToneMapAndEncode(sky_color * max(u_skybox_intensity, 0.0)), 1.0);
+            }
+            else
+            {
+                o_color = vec4(0.0, 0.0, 0.0, 1.0);
+            }
         }
         else
         {

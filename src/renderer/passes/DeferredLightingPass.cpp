@@ -82,14 +82,18 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1f("u_legacy_gamma", settings.legacy_gamma);
         m_deferred_shader->SetUniform1f("u_aces_input_scale", settings.aces_input_scale);
         m_deferred_shader->SetUniform1f("u_aces_saturation", settings.aces_saturation);
+        m_deferred_shader->SetUniform1i("u_draw_hdri_as_skybox", settings.draw_hdri_as_skybox ? 1 : 0);
+        m_deferred_shader->SetUniform1i("u_skybox_texture_source", static_cast<int>(settings.skybox_texture_source));
 
         const bool has_skybox_cubemap = input.has_skybox && input.skybox_cubemap != 0;
         const bool has_irradiance_cubemap = input.has_skybox && input.convoluted_cubemap != 0;
+        const bool has_prefiltered_env_cubemap = input.has_skybox && input.prefiltered_cubemap != 0;
         const bool has_specular_ibl = input.has_skybox &&
                                       input.prefiltered_cubemap != 0 &&
                                       input.brdf_lut != 0;
         m_deferred_shader->SetUniform1i("u_has_skybox", has_skybox_cubemap ? 1 : 0);
         m_deferred_shader->SetUniform1i("u_has_irradiance", has_irradiance_cubemap ? 1 : 0);
+        m_deferred_shader->SetUniform1i("u_has_prefiltered_env", has_prefiltered_env_cubemap ? 1 : 0);
         m_deferred_shader->SetUniform1i("u_has_specular_ibl", has_specular_ibl ? 1 : 0);
         m_deferred_shader->SetUniform1f("u_skybox_intensity", input.skybox_intensity);
         m_deferred_shader->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
