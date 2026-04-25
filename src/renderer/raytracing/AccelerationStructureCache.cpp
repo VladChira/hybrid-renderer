@@ -164,7 +164,25 @@ namespace hybrid::renderer::raytracing
         record.stats           = blas.stats;
         record.bounds          = blas.bounds;
 
-        m_blas_nodes.insert(m_blas_nodes.end(), blas.nodes.begin(), blas.nodes.end());
+        // Append nodes with their child links rebased into global space.
+        // Leaf nodes (right_or_count < 0) keep `left_or_first` — it addresses
+        // the BLAS-local triangle-index table and the GPU shader re-adds
+        // `primitive.blas_triangle_offset` at fetch time. Internal nodes use
+        // `left_or_first` / `right_or_count` as node indices, which must be
+        // rebased by `record.node_offset` so the concatenated global buffer
+        // is self-consistent.
+        const int32_t base = static_cast<int32_t>(record.node_offset);
+        for (const BvhNode &local_node : blas.nodes)
+        {
+            BvhNode global_node = local_node;
+            if (global_node.right_or_count >= 0)
+            {
+                global_node.left_or_first  += base;
+                global_node.right_or_count += base;
+            }
+            m_blas_nodes.push_back(global_node);
+        }
+
         m_blas_triangles.insert(m_blas_triangles.end(),
                                 blas.triangle_indices.begin(),
                                 blas.triangle_indices.end());

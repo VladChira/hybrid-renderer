@@ -16,7 +16,7 @@ namespace hybrid::renderer
         glViewport(0, 0, static_cast<GLsizei>(extent.width), static_cast<GLsizei>(extent.height));
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
-        glClearColor(0.07f, 0.08f, 0.10f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         return true;
     }
