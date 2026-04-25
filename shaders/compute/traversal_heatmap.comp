@@ -1,6 +1,6 @@
 #version 460 core
 
-#include "include/bvh_traversal.glsl"
+#include "include/heatmap_bvh_traversal.glsl"
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 

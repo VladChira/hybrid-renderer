@@ -12,7 +12,7 @@ namespace hybrid::platform
         int width = 1920;
         int height = 1080;
         std::string title = "Hybrid Renderer";
-        bool vsync = false;
+        bool vsync = true;
     };
 
     class Platform
