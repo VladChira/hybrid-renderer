@@ -54,6 +54,7 @@ namespace hybrid::renderer
         RenderExtent render_extent{1920, 1080};
         bool show_bounds = false;
         bool compute_bvh_heatmap = false;
+        float bvh_heatmap_scale = 256.0f;
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;
         float legacy_curve_strength = 1.0f;

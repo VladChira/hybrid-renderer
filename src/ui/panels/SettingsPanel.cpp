@@ -59,6 +59,18 @@ namespace hybrid::ui
         {
             MarkEdited();
         }
+        if (m_pending_render_settings.compute_bvh_heatmap)
+        {
+            if (ImGui::SliderFloat("BVH Heatmap Scale",
+                                   &m_pending_render_settings.bvh_heatmap_scale,
+                                   1.0f,
+                                   4096.0f,
+                                   "%.1f",
+                                   ImGuiSliderFlags_Logarithmic))
+            {
+                MarkEdited();
+            }
+        }
 
         ImGui::Separator();
 

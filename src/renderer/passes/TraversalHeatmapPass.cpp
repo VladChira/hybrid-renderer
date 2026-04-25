@@ -84,7 +84,7 @@ namespace hybrid::renderer
                          static_cast<GLuint>(extent.width),
                          static_cast<GLuint>(extent.height));
         }
-        m_program->SetUniform1f("u_heatmap_scale", 256.0f);
+        m_program->SetUniform1f("u_heatmap_scale", settings.bvh_heatmap_scale);
 
         const GLuint groups_x = CeilDiv(extent.width, kWorkgroupSize);
         const GLuint groups_y = CeilDiv(extent.height, kWorkgroupSize);
