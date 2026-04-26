@@ -76,6 +76,7 @@ namespace hybrid::renderer
         m_gbuffer_rt1_b.Destroy();
         m_gbuffer_rt1_a.Destroy();
         m_raytrace_heatmap.Destroy();
+        m_raytrace_shadow_masks.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -129,6 +130,8 @@ namespace hybrid::renderer
             return m_gbuffer_depth.Id();
         case FrameTarget::RaytraceHeatmap:
             return m_raytrace_heatmap.Id();
+        case FrameTarget::RaytraceShadowMasks:
+            return m_raytrace_shadow_masks.Id();
         default:
             return 0;
         }
@@ -418,6 +421,25 @@ namespace hybrid::renderer
                                       GL_RGBA,
                                       GL_UNSIGNED_BYTE,
                                       nullptr);
+
+        if (!m_raytrace_shadow_masks.IsValid() && !m_raytrace_shadow_masks.Create(GL_TEXTURE_2D_ARRAY))
+        {
+            LOG_ERROR("[FrameResources] Failed to create raytrace shadow mask array");
+            return false;
+        }
+        m_raytrace_shadow_masks.Bind();
+        m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_raytrace_shadow_masks.SetImage3D(0,
+                                           GL_R8,
+                                           static_cast<GLsizei>(extent.width),
+                                           static_cast<GLsizei>(extent.height),
+                                           static_cast<GLsizei>(8),
+                                           GL_RED,
+                                           GL_UNSIGNED_BYTE,
+                                           nullptr);
         return true;
     }
 

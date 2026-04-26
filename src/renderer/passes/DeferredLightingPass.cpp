@@ -73,6 +73,7 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_irradiance_cubemap", 4);
         m_deferred_shader->SetUniform1i("u_prefiltered_env_cubemap", 5);
         m_deferred_shader->SetUniform1i("u_brdf_lut", 6);
+        m_deferred_shader->SetUniform1i("u_shadow_mask_array", 7);
         m_deferred_shader->SetUniformMat4("u_inv_view", glm::affineInverse(effective_view.view));
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
@@ -119,11 +120,16 @@ namespace hybrid::renderer
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, has_specular_ibl ? input.brdf_lut : 0);
 
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, input.shadow_mask_array);
+
         m_impl->fullscreen_vao.Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE5);

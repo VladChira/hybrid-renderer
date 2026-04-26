@@ -141,6 +141,18 @@ namespace hybrid::renderer
         return m_bindless_handle;
     }
 
+    void GLTexture::SetImage3D(GLint level,
+                               GLint internal_format,
+                               GLsizei width,
+                               GLsizei height,
+                               GLsizei depth,
+                               GLenum format,
+                               GLenum type,
+                               const void *pixels) const
+    {
+        glTexImage3D(m_target, level, internal_format, width, height, depth, 0, format, type, pixels);
+    }
+
     bool GLTexture::MakeBindlessResident()
     {
         if (m_bindless_resident)

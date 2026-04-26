@@ -44,6 +44,16 @@ namespace hybrid::renderer
                            GLenum format,
                            GLenum type,
                            const void *pixels) const;
+
+        void SetImage3D(GLint level,
+                        GLint internal_format,
+                        GLsizei width,
+                        GLsizei height,
+                        GLsizei depth,
+                        GLenum format,
+                        GLenum type,
+                        const void *pixels) const;
+        
         void GenerateMipmap() const;
 
         // Bindless texture helpers (GL_ARB_bindless_texture). Returns 0 if the

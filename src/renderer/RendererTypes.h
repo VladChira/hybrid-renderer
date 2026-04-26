@@ -60,8 +60,12 @@ namespace hybrid::renderer
         RenderMode mode = RenderMode::Lit;
         RenderExtent render_extent{1920, 1080};
         bool show_bounds = false;
+
         bool compute_bvh_heatmap = false;
         float bvh_heatmap_scale = 256.0f;
+        bool enable_ray_traced_shadows = true;
+        float raytrace_shadow_normal_bias = 0.02f;
+
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;
         float legacy_curve_strength = 1.0f;

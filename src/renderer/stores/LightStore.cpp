@@ -1,5 +1,6 @@
 #include "renderer/stores/LightStore.h"
 
+#include "renderer/FrameResources.h"
 #include "renderer/ShaderBindings.h"
 
 #include <algorithm>
@@ -71,50 +72,98 @@ namespace hybrid::renderer
         return true;
     }
 
-    bool LightStore::Update(const FrameSceneData &scene)
+    bool LightStore::Update(const FrameSceneData &scene, bool enable_shadows)
     {
         if (!m_initialized)
         {
             return false;
         }
 
+        m_shadow_casters.clear();
         m_directional.clear();
+        m_point.clear();
+        m_area.clear();
+
+        auto allocate_shadow_layer = [&]() -> int32_t
+        {
+            if (!enable_shadows)
+            {
+                return -1;
+            }
+            if (m_shadow_casters.size() >= static_cast<size_t>(8))
+            {
+                return -1;
+            }
+            return static_cast<int32_t>(m_shadow_casters.size());
+        };
+
         m_directional.reserve(scene.directional_lights.size());
         for (const RenderDirectionalLight &light : scene.directional_lights)
         {
+            const int32_t layer = light.cast_shadows ? allocate_shadow_layer() : -1;
             GpuDirectionalLight gpu{};
-            gpu.direction_cast_shadows = glm::vec4(light.direction, light.cast_shadows ? 1.0f : 0.0f);
-            gpu.color_intensity = glm::vec4(light.color, light.intensity);
+            gpu.direction_shadow_layer = glm::vec4(light.direction, static_cast<float>(layer));
+            gpu.color_intensity        = glm::vec4(light.color, light.intensity);
             m_directional.push_back(gpu);
+
+            if (layer >= 0)
+            {
+                ShadowCaster caster{};
+                caster.type      = ShadowCaster::Type::Directional;
+                caster.layer     = static_cast<uint32_t>(layer);
+                caster.direction = light.direction;
+                m_shadow_casters.push_back(caster);
+            }
         }
 
-        m_point.clear();
         m_point.reserve(scene.point_lights.size());
         for (const RenderPointLight &light : scene.point_lights)
         {
+            const int32_t layer = light.cast_shadows ? allocate_shadow_layer() : -1;
             GpuPointLight gpu{};
             gpu.position_intensity = glm::vec4(light.position, light.intensity);
             gpu.color_range        = glm::vec4(light.color, light.range);
-            gpu.attenuation_cast   = glm::vec4(light.attenuation_constant,
+            gpu.attenuation_shadow = glm::vec4(light.attenuation_constant,
                                                light.attenuation_linear,
                                                light.attenuation_quadratic,
-                                               light.cast_shadows ? 1.0f : 0.0f);
+                                               static_cast<float>(layer));
             m_point.push_back(gpu);
+
+            if (layer >= 0)
+            {
+                ShadowCaster caster{};
+                caster.type     = ShadowCaster::Type::Point;
+                caster.layer    = static_cast<uint32_t>(layer);
+                caster.position = light.position;
+                m_shadow_casters.push_back(caster);
+            }
         }
 
-        m_area.clear();
         m_area.reserve(scene.area_lights.size());
         for (const RenderAreaLight &light : scene.area_lights)
         {
+            const int32_t layer = light.cast_shadows ? allocate_shadow_layer() : -1;
             GpuAreaLight gpu{};
-            gpu.position_intensity  = glm::vec4(light.position, light.intensity);
-            gpu.direction_size_x    = glm::vec4(light.direction, light.size.x);
-            gpu.color_size_y        = glm::vec4(light.color, light.size.y);
-            gpu.two_sided_cast_pad  = glm::vec4(light.two_sided ? 1.0f : 0.0f,
-                                                light.cast_shadows ? 1.0f : 0.0f,
-                                                0.0f,
-                                                0.0f);
+            gpu.position_intensity    = glm::vec4(light.position, light.intensity);
+            gpu.direction_size_x      = glm::vec4(light.direction, light.size.x);
+            gpu.color_size_y          = glm::vec4(light.color, light.size.y);
+            gpu.two_sided_shadow_pad  = glm::vec4(light.two_sided ? 1.0f : 0.0f,
+                                                  static_cast<float>(layer),
+                                                  0.0f,
+                                                  0.0f);
             m_area.push_back(gpu);
+
+            if (layer >= 0)
+            {
+                ShadowCaster caster{};
+                caster.type      = ShadowCaster::Type::Area;
+                caster.layer     = static_cast<uint32_t>(layer);
+                caster.position  = light.position;
+                caster.direction = light.direction;
+                caster.size      = light.size;
+                caster.two_sided = light.two_sided ? 1u : 0u;
+                m_shadow_casters.push_back(caster);
+            }
         }
 
         UploadBuffer(m_directional_buffer,
@@ -150,6 +199,7 @@ namespace hybrid::renderer
 
     void LightStore::Clear()
     {
+        m_shadow_casters.clear();
         m_directional.clear();
         m_point.clear();
         m_area.clear();

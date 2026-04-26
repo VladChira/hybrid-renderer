@@ -26,6 +26,8 @@ namespace hybrid::renderer
         GlTextureId brdf_lut = 0;
         float skybox_intensity = 1.0f;
         float skybox_yaw_radians = 0.0f;
+
+        GlTextureId shadow_mask_array = 0;
     };
 
     struct DeferredLightingPassOutput

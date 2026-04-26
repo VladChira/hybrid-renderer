@@ -30,7 +30,8 @@ namespace hybrid::renderer
         GBufferRt1A,
         GBufferEntityId,
         GBufferDepth,
-        RaytraceHeatmap
+        RaytraceHeatmap,
+        RaytraceShadowMasks
     };
 
     enum class FrameFramebuffer
@@ -89,6 +90,7 @@ namespace hybrid::renderer
         GLTexture m_gbuffer_rt1_a{};
 
         GLTexture m_raytrace_heatmap{};
+        GLTexture m_raytrace_shadow_masks{};
     };
 
 } // namespace hybrid::renderer

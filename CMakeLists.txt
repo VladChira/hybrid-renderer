@@ -204,6 +204,8 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/raytracing/SahSplitStrategy.cpp
   src/renderer/raytracing/AccelerationStructureCache.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
+  src/renderer/passes/RayTracedShadowPass.cpp
+
   src/ui/panels/AccelerationStructurePanel.cpp
 
   src/utils/PathUtils.cpp

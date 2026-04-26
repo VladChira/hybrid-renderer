@@ -19,6 +19,7 @@
 #include "renderer/passes/AreaLightVisualizationPass.h"
 #include "renderer/passes/RenderTargetChannelsPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
+#include "renderer/passes/RayTracedShadowPass.h"
 
 #include <array>
 #include <chrono>
@@ -73,6 +74,7 @@ namespace hybrid::renderer
         GLShaderProgram extract_channel_shader{};
         GLShaderProgram area_light_visualization_shader{};
         GLShaderProgram traversal_heatmap_shader{};
+        GLShaderProgram raytrace_shadow_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -86,6 +88,7 @@ namespace hybrid::renderer
         std::unique_ptr<AreaLightVisualizationPass> area_light_visualization_pass{};
         std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
+        std::unique_ptr<RayTracedShadowPass> raytrace_shadow_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -204,9 +207,16 @@ namespace hybrid::renderer
         }
 
         if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/traversal_heatmap.comp",
-                                                                   m_impl->traversal_heatmap_shader))
+                                                                  m_impl->traversal_heatmap_shader))
         {
             LOG_ERROR("[Renderer] Init failed: traversal heatmap compute program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/raytrace_shadow.comp",
+                                                                  m_impl->raytrace_shadow_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: raytrace shadow compute program build failed");
             return false;
         }
 
@@ -232,22 +242,23 @@ namespace hybrid::renderer
             return false;
         }
 
-
-
         m_impl->gbuffer_pass = std::make_unique<GBufferPass>(&m_impl->gbuffer_shader,
                                                              &m_impl->geometry_store,
                                                              &m_impl->material_store);
         m_impl->deferred_lighting_pass = std::make_unique<DeferredLightingPass>(&m_impl->deferred_lighting_shader,
-                                                                                 &m_impl->light_store);
+                                                                                &m_impl->light_store);
         m_impl->hdri_precompute_pass = std::make_unique<HdriPrecomputePass>(&m_impl->equirect_to_cubemap_shader,
-                                                                             &m_impl->convolute_hdri_shader,
-                                                                             &m_impl->prefilter_hdri_shader,
-                                                                             &m_impl->brdf_lut_shader);
+                                                                            &m_impl->convolute_hdri_shader,
+                                                                            &m_impl->prefilter_hdri_shader,
+                                                                            &m_impl->brdf_lut_shader);
         m_impl->area_light_visualization_pass = std::make_unique<AreaLightVisualizationPass>(&m_impl->area_light_visualization_shader);
         m_impl->render_target_channels_pass = std::make_unique<RenderTargetChannelsPass>(&m_impl->extract_channel_shader);
         m_impl->traversal_heatmap_pass = std::make_unique<TraversalHeatmapPass>(&m_impl->traversal_heatmap_shader,
-                                                                                  &m_impl->geometry_store,
-                                                                                  &m_impl->as_cache);
+                                                                                &m_impl->geometry_store,
+                                                                                &m_impl->as_cache);
+        m_impl->raytrace_shadow_pass = std::make_unique<RayTracedShadowPass>(&m_impl->raytrace_shadow_shader,
+                                                                             &m_impl->geometry_store,
+                                                                             &m_impl->as_cache);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
@@ -302,6 +313,7 @@ namespace hybrid::renderer
         m_impl->traversal_heatmap_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->traversal_heatmap_pass.reset();
+        m_impl->raytrace_shadow_pass.reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -460,22 +472,25 @@ namespace hybrid::renderer
             }
         }
 
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
+            m_impl->as_cache.SyncBlas(m_impl->scene_data, m_impl->geometry_store);
+            m_impl->as_cache.SyncTlas(m_impl->scene_data, m_impl->geometry_store);
+            // Primitive descriptors may have been patched with BLAS offsets -
+            // re-sync so the SSBO reflects those fields for ray passes.
+            m_impl->geometry_store.Sync();
+            if (!m_impl->as_cache.Upload())
+            {
+                LOG_ERROR("[Renderer] Acceleration structure upload failed");
+            }
+        }
+
         const bool should_compute_bvh_heatmap =
             m_impl->submitted_settings.compute_bvh_heatmap &&
             (m_impl->traversal_heatmap_pass != nullptr);
 
         if (should_compute_bvh_heatmap)
         {
-            {
-                HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
-                m_impl->as_cache.SyncBlas(m_impl->scene_data, m_impl->geometry_store);
-                m_impl->as_cache.SyncTlas(m_impl->scene_data, m_impl->geometry_store);
-                // Primitive descriptors may have been patched with BLAS offsets -
-                // re-sync so the SSBO reflects those fields for the ray pass.
-                m_impl->geometry_store.Sync();
-                m_impl->as_cache.Upload();
-            }
-
             {
                 HYBRID_PROFILE_ZONE_N("Renderer::TraversalHeatmapPass");
                 TraversalHeatmapPassInput heatmap_input{};
@@ -498,6 +513,28 @@ namespace hybrid::renderer
             }
         }
 
+        // Light upload happens before the shadow pass so ShadowCasters() is
+        // populated, and before deferred lighting so light SSBOs are current.
+        m_impl->light_store.Update(m_impl->scene_data,
+                                    m_impl->submitted_settings.enable_ray_traced_shadows);
+
+        if (m_impl->raytrace_shadow_pass)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::RayTracedShadowPass");
+            RayTracedShadowPassInput shadow_input{};
+            shadow_input.settings          = &m_impl->submitted_settings;
+            shadow_input.effective_view    = &m_impl->effective_view;
+            shadow_input.light_store       = &m_impl->light_store;
+            shadow_input.gbuffer_depth     = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            shadow_input.gbuffer_rt1       = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+            shadow_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            shadow_input.frame_index       = static_cast<uint32_t>(m_impl->frame_context.frame_index);
+            if (!m_impl->raytrace_shadow_pass->Execute(shadow_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_shadow_pass->Name());
+            }
+        }
+
         // Precompute any new/stale HDRIs here before we shade.
         HdriPrecomputePassOutput hdri_output{};
         if (m_impl->hdri_precompute_pass)
@@ -512,11 +549,10 @@ namespace hybrid::renderer
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->hdri_precompute_pass->Name());
             }
         }
-        
+
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
-            m_impl->light_store.Update(m_impl->scene_data);
             DeferredLightingPassInput deferred_input{};
             deferred_input.settings = &m_impl->submitted_settings;
             deferred_input.scene_data = &m_impl->scene_data;
@@ -533,6 +569,7 @@ namespace hybrid::renderer
             deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
+            deferred_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))
@@ -598,6 +635,4 @@ namespace hybrid::renderer
         return &m_impl->as_cache.Stats();
     }
 
-
 } // namespace hybrid::renderer
-
