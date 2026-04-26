@@ -28,6 +28,7 @@ uniform int u_has_prefiltered_env;
 uniform int u_has_specular_ibl;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
+uniform float u_env_shadow_layer;
 
 uniform uint u_directional_light_count;
 uniform uint u_point_light_count;
@@ -396,6 +397,7 @@ void main()
     }
 
     vec3 ambient = vec3(0.0);
+    float env_visibility = SampleShadowMask(v_uv, u_env_shadow_layer);
     vec3 F_ibl = FresnelSchlickRoughness(ndotv, F0, roughness);
     vec3 kS_ibl = F_ibl;
     vec3 kD_ibl = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
@@ -405,7 +407,7 @@ void main()
         vec3 irradiance_direction = RotateAroundY(normal, u_skybox_yaw_radians);
         vec3 irradiance = texture(u_irradiance_cubemap, irradiance_direction).rgb * max(u_skybox_intensity, 0.0);
         vec3 diffuse_ibl = irradiance * albedo;
-        ambient += kD_ibl * diffuse_ibl;
+        ambient += kD_ibl * diffuse_ibl * env_visibility;
     }
 
     if (u_has_specular_ibl != 0)
@@ -418,7 +420,7 @@ void main()
             max(u_skybox_intensity, 0.0);
         vec2 env_brdf = texture(u_brdf_lut, vec2(ndotv, roughness)).rg;
         vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
-        ambient += specular_ibl;
+        ambient += specular_ibl * env_visibility;
     }
 
     vec3 color = ambient + Lo;

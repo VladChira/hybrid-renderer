@@ -54,6 +54,30 @@ namespace hybrid::ui
         };
 
         ImGui::TextUnformatted("Ray tracing Settings");
+
+        if (ImGui::Checkbox("Enable Ray-Traced Shadows", &m_pending_render_settings.enable_ray_traced_shadows))
+        {
+            MarkEdited();
+        }
+
+        if (m_pending_render_settings.enable_ray_traced_shadows)
+        {
+            if (ImGui::SliderFloat("Shadow Normal Bias",
+                                   &m_pending_render_settings.raytrace_shadow_normal_bias,
+                                   0.0001f,
+                                   0.2f,
+                                   "%.5f",
+                                   ImGuiSliderFlags_Logarithmic))
+            {
+                MarkEdited();
+            }
+        }
+
+        if (ImGui::Checkbox("Experimental: HDRI Visibility (1 spp)",
+                            &m_pending_render_settings.enable_ray_traced_hdri_visibility))
+        {
+            MarkEdited();
+        }
         
         if (ImGui::Checkbox("Compute BVH Heatmap", &m_pending_render_settings.compute_bvh_heatmap))
         {

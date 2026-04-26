@@ -1,6 +1,7 @@
 #include "renderer/passes/RayTracedShadowPass.h"
 
 #include "core/Profiling.h"
+#include "renderer/FrameResources.h"
 #include "renderer/stores/GeometryStore.h"
 #include "renderer/stores/LightStore.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
@@ -17,6 +18,7 @@ namespace hybrid::renderer
         constexpr GLuint kShadowImageBinding  = 0;
         constexpr GLuint kGbufferRt1TexUnit   = 0;
         constexpr GLuint kGbufferDepthTexUnit = 1;
+        constexpr uint32_t kLightTypeEnvironment = 3u;
 
         GLuint CeilDiv(GLuint value, GLuint divisor)
         {
@@ -59,13 +61,10 @@ namespace hybrid::renderer
             return false;
         }
 
-        if (!settings.enable_ray_traced_shadows)
-        {
-            return true;
-        }
-
         const auto &casters = input.light_store->ShadowCasters();
-        if (casters.empty())
+        const bool trace_light_shadows = settings.enable_ray_traced_shadows;
+        const bool trace_environment_visibility = settings.enable_ray_traced_hdri_visibility;
+        if ((!trace_light_shadows || casters.empty()) && !trace_environment_visibility)
         {
             return true;
         }
@@ -101,26 +100,51 @@ namespace hybrid::renderer
         const GLuint groups_x = CeilDiv(extent.width, kWorkgroupSize);
         const GLuint groups_y = CeilDiv(extent.height, kWorkgroupSize);
 
-        for (const ShadowCaster &caster : casters)
+        auto dispatch_shadow_layer = [&](uint32_t layer,
+                                         uint32_t light_type,
+                                         const glm::vec3 &light_direction,
+                                         const glm::vec3 &light_position,
+                                         const glm::vec2 &light_size)
         {
             glBindImageTexture(kShadowImageBinding,
                                input.shadow_mask_array,
                                0,
                                GL_FALSE,
-                               static_cast<GLint>(caster.layer),
+                               static_cast<GLint>(layer),
                                GL_WRITE_ONLY,
                                GL_R8);
 
-            m_program->SetUniform1ui("u_light_type", static_cast<uint32_t>(caster.type));
-            m_program->SetUniformVec3("u_light_direction", caster.direction);
-            m_program->SetUniformVec3("u_light_position",  caster.position);
+            m_program->SetUniform1ui("u_light_type", light_type);
+            m_program->SetUniformVec3("u_light_direction", light_direction);
+            m_program->SetUniformVec3("u_light_position", light_position);
             const GLint size_loc = m_program->GetUniformLocation("u_light_size");
             if (size_loc >= 0)
             {
-                glUniform2f(size_loc, caster.size.x, caster.size.y);
+                glUniform2f(size_loc, light_size.x, light_size.y);
             }
 
             glDispatchCompute(groups_x, groups_y, 1);
+        };
+
+        if (trace_light_shadows)
+        {
+            for (const ShadowCaster &caster : casters)
+            {
+                dispatch_shadow_layer(caster.layer,
+                                      static_cast<uint32_t>(caster.type),
+                                      caster.direction,
+                                      caster.position,
+                                      caster.size);
+            }
+        }
+
+        if (trace_environment_visibility)
+        {
+            dispatch_shadow_layer(kRaytraceEnvironmentShadowLayer,
+                                  kLightTypeEnvironment,
+                                  glm::vec3(0.0f),
+                                  glm::vec3(0.0f),
+                                  glm::vec2(0.0f));
         }
 
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);

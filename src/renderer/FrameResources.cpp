@@ -436,7 +436,7 @@ namespace hybrid::renderer
                                            GL_R8,
                                            static_cast<GLsizei>(extent.width),
                                            static_cast<GLsizei>(extent.height),
-                                           static_cast<GLsizei>(8),
+                                           static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
                                            GL_RED,
                                            GL_UNSIGNED_BYTE,
                                            nullptr);

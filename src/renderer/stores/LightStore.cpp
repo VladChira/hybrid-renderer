@@ -90,7 +90,7 @@ namespace hybrid::renderer
             {
                 return -1;
             }
-            if (m_shadow_casters.size() >= static_cast<size_t>(8))
+            if (m_shadow_casters.size() >= static_cast<size_t>(kRaytraceEnvironmentShadowLayer))
             {
                 return -1;
             }

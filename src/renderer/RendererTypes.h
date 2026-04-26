@@ -64,6 +64,7 @@ namespace hybrid::renderer
         bool compute_bvh_heatmap = false;
         float bvh_heatmap_scale = 256.0f;
         bool enable_ray_traced_shadows = true;
+        bool enable_ray_traced_hdri_visibility = false; // Experimental brute-force env visibility (1 spp).
         float raytrace_shadow_normal_bias = 0.02f;
 
         float exposure = 1.0f;

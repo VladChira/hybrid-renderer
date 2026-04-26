@@ -6,6 +6,8 @@
 
 namespace hybrid::renderer
 {
+    constexpr uint32_t kRaytraceShadowMaskLayerCount = 8;
+    constexpr uint32_t kRaytraceEnvironmentShadowLayer = kRaytraceShadowMaskLayerCount - 1;
 
     enum class FrameTarget
     {

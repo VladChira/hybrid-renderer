@@ -1,6 +1,7 @@
 #include "renderer/passes/DeferredLightingPass.h"
 
 #include "core/Profiling.h"
+#include "renderer/FrameResources.h"
 #include "renderer/stores/LightStore.h"
 #include "renderer/opengl/GLShaderProgram.h"
 #include "renderer/opengl/GLVertexArray.h"
@@ -98,6 +99,10 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_has_specular_ibl", has_specular_ibl ? 1 : 0);
         m_deferred_shader->SetUniform1f("u_skybox_intensity", input.skybox_intensity);
         m_deferred_shader->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
+        m_deferred_shader->SetUniform1f("u_env_shadow_layer",
+                                        settings.enable_ray_traced_hdri_visibility
+                                            ? static_cast<float>(kRaytraceEnvironmentShadowLayer)
+                                            : -1.0f);
 
         m_deferred_shader->SetUniform1ui("u_directional_light_count", m_light_store->DirectionalCount());
         m_deferred_shader->SetUniform1ui("u_point_light_count",       m_light_store->PointCount());
