@@ -183,10 +183,6 @@ namespace hybrid::renderer
         uint64_t submitted_triangles = 0;
         GBufferStats gbuffer{};
         double cpu_frame_ms = 0.0;
-        double gpu_frame_ms = 0.0;
-        bool gpu_frame_ms_valid = false;
-        double gpu_raytrace_shadow_ms = 0.0;
-        bool gpu_raytrace_shadow_ms_valid = false;
     };
 
     using GlTextureId = uint32_t;

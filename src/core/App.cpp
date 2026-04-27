@@ -215,10 +215,6 @@ namespace hybrid::core
             FramePerformanceSample frame_sample{};
             frame_sample.time_seconds = elapsed_seconds;
             frame_sample.renderer_cpu_frame_ms = renderer_stats.cpu_frame_ms;
-            frame_sample.renderer_gpu_frame_ms = renderer_stats.gpu_frame_ms;
-            frame_sample.renderer_gpu_frame_ms_valid = renderer_stats.gpu_frame_ms_valid;
-            frame_sample.raytrace_shadow_gpu_ms = renderer_stats.gpu_raytrace_shadow_ms;
-            frame_sample.raytrace_shadow_gpu_ms_valid = renderer_stats.gpu_raytrace_shadow_ms_valid;
             frame_sample.fps = fps;
             frame_sample.draw_calls = renderer_stats.gbuffer.draw_calls;
             frame_sample.submitted_primitives = renderer_stats.submitted_primitives;
