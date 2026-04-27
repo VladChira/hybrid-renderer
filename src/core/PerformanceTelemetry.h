@@ -11,6 +11,10 @@ namespace hybrid::core
     {
         double time_seconds = 0.0;
         double renderer_cpu_frame_ms = 0.0;
+        double renderer_gpu_frame_ms = 0.0;
+        bool renderer_gpu_frame_ms_valid = false;
+        double raytrace_shadow_gpu_ms = 0.0;
+        bool raytrace_shadow_gpu_ms_valid = false;
         double fps = 0.0;
         uint32_t draw_calls = 0;
         uint32_t submitted_primitives = 0;

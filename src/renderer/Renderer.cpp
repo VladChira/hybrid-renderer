@@ -32,6 +32,112 @@ namespace hybrid::renderer
 
     namespace
     {
+        struct GpuTimestampTimer
+        {
+            static constexpr uint32_t kBufferedSamples = 8;
+
+            std::array<GLuint, kBufferedSamples> begin_queries{};
+            std::array<GLuint, kBufferedSamples> end_queries{};
+            uint32_t write_index = 0;
+            uint32_t read_index = 0;
+            uint32_t pending_count = 0;
+            uint32_t active_slot = 0;
+            bool active = false;
+            bool initialized = false;
+            bool has_latest_sample = false;
+            double latest_ms = 0.0;
+        };
+
+        bool InitGpuTimestampTimer(GpuTimestampTimer &timer)
+        {
+            if (timer.initialized)
+            {
+                return true;
+            }
+
+            glGenQueries(static_cast<GLsizei>(GpuTimestampTimer::kBufferedSamples), timer.begin_queries.data());
+            glGenQueries(static_cast<GLsizei>(GpuTimestampTimer::kBufferedSamples), timer.end_queries.data());
+            timer.write_index = 0;
+            timer.read_index = 0;
+            timer.pending_count = 0;
+            timer.active_slot = 0;
+            timer.active = false;
+            timer.has_latest_sample = false;
+            timer.latest_ms = 0.0;
+            timer.initialized = true;
+            return true;
+        }
+
+        void DestroyGpuTimestampTimer(GpuTimestampTimer &timer)
+        {
+            if (!timer.initialized)
+            {
+                return;
+            }
+
+            glDeleteQueries(static_cast<GLsizei>(GpuTimestampTimer::kBufferedSamples), timer.begin_queries.data());
+            glDeleteQueries(static_cast<GLsizei>(GpuTimestampTimer::kBufferedSamples), timer.end_queries.data());
+            timer = {};
+        }
+
+        void PollGpuTimestampTimer(GpuTimestampTimer &timer)
+        {
+            if (!timer.initialized)
+            {
+                return;
+            }
+
+            while (timer.pending_count > 0)
+            {
+                const uint32_t slot = timer.read_index;
+                GLuint available = 0;
+                glGetQueryObjectuiv(timer.end_queries[slot], GL_QUERY_RESULT_AVAILABLE, &available);
+                if (available == 0u)
+                {
+                    break;
+                }
+
+                GLuint64 begin_ns = 0;
+                GLuint64 end_ns = 0;
+                glGetQueryObjectui64v(timer.begin_queries[slot], GL_QUERY_RESULT, &begin_ns);
+                glGetQueryObjectui64v(timer.end_queries[slot], GL_QUERY_RESULT, &end_ns);
+                timer.has_latest_sample = end_ns >= begin_ns;
+                timer.latest_ms = timer.has_latest_sample
+                                      ? static_cast<double>(end_ns - begin_ns) * 1e-6
+                                      : 0.0;
+
+                timer.read_index = (timer.read_index + 1) % GpuTimestampTimer::kBufferedSamples;
+                timer.pending_count -= 1;
+            }
+        }
+
+        void BeginGpuTimestampTimer(GpuTimestampTimer &timer)
+        {
+            if (!timer.initialized || timer.active || timer.pending_count >= GpuTimestampTimer::kBufferedSamples)
+            {
+                return;
+            }
+
+            const uint32_t slot = timer.write_index;
+            glQueryCounter(timer.begin_queries[slot], GL_TIMESTAMP);
+            timer.active_slot = slot;
+            timer.active = true;
+        }
+
+        void EndGpuTimestampTimer(GpuTimestampTimer &timer)
+        {
+            if (!timer.initialized || !timer.active)
+            {
+                return;
+            }
+
+            const uint32_t slot = timer.active_slot;
+            glQueryCounter(timer.end_queries[slot], GL_TIMESTAMP);
+            timer.write_index = (timer.write_index + 1) % GpuTimestampTimer::kBufferedSamples;
+            timer.pending_count += 1;
+            timer.active = false;
+        }
+
         RendererOutputs BuildOutputs(const FrameResources &resources)
         {
             RendererOutputs outputs{};
@@ -105,6 +211,8 @@ namespace hybrid::renderer
         bool initialized = false;
         std::chrono::steady_clock::time_point frame_start{};
         bool tracy_gpu_context_initialized = false;
+        GpuTimestampTimer gpu_frame_timer{};
+        GpuTimestampTimer gpu_raytrace_shadow_timer{};
         glm::mat4 prev_view_projection{1.0f};
         bool prev_view_projection_valid = false;
         bool shadow_history_prev_is_a = true;
@@ -303,6 +411,8 @@ namespace hybrid::renderer
             m_impl->outputs = BuildOutputs(m_impl->frame_resources);
         }
 
+        InitGpuTimestampTimer(m_impl->gpu_frame_timer);
+        InitGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
         m_impl->initialized = true;
         return true;
     }
@@ -344,6 +454,8 @@ namespace hybrid::renderer
         m_impl->traversal_heatmap_pass.reset();
         m_impl->raytrace_shadow_pass.reset();
         m_impl->shadow_denoise_pass.reset();
+        DestroyGpuTimestampTimer(m_impl->gpu_frame_timer);
+        DestroyGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -383,6 +495,12 @@ namespace hybrid::renderer
         }
 
         m_impl->stats = {};
+        PollGpuTimestampTimer(m_impl->gpu_frame_timer);
+        PollGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
+        m_impl->stats.gpu_frame_ms_valid = m_impl->gpu_frame_timer.has_latest_sample;
+        m_impl->stats.gpu_frame_ms = m_impl->gpu_frame_timer.latest_ms;
+        m_impl->stats.gpu_raytrace_shadow_ms_valid = m_impl->gpu_raytrace_shadow_timer.has_latest_sample;
+        m_impl->stats.gpu_raytrace_shadow_ms = m_impl->gpu_raytrace_shadow_timer.latest_ms;
         m_impl->frame_start = std::chrono::steady_clock::now();
         m_impl->current_extent = frame.render_extent;
         m_impl->frame_context = frame;
@@ -444,6 +562,8 @@ namespace hybrid::renderer
         {
             return {};
         }
+
+        BeginGpuTimestampTimer(m_impl->gpu_frame_timer);
 
         if (m_impl->submitted_scene_world != nullptr)
         {
@@ -566,6 +686,7 @@ namespace hybrid::renderer
         m_impl->light_store.Update(m_impl->scene_data,
                                     m_impl->submitted_settings.enable_ray_traced_shadows);
 
+        BeginGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
         if (m_impl->raytrace_shadow_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::RayTracedShadowPass");
@@ -589,6 +710,7 @@ namespace hybrid::renderer
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_shadow_pass->Name());
             }
         }
+        EndGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
 
         GlTextureId resolved_shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
         if (m_impl->shadow_denoise_pass != nullptr &&
@@ -725,6 +847,13 @@ namespace hybrid::renderer
         }
 
         m_impl->backend.EndFrame();
+        EndGpuTimestampTimer(m_impl->gpu_frame_timer);
+        PollGpuTimestampTimer(m_impl->gpu_frame_timer);
+        PollGpuTimestampTimer(m_impl->gpu_raytrace_shadow_timer);
+        m_impl->stats.gpu_frame_ms_valid = m_impl->gpu_frame_timer.has_latest_sample;
+        m_impl->stats.gpu_frame_ms = m_impl->gpu_frame_timer.latest_ms;
+        m_impl->stats.gpu_raytrace_shadow_ms_valid = m_impl->gpu_raytrace_shadow_timer.has_latest_sample;
+        m_impl->stats.gpu_raytrace_shadow_ms = m_impl->gpu_raytrace_shadow_timer.latest_ms;
         HYBRID_PROFILE_GL_COLLECT();
 
         const auto frame_end = std::chrono::steady_clock::now();
