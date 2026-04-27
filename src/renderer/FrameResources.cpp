@@ -77,6 +77,10 @@ namespace hybrid::renderer
         m_gbuffer_rt1_a.Destroy();
         m_raytrace_heatmap.Destroy();
         m_raytrace_shadow_masks.Destroy();
+        m_raytrace_shadow_history_a.Destroy();
+        m_raytrace_shadow_history_b.Destroy();
+        m_raytrace_shadow_atrous_ping.Destroy();
+        m_raytrace_shadow_atrous_pong.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -132,6 +136,14 @@ namespace hybrid::renderer
             return m_raytrace_heatmap.Id();
         case FrameTarget::RaytraceShadowMasks:
             return m_raytrace_shadow_masks.Id();
+        case FrameTarget::RaytraceShadowHistoryA:
+            return m_raytrace_shadow_history_a.Id();
+        case FrameTarget::RaytraceShadowHistoryB:
+            return m_raytrace_shadow_history_b.Id();
+        case FrameTarget::RaytraceShadowAtrousPing:
+            return m_raytrace_shadow_atrous_ping.Id();
+        case FrameTarget::RaytraceShadowAtrousPong:
+            return m_raytrace_shadow_atrous_pong.Id();
         default:
             return 0;
         }
@@ -396,7 +408,7 @@ namespace hybrid::renderer
         return true;
     }
 
-     bool FrameResources::AllocateRaytraceTargets(const RenderExtent &extent)
+    bool FrameResources::AllocateRaytraceTargets(const RenderExtent &extent)
     {
         if (!extent.IsValid())
         {
@@ -440,6 +452,38 @@ namespace hybrid::renderer
                                            GL_RED,
                                            GL_UNSIGNED_BYTE,
                                            nullptr);
+
+        auto allocate_r16f_array = [extent](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D_ARRAY))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {}", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage3D(0,
+                               GL_R16F,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
+                               GL_RED,
+                               GL_HALF_FLOAT,
+                               nullptr);
+            return true;
+        };
+
+        if (!allocate_r16f_array(m_raytrace_shadow_history_a, "raytrace shadow history A array") ||
+            !allocate_r16f_array(m_raytrace_shadow_history_b, "raytrace shadow history B array") ||
+            !allocate_r16f_array(m_raytrace_shadow_atrous_ping, "raytrace shadow atrous ping array") ||
+            !allocate_r16f_array(m_raytrace_shadow_atrous_pong, "raytrace shadow atrous pong array"))
+        {
+            return false;
+        }
+
         return true;
     }
 

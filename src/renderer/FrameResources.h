@@ -33,7 +33,11 @@ namespace hybrid::renderer
         GBufferEntityId,
         GBufferDepth,
         RaytraceHeatmap,
-        RaytraceShadowMasks
+        RaytraceShadowMasks,
+        RaytraceShadowHistoryA,
+        RaytraceShadowHistoryB,
+        RaytraceShadowAtrousPing,
+        RaytraceShadowAtrousPong
     };
 
     enum class FrameFramebuffer
@@ -93,6 +97,10 @@ namespace hybrid::renderer
 
         GLTexture m_raytrace_heatmap{};
         GLTexture m_raytrace_shadow_masks{};
+        GLTexture m_raytrace_shadow_history_a{};
+        GLTexture m_raytrace_shadow_history_b{};
+        GLTexture m_raytrace_shadow_atrous_ping{};
+        GLTexture m_raytrace_shadow_atrous_pong{};
     };
 
 } // namespace hybrid::renderer

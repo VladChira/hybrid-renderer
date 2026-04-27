@@ -20,6 +20,7 @@
 #include "renderer/passes/RenderTargetChannelsPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 #include "renderer/passes/RayTracedShadowPass.h"
+#include "renderer/passes/SpatioTemporalDenoisePass.h"
 
 #include <array>
 #include <chrono>
@@ -75,6 +76,8 @@ namespace hybrid::renderer
         GLShaderProgram area_light_visualization_shader{};
         GLShaderProgram traversal_heatmap_shader{};
         GLShaderProgram raytrace_shadow_shader{};
+        GLShaderProgram temporal_accumulation_shader{};
+        GLShaderProgram atrous_denoise_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -89,6 +92,7 @@ namespace hybrid::renderer
         std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
         std::unique_ptr<RayTracedShadowPass> raytrace_shadow_pass{};
+        std::unique_ptr<SpatioTemporalDenoisePass> shadow_denoise_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -101,6 +105,10 @@ namespace hybrid::renderer
         bool initialized = false;
         std::chrono::steady_clock::time_point frame_start{};
         bool tracy_gpu_context_initialized = false;
+        glm::mat4 prev_view_projection{1.0f};
+        bool prev_view_projection_valid = false;
+        bool shadow_history_prev_is_a = true;
+        bool shadow_history_valid = false;
     };
 
     Renderer::Renderer()
@@ -220,6 +228,20 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/temporal_accumulation.comp",
+                                                                  m_impl->temporal_accumulation_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: temporal accumulation compute program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/atrous_denoise.comp",
+                                                                  m_impl->atrous_denoise_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: atrous denoise compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -259,6 +281,8 @@ namespace hybrid::renderer
         m_impl->raytrace_shadow_pass = std::make_unique<RayTracedShadowPass>(&m_impl->raytrace_shadow_shader,
                                                                              &m_impl->geometry_store,
                                                                              &m_impl->as_cache);
+        m_impl->shadow_denoise_pass = std::make_unique<SpatioTemporalDenoisePass>(&m_impl->temporal_accumulation_shader,
+                                                                                   &m_impl->atrous_denoise_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
@@ -267,6 +291,8 @@ namespace hybrid::renderer
         LOG_INFO("[Renderer] \t - Area Light Visualization Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Ray tracing heatmap visualization [OpenGL Compute Shader]");
+        LOG_INFO("[Renderer] \t - Ray traced shadows [OpenGL Compute Shader]");
+        LOG_INFO("[Renderer] \t - Generic spatio-temporal denoise [OpenGL Compute Shader]");
 
         if (m_impl->current_extent.IsValid())
         {
@@ -311,14 +337,22 @@ namespace hybrid::renderer
         m_impl->extract_channel_shader.Destroy();
         m_impl->area_light_visualization_shader.Destroy();
         m_impl->traversal_heatmap_shader.Destroy();
+        m_impl->raytrace_shadow_shader.Destroy();
+        m_impl->temporal_accumulation_shader.Destroy();
+        m_impl->atrous_denoise_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->traversal_heatmap_pass.reset();
         m_impl->raytrace_shadow_pass.reset();
+        m_impl->shadow_denoise_pass.reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
         m_impl->submitted_settings = {};
         m_impl->frame_context = {};
+        m_impl->prev_view_projection = glm::mat4(1.0f);
+        m_impl->prev_view_projection_valid = false;
+        m_impl->shadow_history_prev_is_a = true;
+        m_impl->shadow_history_valid = false;
     }
 
     void Renderer::Resize(const RenderExtent &extent)
@@ -335,6 +369,8 @@ namespace hybrid::renderer
         }
 
         m_impl->outputs = BuildOutputs(m_impl->frame_resources);
+        m_impl->shadow_history_valid = false;
+        m_impl->shadow_history_prev_is_a = true;
     }
 
     bool Renderer::BeginFrame(const FrameContext &frame)
@@ -362,9 +398,21 @@ namespace hybrid::renderer
             return false;
         }
 
+        const RenderExtent previous_extent = m_impl->frame_resources.Extent();
+        const bool had_valid_resources = m_impl->frame_resources.IsValid();
         if (!m_impl->frame_resources.Resize(m_impl->current_extent))
         {
             return false;
+        }
+
+        const bool resized_this_frame =
+            !had_valid_resources ||
+            previous_extent.width != m_impl->current_extent.width ||
+            previous_extent.height != m_impl->current_extent.height;
+        if (resized_this_frame)
+        {
+            m_impl->shadow_history_valid = false;
+            m_impl->shadow_history_prev_is_a = true;
         }
 
         m_impl->outputs = BuildOutputs(m_impl->frame_resources);
@@ -521,6 +569,13 @@ namespace hybrid::renderer
         if (m_impl->raytrace_shadow_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::RayTracedShadowPass");
+            const GlTextureId shadow_masks = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            if (shadow_masks != 0)
+            {
+                constexpr GLubyte kLit = 255;
+                glClearTexImage(shadow_masks, 0, GL_RED, GL_UNSIGNED_BYTE, &kLit);
+            }
+
             RayTracedShadowPassInput shadow_input{};
             shadow_input.settings          = &m_impl->submitted_settings;
             shadow_input.effective_view    = &m_impl->effective_view;
@@ -533,6 +588,59 @@ namespace hybrid::renderer
             {
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_shadow_pass->Name());
             }
+        }
+
+        GlTextureId resolved_shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+        if (m_impl->shadow_denoise_pass != nullptr &&
+            m_impl->submitted_settings.enable_shadow_denoise &&
+            (m_impl->submitted_settings.enable_ray_traced_shadows ||
+             m_impl->submitted_settings.enable_ray_traced_hdri_visibility))
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::ShadowDenoisePass");
+            const GlTextureId history_prev = m_impl->shadow_history_prev_is_a
+                                                ? m_impl->frame_resources.Get(FrameTarget::RaytraceShadowHistoryA)
+                                                : m_impl->frame_resources.Get(FrameTarget::RaytraceShadowHistoryB);
+            const GlTextureId history_out = m_impl->shadow_history_prev_is_a
+                                                ? m_impl->frame_resources.Get(FrameTarget::RaytraceShadowHistoryB)
+                                                : m_impl->frame_resources.Get(FrameTarget::RaytraceShadowHistoryA);
+
+            SpatioTemporalDenoisePassInput denoise_input{};
+            denoise_input.effective_view = &m_impl->effective_view;
+            denoise_input.extent = m_impl->submitted_settings.render_extent;
+            denoise_input.current_signal_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            denoise_input.history_prev_array = history_prev;
+            denoise_input.history_out_array = history_out;
+            denoise_input.atrous_ping_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowAtrousPing);
+            denoise_input.atrous_pong_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowAtrousPong);
+            denoise_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+            denoise_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            denoise_input.layer_count = kRaytraceShadowMaskLayerCount;
+            denoise_input.history_valid = m_impl->shadow_history_valid && m_impl->prev_view_projection_valid;
+            denoise_input.prev_view_projection = m_impl->prev_view_projection;
+            denoise_input.temporal_alpha = m_impl->submitted_settings.shadow_denoise_temporal_alpha;
+            denoise_input.atrous_iterations = m_impl->submitted_settings.shadow_denoise_atrous_iterations;
+            denoise_input.c_phi = m_impl->submitted_settings.shadow_denoise_c_phi;
+            denoise_input.n_phi = m_impl->submitted_settings.shadow_denoise_n_phi;
+            denoise_input.p_phi = m_impl->submitted_settings.shadow_denoise_p_phi;
+
+            SpatioTemporalDenoisePassOutput denoise_output{};
+            if (!m_impl->shadow_denoise_pass->Execute(denoise_input, denoise_output))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->shadow_denoise_pass->Name());
+                m_impl->shadow_history_valid = false;
+                m_impl->shadow_history_prev_is_a = true;
+            }
+            else
+            {
+                m_impl->shadow_history_valid = true;
+                m_impl->shadow_history_prev_is_a = !m_impl->shadow_history_prev_is_a;
+                resolved_shadow_mask_array = denoise_output.denoised;
+            }
+        }
+        else
+        {
+            m_impl->shadow_history_valid = false;
+            m_impl->shadow_history_prev_is_a = true;
         }
 
         // Precompute any new/stale HDRIs here before we shade.
@@ -569,7 +677,7 @@ namespace hybrid::renderer
             deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
-            deferred_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            deferred_input.shadow_mask_array = resolved_shadow_mask_array;
 
             DeferredLightingPassOutput deferred_output{};
             if (!m_impl->deferred_lighting_pass->Execute(deferred_input, deferred_output))
@@ -622,6 +730,8 @@ namespace hybrid::renderer
         const auto frame_end = std::chrono::steady_clock::now();
         m_impl->stats.cpu_frame_ms =
             std::chrono::duration<double, std::milli>(frame_end - m_impl->frame_start).count();
+        m_impl->prev_view_projection = m_impl->effective_view.projection * m_impl->effective_view.view;
+        m_impl->prev_view_projection_valid = true;
         return m_impl->outputs;
     }
 

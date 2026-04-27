@@ -66,6 +66,12 @@ namespace hybrid::renderer
         bool enable_ray_traced_shadows = true;
         bool enable_ray_traced_hdri_visibility = false; // Experimental brute-force env visibility (1 spp).
         float raytrace_shadow_normal_bias = 0.02f;
+        bool enable_shadow_denoise = true;
+        float shadow_denoise_temporal_alpha = 0.9f;
+        uint32_t shadow_denoise_atrous_iterations = 3;
+        float shadow_denoise_c_phi = 0.15f;
+        float shadow_denoise_n_phi = 32.0f;
+        float shadow_denoise_p_phi = 0.02f;
 
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;

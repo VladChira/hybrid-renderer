@@ -78,6 +78,32 @@ namespace hybrid::ui
         {
             MarkEdited();
         }
+
+        if (ImGui::Checkbox("Denoise Shadow Masks (Spatio-Temporal)",
+                            &m_pending_render_settings.enable_shadow_denoise))
+        {
+            MarkEdited();
+        }
+
+        if (m_pending_render_settings.enable_shadow_denoise)
+        {
+            if (ImGui::SliderFloat("Temporal Alpha",
+                                   &m_pending_render_settings.shadow_denoise_temporal_alpha,
+                                   0.0f,
+                                   0.99f,
+                                   "%.3f"))
+            {
+                MarkEdited();
+            }
+
+            int atrous_iterations = static_cast<int>(m_pending_render_settings.shadow_denoise_atrous_iterations);
+            if (ImGui::SliderInt("A-Trous Iterations", &atrous_iterations, 0, 6))
+            {
+                m_pending_render_settings.shadow_denoise_atrous_iterations =
+                    static_cast<uint32_t>(atrous_iterations);
+                MarkEdited();
+            }
+        }
         
         if (ImGui::Checkbox("Compute BVH Heatmap", &m_pending_render_settings.compute_bvh_heatmap))
         {
