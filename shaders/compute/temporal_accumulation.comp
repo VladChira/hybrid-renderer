@@ -14,6 +14,7 @@ uniform mat4 u_prev_view_projection;
 
 uniform uvec2 u_output_size;
 uniform uint u_layer_count;
+uniform uint u_denoise_layer_mask;
 uniform float u_alpha;
 uniform uint u_history_valid;
 
@@ -58,6 +59,13 @@ void main()
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {
         float current = texture(u_mask_current, vec3(uv, float(layer))).r;
+        bool should_denoise = (u_denoise_layer_mask & (1u << layer)) != 0u;
+        if (!should_denoise)
+        {
+            imageStore(o_history, ivec3(pixel, int(layer)), vec4(current));
+            continue;
+        }
+
         float history = reproject
                             ? texture(u_history_prev, vec3(prev_uv, float(layer))).r
                             : current;

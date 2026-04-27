@@ -590,11 +590,28 @@ namespace hybrid::renderer
             }
         }
 
-        GlTextureId resolved_shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
-        if (m_impl->shadow_denoise_pass != nullptr &&
+        uint32_t shadow_denoise_layer_mask = 0u;
+        for (const ShadowCaster &caster : m_impl->light_store.ShadowCasters())
+        {
+            if (caster.type == ShadowCaster::Type::Area && caster.layer < 32u)
+            {
+                shadow_denoise_layer_mask |= (1u << caster.layer);
+            }
+        }
+        if (m_impl->submitted_settings.enable_ray_traced_hdri_visibility &&
+            kRaytraceEnvironmentShadowLayer < 32u)
+        {
+            shadow_denoise_layer_mask |= (1u << kRaytraceEnvironmentShadowLayer);
+        }
+
+        const bool should_run_shadow_denoise =
             m_impl->submitted_settings.enable_shadow_denoise &&
             (m_impl->submitted_settings.enable_ray_traced_shadows ||
-             m_impl->submitted_settings.enable_ray_traced_hdri_visibility))
+             m_impl->submitted_settings.enable_ray_traced_hdri_visibility) &&
+            shadow_denoise_layer_mask != 0u;
+
+        GlTextureId resolved_shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+        if (m_impl->shadow_denoise_pass != nullptr && should_run_shadow_denoise)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::ShadowDenoisePass");
             const GlTextureId history_prev = m_impl->shadow_history_prev_is_a
@@ -615,6 +632,7 @@ namespace hybrid::renderer
             denoise_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
             denoise_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
             denoise_input.layer_count = kRaytraceShadowMaskLayerCount;
+            denoise_input.denoise_layer_mask = shadow_denoise_layer_mask;
             denoise_input.history_valid = m_impl->shadow_history_valid && m_impl->prev_view_projection_valid;
             denoise_input.prev_view_projection = m_impl->prev_view_projection;
             denoise_input.temporal_alpha = m_impl->submitted_settings.shadow_denoise_temporal_alpha;

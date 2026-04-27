@@ -10,6 +10,7 @@ uniform sampler2D u_gbuffer_depth;
 
 uniform uvec2 u_output_size;
 uniform uint u_layer_count;
+uniform uint u_denoise_layer_mask;
 uniform int u_stepwidth;
 uniform float u_c_phi;
 uniform float u_n_phi;
@@ -42,6 +43,13 @@ void main()
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {
         float center = texelFetch(u_input_signal, ivec3(pixel, int(layer)), 0).r;
+        bool should_denoise = (u_denoise_layer_mask & (1u << layer)) != 0u;
+        if (!should_denoise)
+        {
+            imageStore(o_filtered, ivec3(pixel, int(layer)), vec4(center));
+            continue;
+        }
+
         if (depth_center >= 1.0)
         {
             imageStore(o_filtered, ivec3(pixel, int(layer)), vec4(center));

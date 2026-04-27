@@ -24,6 +24,7 @@ namespace hybrid::renderer
         GlTextureId gbuffer_depth = 0;
 
         uint32_t layer_count = 0;
+        uint32_t denoise_layer_mask = 0xFFFFFFFFu;
         bool history_valid = false;
         glm::mat4 prev_view_projection{1.0f};
         float temporal_alpha = 0.9f;

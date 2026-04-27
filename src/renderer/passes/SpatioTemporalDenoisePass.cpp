@@ -87,6 +87,7 @@ namespace hybrid::renderer
             m_temporal_program->SetUniformMat4("u_inv_projection", glm::inverse(view.projection));
             m_temporal_program->SetUniformMat4("u_prev_view_projection", input.prev_view_projection);
             m_temporal_program->SetUniform1ui("u_layer_count", input.layer_count);
+            m_temporal_program->SetUniform1ui("u_denoise_layer_mask", input.denoise_layer_mask);
             m_temporal_program->SetUniform1f("u_alpha", input.temporal_alpha);
             m_temporal_program->SetUniform1ui("u_history_valid", input.history_valid ? 1u : 0u);
 
@@ -135,6 +136,7 @@ namespace hybrid::renderer
             m_atrous_program->SetUniform1i("u_gbuffer_depth", static_cast<GLint>(kAtrousDepthTexUnit));
 
             m_atrous_program->SetUniform1ui("u_layer_count", input.layer_count);
+            m_atrous_program->SetUniform1ui("u_denoise_layer_mask", input.denoise_layer_mask);
             m_atrous_program->SetUniform1f("u_c_phi", input.c_phi);
             m_atrous_program->SetUniform1f("u_n_phi", input.n_phi);
             m_atrous_program->SetUniform1f("u_p_phi", input.p_phi);
