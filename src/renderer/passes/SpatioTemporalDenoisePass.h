@@ -22,11 +22,18 @@ namespace hybrid::renderer
         GlTextureId atrous_pong_array = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_depth = 0;
+        GlTextureId gbuffer_rt1_prev = 0;
+        GlTextureId gbuffer_depth_prev = 0;
 
         uint32_t layer_count = 0;
         uint32_t denoise_layer_mask = 0xFFFFFFFFu;
         bool history_valid = false;
         glm::mat4 prev_view_projection{1.0f};
+        float camera_near = 0.1f;
+        float camera_far = 1000.0f;
+        // Disocclusion guards on history reuse.
+        float depth_tolerance = 0.05f;
+        float normal_tolerance = 0.9f;
         float temporal_alpha = 0.9f;
         uint32_t atrous_iterations = 3;
         float c_phi = 0.15f;

@@ -107,6 +107,7 @@ namespace hybrid::renderer
         bool tracy_gpu_context_initialized = false;
         glm::mat4 prev_view_projection{1.0f};
         bool prev_view_projection_valid = false;
+        bool prev_gbuffer_valid = false;
         bool shadow_history_prev_is_a = true;
         bool shadow_history_valid = false;
     };
@@ -351,6 +352,7 @@ namespace hybrid::renderer
         m_impl->frame_context = {};
         m_impl->prev_view_projection = glm::mat4(1.0f);
         m_impl->prev_view_projection_valid = false;
+        m_impl->prev_gbuffer_valid = false;
         m_impl->shadow_history_prev_is_a = true;
         m_impl->shadow_history_valid = false;
     }
@@ -631,10 +633,16 @@ namespace hybrid::renderer
             denoise_input.atrous_pong_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowAtrousPong);
             denoise_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
             denoise_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            denoise_input.gbuffer_rt1_prev = m_impl->frame_resources.Get(FrameTarget::PrevGBufferRt1);
+            denoise_input.gbuffer_depth_prev = m_impl->frame_resources.Get(FrameTarget::PrevGBufferDepth);
             denoise_input.layer_count = kRaytraceShadowMaskLayerCount;
             denoise_input.denoise_layer_mask = shadow_denoise_layer_mask;
-            denoise_input.history_valid = m_impl->shadow_history_valid && m_impl->prev_view_projection_valid;
+            denoise_input.history_valid = m_impl->shadow_history_valid &&
+                                          m_impl->prev_view_projection_valid &&
+                                          m_impl->prev_gbuffer_valid;
             denoise_input.prev_view_projection = m_impl->prev_view_projection;
+            denoise_input.camera_near = m_impl->effective_view.near_plane;
+            denoise_input.camera_far = m_impl->effective_view.far_plane;
             denoise_input.temporal_alpha = m_impl->submitted_settings.shadow_denoise_temporal_alpha;
             denoise_input.atrous_iterations = m_impl->submitted_settings.shadow_denoise_atrous_iterations;
             denoise_input.c_phi = m_impl->submitted_settings.shadow_denoise_c_phi;
@@ -750,6 +758,28 @@ namespace hybrid::renderer
             std::chrono::duration<double, std::milli>(frame_end - m_impl->frame_start).count();
         m_impl->prev_view_projection = m_impl->effective_view.projection * m_impl->effective_view.view;
         m_impl->prev_view_projection_valid = true;
+
+        // Stash the current gbuffer (depth + normals) so the next frame's
+        // temporal pass can do disocclusion checks against it.
+        const GlTextureId cur_depth  = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+        const GlTextureId prev_depth = m_impl->frame_resources.Get(FrameTarget::PrevGBufferDepth);
+        const GlTextureId cur_rt1    = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+        const GlTextureId prev_rt1   = m_impl->frame_resources.Get(FrameTarget::PrevGBufferRt1);
+        const auto &cur_extent = m_impl->current_extent;
+        if (cur_depth != 0 && prev_depth != 0 && cur_rt1 != 0 && prev_rt1 != 0 && cur_extent.IsValid())
+        {
+            glCopyImageSubData(cur_depth, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               prev_depth, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               static_cast<GLsizei>(cur_extent.width),
+                               static_cast<GLsizei>(cur_extent.height),
+                               1);
+            glCopyImageSubData(cur_rt1, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               prev_rt1, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               static_cast<GLsizei>(cur_extent.width),
+                               static_cast<GLsizei>(cur_extent.height),
+                               1);
+            m_impl->prev_gbuffer_valid = true;
+        }
         return m_impl->outputs;
     }
 

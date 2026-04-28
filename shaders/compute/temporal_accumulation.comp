@@ -7,6 +7,9 @@ layout(r16f, binding = 0) uniform writeonly image2DArray o_history;
 uniform sampler2DArray u_mask_current;
 uniform sampler2DArray u_history_prev;
 uniform sampler2D u_gbuffer_depth;
+uniform sampler2D u_gbuffer_rt1;
+uniform sampler2D u_gbuffer_depth_prev;
+uniform sampler2D u_gbuffer_rt1_prev;
 
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
@@ -17,6 +20,19 @@ uniform uint u_layer_count;
 uniform uint u_denoise_layer_mask;
 uniform float u_alpha;
 uniform uint u_history_valid;
+uniform float u_camera_near;
+uniform float u_camera_far;
+uniform float u_depth_tolerance;     // relative
+uniform float u_normal_tolerance;    // dot threshold
+
+float LinearizeDepth(float ndc_z_01)
+{
+    float z_n = ndc_z_01 * 2.0 - 1.0;
+    return (2.0 * u_camera_near * u_camera_far) /
+           (u_camera_far + u_camera_near - z_n * (u_camera_far - u_camera_near));
+}
+
+vec3 DecodeNormal(vec3 enc) { return normalize(enc * 2.0 - 1.0); }
 
 void main()
 {
@@ -31,6 +47,7 @@ void main()
 
     bool reproject = (u_history_valid != 0u) && (depth < 1.0);
     vec2 prev_uv = vec2(0.0);
+    float expected_prev_ndc_z = 0.0;
 
     if (reproject)
     {
@@ -44,6 +61,7 @@ void main()
         {
             vec3 prev_ndc = prev_clip.xyz / prev_clip.w;
             prev_uv = prev_ndc.xy * 0.5 + 0.5;
+            expected_prev_ndc_z = prev_ndc.z * 0.5 + 0.5;
             if (any(lessThan(prev_uv, vec2(0.0))) || any(greaterThan(prev_uv, vec2(1.0))))
             {
                 reproject = false;
@@ -55,7 +73,6 @@ void main()
         }
     }
 
-    float alpha = reproject ? clamp(u_alpha, 0.0, 0.999) : 0.0;
     // Snap the reprojected sample point to a single texel. With bilinear
     // sampling, sub-pixel reprojection round-off (even at a stationary camera)
     // bleeds neighbouring history values into the EMA. At high alpha the
@@ -63,6 +80,39 @@ void main()
     // regions adjacent to lit ones.
     ivec2 prev_pixel = ivec2(floor(prev_uv * vec2(u_output_size)));
     prev_pixel = clamp(prev_pixel, ivec2(0), ivec2(u_output_size) - ivec2(1));
+
+    // Disocclusion rejection: discard history if the surface visible at
+    // prev_uv last frame doesn't match the surface we're shading now.
+    if (reproject)
+    {
+        float prev_depth_ndc = texelFetch(u_gbuffer_depth_prev, prev_pixel, 0).r;
+        if (prev_depth_ndc >= 1.0)
+        {
+            reproject = false;
+        }
+        else
+        {
+            float prev_linear_z = LinearizeDepth(prev_depth_ndc);
+            float expected_linear_z = LinearizeDepth(expected_prev_ndc_z);
+            float dz_rel = abs(prev_linear_z - expected_linear_z) /
+                           max(expected_linear_z, 1e-4);
+            if (dz_rel > u_depth_tolerance)
+            {
+                reproject = false;
+            }
+            else
+            {
+                vec3 cur_normal = DecodeNormal(texelFetch(u_gbuffer_rt1, pixel, 0).xyz);
+                vec3 prev_normal = DecodeNormal(texelFetch(u_gbuffer_rt1_prev, prev_pixel, 0).xyz);
+                if (dot(cur_normal, prev_normal) < u_normal_tolerance)
+                {
+                    reproject = false;
+                }
+            }
+        }
+    }
+
+    float alpha = reproject ? clamp(u_alpha, 0.0, 0.999) : 0.0;
 
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {

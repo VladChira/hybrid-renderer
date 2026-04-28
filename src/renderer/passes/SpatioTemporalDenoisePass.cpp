@@ -14,9 +14,12 @@ namespace hybrid::renderer
         constexpr GLuint kTemporalHistoryImageBinding = 0;
         constexpr GLuint kAtrousOutputImageBinding = 0;
 
-        constexpr GLuint kTemporalCurrentTexUnit = 0;
-        constexpr GLuint kTemporalHistoryTexUnit = 1;
-        constexpr GLuint kTemporalDepthTexUnit = 2;
+        constexpr GLuint kTemporalCurrentTexUnit       = 0;
+        constexpr GLuint kTemporalHistoryTexUnit       = 1;
+        constexpr GLuint kTemporalDepthTexUnit         = 2;
+        constexpr GLuint kTemporalNormalTexUnit        = 3;
+        constexpr GLuint kTemporalDepthPrevTexUnit     = 4;
+        constexpr GLuint kTemporalNormalPrevTexUnit    = 5;
 
         constexpr GLuint kAtrousInputTexUnit = 0;
         constexpr GLuint kAtrousNormalTexUnit = 1;
@@ -73,23 +76,46 @@ namespace hybrid::renderer
             HYBRID_PROFILE_ZONE_N("SpatioTemporalDenoisePass::Temporal");
             m_temporal_program->Use();
 
+            // History rejection requires the previous-frame gbuffer. If it
+            // hasn't been populated yet (first frame after init/resize) we
+            // fall back to "always reject" by routing the current gbuffer in
+            // and disabling history.
+            const bool prev_gbuffer_available =
+                input.gbuffer_depth_prev != 0 && input.gbuffer_rt1_prev != 0;
+            const bool history_valid_effective = input.history_valid && prev_gbuffer_available;
+
             glActiveTexture(GL_TEXTURE0 + kTemporalCurrentTexUnit);
             glBindTexture(GL_TEXTURE_2D_ARRAY, input.current_signal_array);
             glActiveTexture(GL_TEXTURE0 + kTemporalHistoryTexUnit);
             glBindTexture(GL_TEXTURE_2D_ARRAY, input.history_prev_array);
             glActiveTexture(GL_TEXTURE0 + kTemporalDepthTexUnit);
             glBindTexture(GL_TEXTURE_2D, input.gbuffer_depth);
+            glActiveTexture(GL_TEXTURE0 + kTemporalNormalTexUnit);
+            glBindTexture(GL_TEXTURE_2D, input.gbuffer_rt1);
+            glActiveTexture(GL_TEXTURE0 + kTemporalDepthPrevTexUnit);
+            glBindTexture(GL_TEXTURE_2D,
+                          prev_gbuffer_available ? input.gbuffer_depth_prev : input.gbuffer_depth);
+            glActiveTexture(GL_TEXTURE0 + kTemporalNormalPrevTexUnit);
+            glBindTexture(GL_TEXTURE_2D,
+                          prev_gbuffer_available ? input.gbuffer_rt1_prev : input.gbuffer_rt1);
 
-            m_temporal_program->SetUniform1i("u_mask_current", static_cast<GLint>(kTemporalCurrentTexUnit));
-            m_temporal_program->SetUniform1i("u_history_prev", static_cast<GLint>(kTemporalHistoryTexUnit));
-            m_temporal_program->SetUniform1i("u_gbuffer_depth", static_cast<GLint>(kTemporalDepthTexUnit));
+            m_temporal_program->SetUniform1i("u_mask_current",       static_cast<GLint>(kTemporalCurrentTexUnit));
+            m_temporal_program->SetUniform1i("u_history_prev",       static_cast<GLint>(kTemporalHistoryTexUnit));
+            m_temporal_program->SetUniform1i("u_gbuffer_depth",      static_cast<GLint>(kTemporalDepthTexUnit));
+            m_temporal_program->SetUniform1i("u_gbuffer_rt1",        static_cast<GLint>(kTemporalNormalTexUnit));
+            m_temporal_program->SetUniform1i("u_gbuffer_depth_prev", static_cast<GLint>(kTemporalDepthPrevTexUnit));
+            m_temporal_program->SetUniform1i("u_gbuffer_rt1_prev",   static_cast<GLint>(kTemporalNormalPrevTexUnit));
             m_temporal_program->SetUniformMat4("u_inv_view", glm::affineInverse(view.view));
             m_temporal_program->SetUniformMat4("u_inv_projection", glm::inverse(view.projection));
             m_temporal_program->SetUniformMat4("u_prev_view_projection", input.prev_view_projection);
             m_temporal_program->SetUniform1ui("u_layer_count", input.layer_count);
             m_temporal_program->SetUniform1ui("u_denoise_layer_mask", input.denoise_layer_mask);
             m_temporal_program->SetUniform1f("u_alpha", input.temporal_alpha);
-            m_temporal_program->SetUniform1ui("u_history_valid", input.history_valid ? 1u : 0u);
+            m_temporal_program->SetUniform1ui("u_history_valid", history_valid_effective ? 1u : 0u);
+            m_temporal_program->SetUniform1f("u_camera_near", input.camera_near);
+            m_temporal_program->SetUniform1f("u_camera_far", input.camera_far);
+            m_temporal_program->SetUniform1f("u_depth_tolerance", input.depth_tolerance);
+            m_temporal_program->SetUniform1f("u_normal_tolerance", input.normal_tolerance);
 
             const GLint output_size_loc = m_temporal_program->GetUniformLocation("u_output_size");
             if (output_size_loc >= 0)
@@ -110,6 +136,12 @@ namespace hybrid::renderer
             glDispatchCompute(groups_x, groups_y, 1);
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
+            glActiveTexture(GL_TEXTURE0 + kTemporalNormalPrevTexUnit);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE0 + kTemporalDepthPrevTexUnit);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE0 + kTemporalNormalTexUnit);
+            glBindTexture(GL_TEXTURE_2D, 0);
             glActiveTexture(GL_TEXTURE0 + kTemporalDepthTexUnit);
             glBindTexture(GL_TEXTURE_2D, 0);
             glActiveTexture(GL_TEXTURE0 + kTemporalHistoryTexUnit);
