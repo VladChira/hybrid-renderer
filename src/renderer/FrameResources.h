@@ -37,7 +37,10 @@ namespace hybrid::renderer
         RaytraceShadowHistoryA,
         RaytraceShadowHistoryB,
         RaytraceShadowAtrousPing,
-        RaytraceShadowAtrousPong
+        RaytraceShadowAtrousPong,
+        // Copies of the previous frame's gbuffer used by temporal history rejection.
+        PrevGBufferDepth,
+        PrevGBufferRt1
     };
 
     enum class FrameFramebuffer
@@ -101,6 +104,8 @@ namespace hybrid::renderer
         GLTexture m_raytrace_shadow_history_b{};
         GLTexture m_raytrace_shadow_atrous_ping{};
         GLTexture m_raytrace_shadow_atrous_pong{};
+        GLTexture m_prev_gbuffer_depth{};
+        GLTexture m_prev_gbuffer_rt1{};
     };
 
 } // namespace hybrid::renderer

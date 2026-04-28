@@ -1,22 +1,49 @@
 #version 460 core
 
+// SVGF-style temporal accumulation. Accumulates first and second moments of the
+// signal across frames so that the spatial filter can derive a per-pixel
+// luminance variance. Rejects history when the reprojected pixel disocclusion
+// is detected via depth or normal divergence vs the previous-frame G-buffer.
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(r16f, binding = 0) uniform writeonly image2DArray o_history;
+// (m1, m2) carried across frames
+layout(rg16f, binding = 0) uniform writeonly image2DArray o_history;
+// (m1, variance) consumed by this frame's a-trous filter
+layout(rg16f, binding = 1) uniform writeonly image2DArray o_moments;
 
 uniform sampler2DArray u_mask_current;
 uniform sampler2DArray u_history_prev;
 uniform sampler2D u_gbuffer_depth;
+uniform sampler2D u_gbuffer_rt1;
+uniform sampler2D u_gbuffer_depth_prev;
+uniform sampler2D u_gbuffer_rt1_prev;
 
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform mat4 u_prev_view_projection;
 
 uniform uvec2 u_output_size;
-uniform uint u_layer_count;
-uniform uint u_denoise_layer_mask;
+uniform uint  u_layer_count;
+uniform uint  u_denoise_layer_mask;
 uniform float u_alpha;
-uniform uint u_history_valid;
+uniform uint  u_history_valid;
+uniform float u_camera_near;
+uniform float u_camera_far;
+uniform float u_depth_tolerance;
+uniform float u_normal_tolerance;
+
+float LinearizeDepth(float ndc_z)
+{
+    float z_n = ndc_z * 2.0 - 1.0;
+    return (2.0 * u_camera_near * u_camera_far) /
+           (u_camera_far + u_camera_near - z_n * (u_camera_far - u_camera_near));
+}
+
+vec3 DecodeNormal(vec3 enc)
+{
+    return normalize(enc * 2.0 - 1.0);
+}
 
 void main()
 {
@@ -27,10 +54,12 @@ void main()
     }
 
     vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
-    float depth = texture(u_gbuffer_depth, uv).r;
+    float depth = texelFetch(u_gbuffer_depth, pixel, 0).r;
+    bool sky = depth >= 1.0;
 
-    bool reproject = (u_history_valid != 0u) && (depth < 1.0);
+    bool reproject = (u_history_valid != 0u) && !sky;
     vec2 prev_uv = vec2(0.0);
+    float linear_z_expected = 0.0;
 
     if (reproject)
     {
@@ -44,6 +73,7 @@ void main()
         {
             vec3 prev_ndc = prev_clip.xyz / prev_clip.w;
             prev_uv = prev_ndc.xy * 0.5 + 0.5;
+            linear_z_expected = LinearizeDepth(prev_ndc.z * 0.5 + 0.5);
             if (any(lessThan(prev_uv, vec2(0.0))) || any(greaterThan(prev_uv, vec2(1.0))))
             {
                 reproject = false;
@@ -55,21 +85,58 @@ void main()
         }
     }
 
+    if (reproject)
+    {
+        float prev_depth_ndc = texture(u_gbuffer_depth_prev, prev_uv).r;
+        if (prev_depth_ndc >= 1.0)
+        {
+            reproject = false;
+        }
+        else
+        {
+            float prev_linear_z = LinearizeDepth(prev_depth_ndc);
+            float dz_rel = abs(prev_linear_z - linear_z_expected) /
+                           max(linear_z_expected, 1e-4);
+            if (dz_rel > u_depth_tolerance)
+            {
+                reproject = false;
+            }
+        }
+    }
+
+    if (reproject)
+    {
+        vec3 cur_normal = DecodeNormal(texelFetch(u_gbuffer_rt1, pixel, 0).xyz);
+        vec3 prev_normal = DecodeNormal(texture(u_gbuffer_rt1_prev, prev_uv).xyz);
+        if (dot(cur_normal, prev_normal) < u_normal_tolerance)
+        {
+            reproject = false;
+        }
+    }
+
     float alpha = reproject ? clamp(u_alpha, 0.0, 0.999) : 0.0;
+
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {
         float current = texture(u_mask_current, vec3(uv, float(layer))).r;
         bool should_denoise = (u_denoise_layer_mask & (1u << layer)) != 0u;
         if (!should_denoise)
         {
-            imageStore(o_history, ivec3(pixel, int(layer)), vec4(current));
+            float c2 = current * current;
+            imageStore(o_history, ivec3(pixel, int(layer)), vec4(current, c2, 0.0, 0.0));
+            imageStore(o_moments, ivec3(pixel, int(layer)), vec4(current, 0.0, 0.0, 0.0));
             continue;
         }
 
-        float history = reproject
-                            ? texture(u_history_prev, vec3(prev_uv, float(layer))).r
-                            : current;
-        float accumulated = mix(current, history, alpha);
-        imageStore(o_history, ivec3(pixel, int(layer)), vec4(accumulated));
+        vec2 prev_moments = reproject
+                                ? texture(u_history_prev, vec3(prev_uv, float(layer))).rg
+                                : vec2(current, current * current);
+
+        float m1 = mix(current, prev_moments.x, alpha);
+        float m2 = mix(current * current, prev_moments.y, alpha);
+        float var = max(0.0, m2 - m1 * m1);
+
+        imageStore(o_history, ivec3(pixel, int(layer)), vec4(m1, m2, 0.0, 0.0));
+        imageStore(o_moments, ivec3(pixel, int(layer)), vec4(m1, var, 0.0, 0.0));
     }
 }

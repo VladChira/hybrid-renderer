@@ -68,10 +68,17 @@ namespace hybrid::renderer
         float raytrace_shadow_normal_bias = 0.02f;
         bool enable_shadow_denoise = true;
         float shadow_denoise_temporal_alpha = 0.9f;
-        uint32_t shadow_denoise_atrous_iterations = 3;
-        float shadow_denoise_c_phi = 0.15f;
-        float shadow_denoise_n_phi = 32.0f;
-        float shadow_denoise_p_phi = 0.02f;
+        uint32_t shadow_denoise_atrous_iterations = 4;
+        // Luminance bandwidth multiplier applied to sqrt(variance) per pixel
+        // (SVGF "sigma_l"). Larger -> more aggressive blur.
+        float shadow_denoise_sigma_l = 4.0f;
+        // Normal weight exponent.
+        float shadow_denoise_n_phi = 128.0f;
+        // Linear-depth bandwidth, expressed as a fraction of view-space z.
+        float shadow_denoise_p_phi = 1.0f;
+        // Disocclusion guards on history reuse.
+        float shadow_denoise_depth_tolerance = 0.05f;
+        float shadow_denoise_normal_tolerance = 0.9f;
 
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;

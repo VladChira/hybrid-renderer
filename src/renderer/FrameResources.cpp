@@ -81,6 +81,8 @@ namespace hybrid::renderer
         m_raytrace_shadow_history_b.Destroy();
         m_raytrace_shadow_atrous_ping.Destroy();
         m_raytrace_shadow_atrous_pong.Destroy();
+        m_prev_gbuffer_depth.Destroy();
+        m_prev_gbuffer_rt1.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -144,6 +146,10 @@ namespace hybrid::renderer
             return m_raytrace_shadow_atrous_ping.Id();
         case FrameTarget::RaytraceShadowAtrousPong:
             return m_raytrace_shadow_atrous_pong.Id();
+        case FrameTarget::PrevGBufferDepth:
+            return m_prev_gbuffer_depth.Id();
+        case FrameTarget::PrevGBufferRt1:
+            return m_prev_gbuffer_rt1.Id();
         default:
             return 0;
         }
@@ -453,7 +459,7 @@ namespace hybrid::renderer
                                            GL_UNSIGNED_BYTE,
                                            nullptr);
 
-        auto allocate_r16f_array = [extent](GLTexture &texture, const char *label) -> bool
+        auto allocate_rg16f_array = [extent](GLTexture &texture, const char *label) -> bool
         {
             if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D_ARRAY))
             {
@@ -466,23 +472,59 @@ namespace hybrid::renderer
             texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             texture.SetImage3D(0,
-                               GL_R16F,
+                               GL_RG16F,
                                static_cast<GLsizei>(extent.width),
                                static_cast<GLsizei>(extent.height),
                                static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
-                               GL_RED,
+                               GL_RG,
                                GL_HALF_FLOAT,
                                nullptr);
             return true;
         };
 
-        if (!allocate_r16f_array(m_raytrace_shadow_history_a, "raytrace shadow history A array") ||
-            !allocate_r16f_array(m_raytrace_shadow_history_b, "raytrace shadow history B array") ||
-            !allocate_r16f_array(m_raytrace_shadow_atrous_ping, "raytrace shadow atrous ping array") ||
-            !allocate_r16f_array(m_raytrace_shadow_atrous_pong, "raytrace shadow atrous pong array"))
+        if (!allocate_rg16f_array(m_raytrace_shadow_history_a, "raytrace shadow history A array") ||
+            !allocate_rg16f_array(m_raytrace_shadow_history_b, "raytrace shadow history B array") ||
+            !allocate_rg16f_array(m_raytrace_shadow_atrous_ping, "raytrace shadow atrous ping array") ||
+            !allocate_rg16f_array(m_raytrace_shadow_atrous_pong, "raytrace shadow atrous pong array"))
         {
             return false;
         }
+
+        if (!m_prev_gbuffer_depth.IsValid() && !m_prev_gbuffer_depth.Create(GL_TEXTURE_2D))
+        {
+            LOG_ERROR("[FrameResources] Failed to create prev gbuffer depth texture");
+            return false;
+        }
+        m_prev_gbuffer_depth.Bind();
+        m_prev_gbuffer_depth.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        m_prev_gbuffer_depth.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        m_prev_gbuffer_depth.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_prev_gbuffer_depth.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_prev_gbuffer_depth.SetImage2D(0,
+                                        GL_DEPTH_COMPONENT24,
+                                        static_cast<GLsizei>(extent.width),
+                                        static_cast<GLsizei>(extent.height),
+                                        GL_DEPTH_COMPONENT,
+                                        GL_FLOAT,
+                                        nullptr);
+
+        if (!m_prev_gbuffer_rt1.IsValid() && !m_prev_gbuffer_rt1.Create(GL_TEXTURE_2D))
+        {
+            LOG_ERROR("[FrameResources] Failed to create prev gbuffer rt1 texture");
+            return false;
+        }
+        m_prev_gbuffer_rt1.Bind();
+        m_prev_gbuffer_rt1.SetParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        m_prev_gbuffer_rt1.SetParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        m_prev_gbuffer_rt1.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_prev_gbuffer_rt1.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_prev_gbuffer_rt1.SetImage2D(0,
+                                      GL_RGBA16F,
+                                      static_cast<GLsizei>(extent.width),
+                                      static_cast<GLsizei>(extent.height),
+                                      GL_RGBA,
+                                      GL_HALF_FLOAT,
+                                      nullptr);
 
         return true;
     }
