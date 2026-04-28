@@ -113,6 +113,7 @@ void main()
     }
 
     float alpha = reproject ? clamp(u_alpha, 0.0, 0.999) : 0.0;
+    ivec2 max_coord = ivec2(u_output_size) - ivec2(1);
 
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {
@@ -127,6 +128,33 @@ void main()
         float history = reproject
                             ? texelFetch(u_history_prev, ivec3(prev_pixel, int(layer)), 0).r
                             : current;
+
+        // TAA-style neighbourhood clamp: rectify the reprojected history into
+        // the per-frame value envelope of the current 3x3 neighbourhood. This
+        // kills the "ghosting" you get when a deep-shadow pixel reads its
+        // history from a tangentially-offset penumbra/boundary texel during
+        // camera motion (geometric rejection can't catch that — it's the same
+        // surface, just a different shadow value). Stochastic regions
+        // (penumbras) naturally span [0,1] in the 3x3 box so the clamp is
+        // wide and temporal averaging keeps working there.
+        if (reproject)
+        {
+            float nbr_min = current;
+            float nbr_max = current;
+            for (int j = -1; j <= 1; ++j)
+            {
+                for (int i = -1; i <= 1; ++i)
+                {
+                    if (i == 0 && j == 0) continue;
+                    ivec2 c = clamp(pixel + ivec2(i, j), ivec2(0), max_coord);
+                    float v = texelFetch(u_mask_current, ivec3(c, int(layer)), 0).r;
+                    nbr_min = min(nbr_min, v);
+                    nbr_max = max(nbr_max, v);
+                }
+            }
+            history = clamp(history, nbr_min, nbr_max);
+        }
+
         float accumulated = mix(current, history, alpha);
         imageStore(o_history, ivec3(pixel, int(layer)), vec4(accumulated));
     }
