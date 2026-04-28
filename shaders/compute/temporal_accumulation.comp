@@ -56,6 +56,14 @@ void main()
     }
 
     float alpha = reproject ? clamp(u_alpha, 0.0, 0.999) : 0.0;
+    // Snap the reprojected sample point to a single texel. With bilinear
+    // sampling, sub-pixel reprojection round-off (even at a stationary camera)
+    // bleeds neighbouring history values into the EMA. At high alpha the
+    // bleed compounds frame-over-frame and noticeably brightens fully-dark
+    // regions adjacent to lit ones.
+    ivec2 prev_pixel = ivec2(floor(prev_uv * vec2(u_output_size)));
+    prev_pixel = clamp(prev_pixel, ivec2(0), ivec2(u_output_size) - ivec2(1));
+
     for (uint layer = 0u; layer < u_layer_count; ++layer)
     {
         float current = texture(u_mask_current, vec3(uv, float(layer))).r;
@@ -67,7 +75,7 @@ void main()
         }
 
         float history = reproject
-                            ? texture(u_history_prev, vec3(prev_uv, float(layer))).r
+                            ? texelFetch(u_history_prev, ivec3(prev_pixel, int(layer)), 0).r
                             : current;
         float accumulated = mix(current, history, alpha);
         imageStore(o_history, ivec3(pixel, int(layer)), vec4(accumulated));
