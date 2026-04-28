@@ -12,7 +12,8 @@ uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform mat4 u_prev_view_projection;
 
-uniform uvec2 u_output_size;
+uniform uvec2 u_output_size;    // dispatch size (half-res when half-res is on)
+uniform uvec2 u_gbuffer_size;   // full-res gbuffer dimensions
 uniform uint u_layer_count;
 uniform uint u_denoise_layer_mask;
 uniform float u_alpha;
@@ -27,14 +28,17 @@ void main()
     }
 
     vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
-    float depth = texture(u_gbuffer_depth, uv).r;
+    ivec2 scale = ivec2(u_gbuffer_size) / ivec2(u_output_size);
+    ivec2 gbuffer_pixel = pixel * scale;
+    vec2 gb_uv = (vec2(gbuffer_pixel) + vec2(0.5)) / vec2(u_gbuffer_size);
+    float depth = texelFetch(u_gbuffer_depth, gbuffer_pixel, 0).r;
 
     bool reproject = (u_history_valid != 0u) && (depth < 1.0);
     vec2 prev_uv = vec2(0.0);
 
     if (reproject)
     {
-        vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        vec4 ndc = vec4(gb_uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
         vec4 view = u_inv_projection * ndc;
         view /= max(view.w, 1e-5);
         vec3 world_pos = (u_inv_view * vec4(view.xyz, 1.0)).xyz;

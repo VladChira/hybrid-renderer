@@ -81,6 +81,7 @@ namespace hybrid::renderer
         m_raytrace_shadow_history_b.Destroy();
         m_raytrace_shadow_atrous_ping.Destroy();
         m_raytrace_shadow_atrous_pong.Destroy();
+        m_raytrace_shadow_mask_upscaled.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -144,6 +145,8 @@ namespace hybrid::renderer
             return m_raytrace_shadow_atrous_ping.Id();
         case FrameTarget::RaytraceShadowAtrousPong:
             return m_raytrace_shadow_atrous_pong.Id();
+        case FrameTarget::RaytraceShadowMaskUpscaled:
+            return m_raytrace_shadow_mask_upscaled.Id();
         default:
             return 0;
         }
@@ -434,6 +437,11 @@ namespace hybrid::renderer
                                       GL_UNSIGNED_BYTE,
                                       nullptr);
 
+        // The shadow chain (mask, history, atrous) runs at half-res. A separate
+        // full-res mask is produced by the upscale pass and consumed by
+        // deferred lighting.
+        const RenderExtent half = HalfResExtent(extent);
+
         if (!m_raytrace_shadow_masks.IsValid() && !m_raytrace_shadow_masks.Create(GL_TEXTURE_2D_ARRAY))
         {
             LOG_ERROR("[FrameResources] Failed to create raytrace shadow mask array");
@@ -446,14 +454,14 @@ namespace hybrid::renderer
         m_raytrace_shadow_masks.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         m_raytrace_shadow_masks.SetImage3D(0,
                                            GL_R8,
-                                           static_cast<GLsizei>(extent.width),
-                                           static_cast<GLsizei>(extent.height),
+                                           static_cast<GLsizei>(half.width),
+                                           static_cast<GLsizei>(half.height),
                                            static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
                                            GL_RED,
                                            GL_UNSIGNED_BYTE,
                                            nullptr);
 
-        auto allocate_r16f_array = [extent](GLTexture &texture, const char *label) -> bool
+        auto allocate_r16f_array = [half](GLTexture &texture, const char *label) -> bool
         {
             if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D_ARRAY))
             {
@@ -467,8 +475,8 @@ namespace hybrid::renderer
             texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             texture.SetImage3D(0,
                                GL_R16F,
-                               static_cast<GLsizei>(extent.width),
-                               static_cast<GLsizei>(extent.height),
+                               static_cast<GLsizei>(half.width),
+                               static_cast<GLsizei>(half.height),
                                static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
                                GL_RED,
                                GL_HALF_FLOAT,
@@ -483,6 +491,25 @@ namespace hybrid::renderer
         {
             return false;
         }
+
+        if (!m_raytrace_shadow_mask_upscaled.IsValid() && !m_raytrace_shadow_mask_upscaled.Create(GL_TEXTURE_2D_ARRAY))
+        {
+            LOG_ERROR("[FrameResources] Failed to create raytrace shadow mask upscaled array");
+            return false;
+        }
+        m_raytrace_shadow_mask_upscaled.Bind();
+        m_raytrace_shadow_mask_upscaled.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        m_raytrace_shadow_mask_upscaled.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_raytrace_shadow_mask_upscaled.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_raytrace_shadow_mask_upscaled.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_raytrace_shadow_mask_upscaled.SetImage3D(0,
+                                                   GL_R8,
+                                                   static_cast<GLsizei>(extent.width),
+                                                   static_cast<GLsizei>(extent.height),
+                                                   static_cast<GLsizei>(kRaytraceShadowMaskLayerCount),
+                                                   GL_RED,
+                                                   GL_UNSIGNED_BYTE,
+                                                   nullptr);
 
         return true;
     }

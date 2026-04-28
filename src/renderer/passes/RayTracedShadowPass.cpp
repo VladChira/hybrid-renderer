@@ -55,8 +55,10 @@ namespace hybrid::renderer
 
         const RenderSettings &settings = *input.settings;
         const RenderView &view = *input.effective_view;
-        const auto &extent = settings.render_extent;
-        if (!extent.IsValid())
+        const auto &gbuffer_extent = settings.render_extent;
+        const RenderExtent shadow_extent =
+            input.shadow_extent.IsValid() ? input.shadow_extent : gbuffer_extent;
+        if (!gbuffer_extent.IsValid() || !shadow_extent.IsValid())
         {
             return false;
         }
@@ -93,12 +95,20 @@ namespace hybrid::renderer
         if (output_size_loc >= 0)
         {
             glUniform2ui(output_size_loc,
-                         static_cast<GLuint>(extent.width),
-                         static_cast<GLuint>(extent.height));
+                         static_cast<GLuint>(shadow_extent.width),
+                         static_cast<GLuint>(shadow_extent.height));
         }
 
-        const GLuint groups_x = CeilDiv(extent.width, kWorkgroupSize);
-        const GLuint groups_y = CeilDiv(extent.height, kWorkgroupSize);
+        const GLint gbuffer_size_loc = m_program->GetUniformLocation("u_gbuffer_size");
+        if (gbuffer_size_loc >= 0)
+        {
+            glUniform2ui(gbuffer_size_loc,
+                         static_cast<GLuint>(gbuffer_extent.width),
+                         static_cast<GLuint>(gbuffer_extent.height));
+        }
+
+        const GLuint groups_x = CeilDiv(shadow_extent.width, kWorkgroupSize);
+        const GLuint groups_y = CeilDiv(shadow_extent.height, kWorkgroupSize);
 
         auto dispatch_shadow_layer = [&](uint32_t layer,
                                          uint32_t light_type,

@@ -21,6 +21,7 @@
 #include "renderer/passes/TraversalHeatmapPass.h"
 #include "renderer/passes/RayTracedShadowPass.h"
 #include "renderer/passes/SpatioTemporalDenoisePass.h"
+#include "renderer/passes/ShadowMaskUpscalePass.h"
 
 #include <array>
 #include <chrono>
@@ -78,6 +79,7 @@ namespace hybrid::renderer
         GLShaderProgram raytrace_shadow_shader{};
         GLShaderProgram temporal_accumulation_shader{};
         GLShaderProgram atrous_denoise_shader{};
+        GLShaderProgram shadow_mask_upscale_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -93,6 +95,7 @@ namespace hybrid::renderer
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
         std::unique_ptr<RayTracedShadowPass> raytrace_shadow_pass{};
         std::unique_ptr<SpatioTemporalDenoisePass> shadow_denoise_pass{};
+        std::unique_ptr<ShadowMaskUpscalePass> shadow_mask_upscale_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -242,6 +245,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/shadow_mask_upscale.comp",
+                                                                  m_impl->shadow_mask_upscale_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: shadow mask upscale compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -283,6 +293,7 @@ namespace hybrid::renderer
                                                                              &m_impl->as_cache);
         m_impl->shadow_denoise_pass = std::make_unique<SpatioTemporalDenoisePass>(&m_impl->temporal_accumulation_shader,
                                                                                    &m_impl->atrous_denoise_shader);
+        m_impl->shadow_mask_upscale_pass = std::make_unique<ShadowMaskUpscalePass>(&m_impl->shadow_mask_upscale_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
@@ -340,6 +351,7 @@ namespace hybrid::renderer
         m_impl->raytrace_shadow_shader.Destroy();
         m_impl->temporal_accumulation_shader.Destroy();
         m_impl->atrous_denoise_shader.Destroy();
+        m_impl->shadow_mask_upscale_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->traversal_heatmap_pass.reset();
         m_impl->raytrace_shadow_pass.reset();
@@ -566,6 +578,9 @@ namespace hybrid::renderer
         m_impl->light_store.Update(m_impl->scene_data,
                                     m_impl->submitted_settings.enable_ray_traced_shadows);
 
+        const RenderExtent shadow_extent =
+            FrameResources::HalfResExtent(m_impl->submitted_settings.render_extent);
+
         if (m_impl->raytrace_shadow_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::RayTracedShadowPass");
@@ -583,6 +598,7 @@ namespace hybrid::renderer
             shadow_input.gbuffer_depth     = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
             shadow_input.gbuffer_rt1       = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
             shadow_input.shadow_mask_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
+            shadow_input.shadow_extent     = shadow_extent;
             shadow_input.frame_index       = static_cast<uint32_t>(m_impl->frame_context.frame_index);
             if (!m_impl->raytrace_shadow_pass->Execute(shadow_input))
             {
@@ -623,7 +639,8 @@ namespace hybrid::renderer
 
             SpatioTemporalDenoisePassInput denoise_input{};
             denoise_input.effective_view = &m_impl->effective_view;
-            denoise_input.extent = m_impl->submitted_settings.render_extent;
+            denoise_input.extent = shadow_extent;
+            denoise_input.gbuffer_extent = m_impl->submitted_settings.render_extent;
             denoise_input.current_signal_array = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMasks);
             denoise_input.history_prev_array = history_prev;
             denoise_input.history_out_array = history_out;
@@ -659,6 +676,33 @@ namespace hybrid::renderer
         {
             m_impl->shadow_history_valid = false;
             m_impl->shadow_history_prev_is_a = true;
+        }
+
+        // Joint-bilateral upscale of the half-res shadow chain back to full
+        // resolution. Deferred lighting samples the upscaled mask.
+        if (m_impl->shadow_mask_upscale_pass != nullptr && resolved_shadow_mask_array != 0)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::ShadowMaskUpscalePass");
+            const GlTextureId upscaled = m_impl->frame_resources.Get(FrameTarget::RaytraceShadowMaskUpscaled);
+            if (upscaled != 0)
+            {
+                ShadowMaskUpscalePassInput upscale_input{};
+                upscale_input.input_extent = shadow_extent;
+                upscale_input.output_extent = m_impl->submitted_settings.render_extent;
+                upscale_input.input_mask_array = resolved_shadow_mask_array;
+                upscale_input.output_mask_array = upscaled;
+                upscale_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+                upscale_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+                upscale_input.layer_count = kRaytraceShadowMaskLayerCount;
+                if (!m_impl->shadow_mask_upscale_pass->Execute(upscale_input))
+                {
+                    LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->shadow_mask_upscale_pass->Name());
+                }
+                else
+                {
+                    resolved_shadow_mask_array = upscaled;
+                }
+            }
         }
 
         // Precompute any new/stale HDRIs here before we shade.

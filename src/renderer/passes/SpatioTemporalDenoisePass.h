@@ -13,7 +13,10 @@ namespace hybrid::renderer
     struct SpatioTemporalDenoisePassInput
     {
         const RenderView *effective_view = nullptr;
+        // Half-res shadow chain extent (dispatch size for both passes).
         RenderExtent extent{};
+        // Full-res gbuffer extent. Equals `extent` when the half-res path is off.
+        RenderExtent gbuffer_extent{};
 
         GlTextureId current_signal_array = 0;
         GlTextureId history_prev_array = 0;

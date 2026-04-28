@@ -1,0 +1,119 @@
+#version 460 core
+
+// Joint-bilateral upscale of the half-res shadow mask back to full-res. Each
+// half-res tap was traced against the gbuffer at full-res pixel `tap * 2`, so
+// for each full-res target pixel we score the 4 surrounding taps by depth and
+// normal similarity vs the target's gbuffer and combine with bilinear weights.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(r8, binding = 0) uniform writeonly image2DArray o_shadow_mask;
+
+uniform sampler2DArray u_input_mask;     // half-res shadow chain output
+uniform sampler2D      u_gbuffer_rt1;    // full-res normal
+uniform sampler2D      u_gbuffer_depth;  // full-res depth
+
+uniform uvec2 u_output_size;             // full-res
+uniform uvec2 u_input_size;              // half-res
+uniform uint  u_layer_count;
+uniform float u_depth_sigma;             // relative depth tolerance
+uniform float u_normal_exponent;         // larger -> tighter normal match
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+
+    float depth_center = texelFetch(u_gbuffer_depth, pixel, 0).r;
+    if (depth_center >= 1.0)
+    {
+        for (uint layer = 0u; layer < u_layer_count; ++layer)
+        {
+            imageStore(o_shadow_mask, ivec3(pixel, int(layer)), vec4(1.0));
+        }
+        return;
+    }
+    vec3 normal_center = normalize(texelFetch(u_gbuffer_rt1, pixel, 0).xyz * 2.0 - 1.0);
+
+    // Locate the 4 surrounding half-res taps and bilinear weights. Half-res
+    // pixel (i,j) covers full-res positions [2i, 2i+1] x [2j, 2j+1] — its
+    // center sits at full-res (2i+0.5, 2j+0.5).
+    vec2 half_pos = (vec2(pixel) + vec2(0.5)) * 0.5 - vec2(0.5);
+    ivec2 tap0 = ivec2(floor(half_pos));
+    vec2  frac_part = half_pos - vec2(tap0);
+
+    ivec2 max_tap = ivec2(u_input_size) - ivec2(1);
+
+    ivec2 taps[4] = ivec2[4](
+        clamp(tap0 + ivec2(0, 0), ivec2(0), max_tap),
+        clamp(tap0 + ivec2(1, 0), ivec2(0), max_tap),
+        clamp(tap0 + ivec2(0, 1), ivec2(0), max_tap),
+        clamp(tap0 + ivec2(1, 1), ivec2(0), max_tap)
+    );
+    float bilinear_w[4] = float[4](
+        (1.0 - frac_part.x) * (1.0 - frac_part.y),
+        frac_part.x         * (1.0 - frac_part.y),
+        (1.0 - frac_part.x) * frac_part.y,
+        frac_part.x         * frac_part.y
+    );
+
+    // Geometric weights are computed once per tap (shared across layers).
+    float geom_w[4];
+    bool  geom_valid[4];
+    int   best_tap = 0;
+    float best_geom = -1.0;
+    float depth_scale = max(abs(depth_center) * u_depth_sigma, 1e-5);
+    for (int i = 0; i < 4; ++i)
+    {
+        ivec2 gb_pixel = taps[i] * 2;
+        gb_pixel = clamp(gb_pixel, ivec2(0), ivec2(u_output_size) - ivec2(1));
+        float depth_sample = texelFetch(u_gbuffer_depth, gb_pixel, 0).r;
+        if (depth_sample >= 1.0)
+        {
+            geom_w[i] = 0.0;
+            geom_valid[i] = false;
+            continue;
+        }
+        vec3 normal_sample = normalize(texelFetch(u_gbuffer_rt1, gb_pixel, 0).xyz * 2.0 - 1.0);
+
+        float dz = abs(depth_sample - depth_center) / depth_scale;
+        float depth_w = exp(-dz * dz);
+        float n_dot = max(dot(normal_center, normal_sample), 0.0);
+        float normal_w = pow(n_dot, max(u_normal_exponent, 1.0));
+        float w = depth_w * normal_w;
+        geom_w[i] = w;
+        geom_valid[i] = true;
+        if (w > best_geom)
+        {
+            best_geom = w;
+            best_tap = i;
+        }
+    }
+
+    for (uint layer = 0u; layer < u_layer_count; ++layer)
+    {
+        float sum = 0.0;
+        float wsum = 0.0;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (!geom_valid[i])
+            {
+                continue;
+            }
+            float w = bilinear_w[i] * geom_w[i];
+            float v = texelFetch(u_input_mask, ivec3(taps[i], int(layer)), 0).r;
+            sum += v * w;
+            wsum += w;
+        }
+        // Fallback: nearest valid tap when no neighbour passes the geometric test.
+        if (wsum <= 1e-6)
+        {
+            sum = texelFetch(u_input_mask, ivec3(taps[best_tap], int(layer)), 0).r;
+            wsum = 1.0;
+        }
+        imageStore(o_shadow_mask, ivec3(pixel, int(layer)), vec4(sum / wsum));
+    }
+}

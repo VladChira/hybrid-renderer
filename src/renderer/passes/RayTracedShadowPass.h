@@ -27,6 +27,9 @@ namespace hybrid::renderer
         GlTextureId           gbuffer_depth    = 0;
         GlTextureId           gbuffer_rt1      = 0;
         GlTextureId           shadow_mask_array = 0;
+        // Dispatch / shadow-mask extent. Half of render_extent when the
+        // half-res shadow path is on; equal to render_extent otherwise.
+        RenderExtent          shadow_extent{};
         uint32_t              frame_index      = 0;
     };
 

@@ -20,7 +20,8 @@ uniform mat4  u_inv_projection;
 uniform vec3  u_camera_position;
 
 uniform uint  u_tlas_node_count;
-uniform uvec2 u_output_size;
+uniform uvec2 u_output_size;     // dispatch-size; half-res when half-res is enabled
+uniform uvec2 u_gbuffer_size;    // full-res gbuffer dimensions
 uniform uint  u_frame_index;
 uniform float u_normal_bias;
 
@@ -64,8 +65,13 @@ void main()
         return;
     }
 
-    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
-    float depth = texture(u_gbuffer_depth, uv).r;
+    // Map this output pixel onto a full-res gbuffer pixel. For half-res this
+    // picks the top-left full-res pixel of each 2x2 quad; for full-res the
+    // mapping is identity.
+    ivec2 scale = ivec2(u_gbuffer_size) / ivec2(u_output_size);
+    ivec2 gbuffer_pixel = pixel * scale;
+    vec2 uv = (vec2(gbuffer_pixel) + vec2(0.5)) / vec2(u_gbuffer_size);
+    float depth = texelFetch(u_gbuffer_depth, gbuffer_pixel, 0).r;
     if (depth >= 1.0)
     {
         imageStore(o_shadow_mask, pixel, vec4(1.0));
@@ -73,7 +79,7 @@ void main()
     }
 
     vec3 world_pos = ReconstructWorldPos(uv, depth);
-    vec3 normal    = normalize(texture(u_gbuffer_rt1, uv).xyz * 2.0 - 1.0);
+    vec3 normal    = normalize(texelFetch(u_gbuffer_rt1, gbuffer_pixel, 0).xyz * 2.0 - 1.0);
 
     if (u_light_type == 3u)
     {

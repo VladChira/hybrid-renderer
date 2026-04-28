@@ -206,6 +206,7 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/passes/RayTracedShadowPass.cpp
   src/renderer/passes/SpatioTemporalDenoisePass.cpp
+  src/renderer/passes/ShadowMaskUpscalePass.cpp
 
   src/ui/panels/AccelerationStructurePanel.cpp
 

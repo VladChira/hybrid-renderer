@@ -4,6 +4,8 @@
 #include "renderer/opengl/GLFramebuffer.h"
 #include "renderer/opengl/GLTexture.h"
 
+#include <algorithm>
+
 namespace hybrid::renderer
 {
     constexpr uint32_t kRaytraceShadowMaskLayerCount = 8;
@@ -37,7 +39,10 @@ namespace hybrid::renderer
         RaytraceShadowHistoryA,
         RaytraceShadowHistoryB,
         RaytraceShadowAtrousPing,
-        RaytraceShadowAtrousPong
+        RaytraceShadowAtrousPong,
+        // Full-res mask produced by joint-bilateral upscale of the half-res
+        // shadow chain. Consumed by deferred lighting.
+        RaytraceShadowMaskUpscaled
     };
 
     enum class FrameFramebuffer
@@ -55,6 +60,18 @@ namespace hybrid::renderer
 
         bool IsValid() const { return m_valid; }
         const RenderExtent &Extent() const { return m_extent; }
+        // Extent used for the half-res shadow chain (mask, history, atrous).
+        // The upscale pass produces a full-res mask from this. We round DOWN
+        // so the integer ratio gbuffer_size / shadow_size is exactly 2 even
+        // for odd render extents — the trace shader relies on this to map
+        // half-res pixels onto full-res gbuffer pixels.
+        static RenderExtent HalfResExtent(const RenderExtent &extent)
+        {
+            return RenderExtent{
+                std::max<uint32_t>(1u, extent.width / 2u),
+                std::max<uint32_t>(1u, extent.height / 2u)};
+        }
+        RenderExtent ShadowExtent() const { return HalfResExtent(m_extent); }
 
         GlTextureId Get(FrameTarget target) const;
         uint32_t GetFbo(FrameFramebuffer framebuffer) const;
@@ -101,6 +118,7 @@ namespace hybrid::renderer
         GLTexture m_raytrace_shadow_history_b{};
         GLTexture m_raytrace_shadow_atrous_ping{};
         GLTexture m_raytrace_shadow_atrous_pong{};
+        GLTexture m_raytrace_shadow_mask_upscaled{};
     };
 
 } // namespace hybrid::renderer

@@ -58,7 +58,9 @@ namespace hybrid::renderer
 
         const RenderView &view = *input.effective_view;
         const auto &extent = input.extent;
-        if (!extent.IsValid())
+        const RenderExtent gbuffer_extent =
+            input.gbuffer_extent.IsValid() ? input.gbuffer_extent : extent;
+        if (!extent.IsValid() || !gbuffer_extent.IsValid())
         {
             return false;
         }
@@ -97,6 +99,13 @@ namespace hybrid::renderer
                 glUniform2ui(output_size_loc,
                              static_cast<GLuint>(extent.width),
                              static_cast<GLuint>(extent.height));
+            }
+            const GLint gbuffer_size_loc_t = m_temporal_program->GetUniformLocation("u_gbuffer_size");
+            if (gbuffer_size_loc_t >= 0)
+            {
+                glUniform2ui(gbuffer_size_loc_t,
+                             static_cast<GLuint>(gbuffer_extent.width),
+                             static_cast<GLuint>(gbuffer_extent.height));
             }
 
             glBindImageTexture(kTemporalHistoryImageBinding,
@@ -147,6 +156,13 @@ namespace hybrid::renderer
                 glUniform2ui(output_size_loc,
                              static_cast<GLuint>(extent.width),
                              static_cast<GLuint>(extent.height));
+            }
+            const GLint gbuffer_size_loc_a = m_atrous_program->GetUniformLocation("u_gbuffer_size");
+            if (gbuffer_size_loc_a >= 0)
+            {
+                glUniform2ui(gbuffer_size_loc_a,
+                             static_cast<GLuint>(gbuffer_extent.width),
+                             static_cast<GLuint>(gbuffer_extent.height));
             }
 
             for (uint32_t iteration = 0; iteration < iterations; ++iteration)
