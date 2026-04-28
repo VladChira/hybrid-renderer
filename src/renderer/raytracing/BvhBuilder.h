@@ -16,7 +16,7 @@ namespace hybrid::renderer::raytracing
     {
         BvhSplitStrategyKind split_strategy = BvhSplitStrategyKind::MiddleSplit;
         uint32_t max_leaf_primitives = 4;
-        uint32_t max_depth           = 64;
+        uint32_t max_depth           = 32;
     };
 
     // Input record for the generic builder. `payload_index` is the caller's
