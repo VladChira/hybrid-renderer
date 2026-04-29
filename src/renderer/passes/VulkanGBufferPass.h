@@ -42,9 +42,10 @@ namespace hybrid::renderer
         struct DrawCall
         {
             glm::mat4 model{1.0f};
-            uint32_t  first_index   = 0;
-            uint32_t  index_count   = 0;
-            int32_t   vertex_offset = 0;
+            uint32_t  first_index    = 0;
+            uint32_t  index_count    = 0;
+            int32_t   vertex_offset  = 0;
+            uint32_t  material_index = 0;
         };
 
         struct GeometryUpload
@@ -53,6 +54,12 @@ namespace hybrid::renderer
             VkDeviceSize vertices_bytes = 0;
             const void  *indices        = nullptr;
             VkDeviceSize indices_bytes  = 0;
+        };
+
+        struct MaterialUpload
+        {
+            const void  *materials       = nullptr;
+            VkDeviceSize materials_bytes = 0;
         };
 
         bool Init(VkDevice device,
@@ -66,6 +73,11 @@ namespace hybrid::renderer
         // must wait idle when shape changes (same pattern as the heatmap
         // pass's UpdateSsbos).
         void UpdateGeometry(const GeometryUpload &geo);
+
+        // Mirror the Vulkan-side material mirror's GpuMaterial array into
+        // the pass's host-visible material SSBO. Same dirty-grow contract
+        // as UpdateGeometry.
+        void UpdateMaterials(const MaterialUpload &mats);
 
         // Records the dynamic-rendering scope, viewport/scissor, vertex/
         // index bindings, and one vkCmdDrawIndexed per DrawCall.
@@ -83,6 +95,7 @@ namespace hybrid::renderer
         bool CreateDescriptorPool();
         bool AllocateDescriptorSets();
         void WriteUboDescriptors();
+        void WriteMaterialDescriptors();
 
         VkDevice     m_device    = VK_NULL_HANDLE;
         VmaAllocator m_allocator = VK_NULL_HANDLE;
@@ -97,6 +110,7 @@ namespace hybrid::renderer
 
         vulkan::Buffer m_vertices{};
         vulkan::Buffer m_indices{};
+        vulkan::Buffer m_materials{};
         std::array<vulkan::Buffer, kMaxFramesInFlight> m_uniforms{};
     };
 

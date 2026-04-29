@@ -422,6 +422,33 @@ work doesn't re-litigate them.
   available yet) — fine while the per-frame texture handles are all 0
   in stage-1; will need attention when ViewportPanel goes to sample the
   offscreen image (stage-2).
+- **2026-04-29**: Bake the Vulkan Y flip into the projection matrix
+  (`view.projection[1][1] *= -1`), NOT into a negative-height viewport.
+  ImGuizmo computes screen-space gizmo handles from the projection it's
+  given without going through our viewport — a viewport-only flip leaves
+  ImGuizmo's coordinate frame mirrored relative to the rendered image,
+  so dragging the gizmo's Y+ handle moves the object the wrong way.
+  Projection-flip is invisible to ImGuizmo (it sees the same matrix as
+  the gbuffer pass). Cost is one matrix element per frame; combined with
+  GLM_FORCE_DEPTH_ZERO_TO_ONE (also enabled on Vulkan) this gives glm
+  consumers a Vulkan-flavoured projection without per-call rewrites.
+- **2026-04-29**: Validation layers always-on, not gated on HYBRID_DEBUG.
+  Triggered by debugging Phase 3 misuse blind: ATTACHMENT_OPTIMAL layout
+  required separateDepthStencilLayouts (we hadn't enabled), front-face
+  reasoning around negative-height viewport was wrong, semaphore reuse
+  was hidden. Each one would have been one validation message away from
+  resolution. Validation cost in dev / release-with-debug-info builds
+  is small. Swap to a HYBRID_VK_VALIDATION compile flag if we ever ship
+  a true release build through this path.
+- **2026-04-29**: Per-swapchain-image render_finished semaphore.
+  Originally per-frame-in-flight, which caused a validation hit
+  ("VkSemaphore may still be in use by VkSwapchainKHR" on reuse). The
+  semaphore is signaled by vkQueueSubmit and waited on by
+  vkQueuePresentKHR; present can outlive the next acquire of the same
+  image, so the semaphore index must be the swapchain image index, not
+  the frame-in-flight index. image_available stays per-frame-in-flight
+  (it's reset by the wait fence each frame). Standard pattern from
+  Khronos's swapchain-semaphore-reuse guide.
 
 ## 8. Open questions
 
@@ -446,6 +473,126 @@ Flag any of them that block progress.
 
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
+
+### Phase 3-stage-B landing notes (2026-04-29) — MRT (RT0 + RT1) + semaphore reuse fix
+
+What runs now: gbuffer raster writes both RT0 (placeholder gray albedo +
+metallic=0) and RT1 (encoded world-normal + roughness=0.5). Each is
+registered with ImGui as a separate texture; the RenderTargetsPanel can
+display either one. ViewportPanel still defaults to RT0. EntityID
+attachment is deferred — needs a uint→displayable conversion shader
+that's only useful with picking infrastructure (stage C territory).
+
+**Pipeline plumbing for N color attachments**: `VulkanGBufferPass::Init`
+now takes `std::vector<VkFormat>` of color formats instead of a single
+format. Internally:
+- Pipeline color blend state has one entry per attachment (all opaque,
+  full write mask).
+- `VkPipelineRenderingCreateInfo` advertises the formats (chained via
+  pNext on the graphics pipeline create info).
+- `Execute` takes `std::vector<VkImageView>` of color views, builds N
+  `VkRenderingAttachmentInfo` entries (all loadOp=CLEAR, storeOp=STORE),
+  passes them as `VkRenderingInfo::pColorAttachments`.
+
+The pattern scales — when stage C adds materials (and possibly EntityID),
+adding more attachments is just appending to the formats/views vectors
+plus a corresponding shader output and barrier transition.
+
+**Per-RT registration in App.cpp** is currently parallel-coded — one set
+of fields (texture, view-handle cache) per RT. With 2 RTs that's
+manageable; with 4+ it'd benefit from a small array. Refactor when stage
+C surfaces EntityID + full albedo / normal targets.
+
+**Open items for stage C**:
+- MaterialStore Vulkan port. Mirror the GpuMaterial std430 struct into a
+  host-visible SSBO; per-draw push constants gain a `material_index`.
+  Shader reads scalar/vec material params from the buffer (no textures
+  yet). Validates the material data path independently of bindless.
+- Texture upload pipeline. glTF images → VkImage + VkImageView, owned by
+  a Vulkan-side MaterialStore mirror. Same pattern as Ui's icon upload
+  but for many textures. Probably batch them at scene-load.
+- Bindless descriptor array. One large set with N
+  `COMBINED_IMAGE_SAMPLER` entries via `VK_EXT_descriptor_indexing`
+  (core in 1.2). The fragment shader uses `texture(textures[
+  material.base_color_index], uv)`. Already gated at Phase 0 by the
+  device-feature probe for descriptorIndexing, runtimeDescriptorArray,
+  shaderSampledImageArrayNonUniformIndexing — confirmed enabled.
+- EntityID attachment + a small extract-channel-or-id pass that writes
+  the uint into a samplable image so the ViewportPanel's existing
+  hover-readback path works on Vulkan.
+
+### Phase 3-stage-A landing notes (2026-04-29) — first raster pass on Vulkan
+
+What runs now: glTF helmet rendered through a real Vulkan graphics
+pipeline. Vertex/index buffers populated from `GeometryStore`'s CPU
+vectors (the same data we used for BVH SSBOs in Phase 2B), one
+`vkCmdDrawIndexed` per primitive, model matrix delivered via push
+constant, view+projection via UBO. Output is normal-as-color into the
+existing offscreen image; `ViewportPanel` samples it via the texture
+registered in Phase 7-stage-2. Resize works.
+
+**Patterns established this session**:
+
+*Vertex/index buffer mirror.* Same dirty-grow pattern as the heatmap
+pass's SSBOs: track `last_vertices_bytes` / `last_indices_bytes` in
+the renderer, wait_idle when sizes change, then memcpy into host-
+visible buffers. The pass owns the buffers; allocation goes through VMA
+via the existing `vulkan::CreateHostVisibleBuffer` helper. Production-
+quality eventually wants device-local + staging upload.
+
+*Graphics pipeline with dynamic rendering.* No render pass, no
+framebuffer objects. The pipeline declares its attachment formats via
+`VkPipelineRenderingCreateInfo` (chained via pNext on the graphics
+pipeline create info); `vkCmdBeginRendering` opens the rendering scope
+with the actual image views per frame. Dynamic viewport + scissor
+(`VK_DYNAMIC_STATE_VIEWPORT`/`_SCISSOR`) so the pipeline doesn't bake
+the extent.
+
+*Per-draw push constants.* Model matrix (64 bytes) lives in a push
+constant range on the pipeline layout. Vert shader reads it as
+`layout(push_constant)`. Per-draw `vkCmdPushConstants` before
+`vkCmdDrawIndexed`. UBO (set=0, binding=0) carries view + projection
+which only change once per frame.
+
+*Y handling.* Decision-log entry covers it: project Y flip baked into
+projection matrix, NOT a negative-height viewport, so ImGuizmo agrees.
+Combined with `GLM_FORCE_DEPTH_ZERO_TO_ONE` (Vulkan-mode-only compile
+def in CMakeLists.txt), `glm::perspective` produces a Vulkan-style
+projection without per-call rewrites.
+
+*Front-face winding.* `frontFace = COUNTER_CLOCKWISE` matches glTF
+conventions. With projection Y-flip + positive-height viewport, the
+two Y inversions (projection + Vulkan Y-down framebuffer) cancel and
+NDC winding is preserved through the framebuffer transform.
+
+*UV orientation in ViewportPanel and RenderTargetsPanel.* GL's Y-up
+framebuffer needs flipped UVs `(0,1)-(1,0)` to display upright in
+ImGui's Y-down convention. Vulkan's Y-down framebuffer is already
+matched, so it uses standard `(0,0)-(1,1)`. Both panels have an `#ifdef
+HYBRID_RHI_VULKAN` switch.
+
+*Depth attachment.* `VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL`
+is the legacy combined layout that works without enabling
+`separateDepthStencilLayouts`. We tripped over the separate
+`DEPTH_ATTACHMENT_OPTIMAL` enum which silently fails in our setup;
+validation layers caught it once we turned them on (see decision-log
+entry on always-on validation).
+
+**The hard-won lessons from this session**:
+1. Vulkan-spec misuse fails silently without validation. Two
+   consecutive bugs (depth layout + semaphore reuse) lost serious time
+   debugging by symptom. Validation now defaults on.
+2. Negative-height viewport flips Y but keeps NDC winding (the flip
+   applies symmetrically to all triangle vertices). My initial claim
+   that it inverted winding was wrong — Sascha Willems' tutorials
+   confirm CCW with negative-height viewport is correct for CCW glTF.
+3. Negative-height viewport ≠ projection Y-flip in user-visible
+   behavior. Viewport-only flip is invisible to ImGuizmo and any other
+   ImGui-side tooling that computes screen-space coordinates from
+   projection. Projection-flip approach is the canonical Vulkan recipe.
+4. UV conventions in ImGui::Image differ between Vulkan and GL because
+   the underlying framebuffer Y direction differs. Easy to forget when
+   adding new panels.
 
 ### Phase 7-stage-2 landing notes (2026-04-29) — ViewportPanel sampling the offscreen, blit dropped
 

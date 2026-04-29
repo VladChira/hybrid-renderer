@@ -24,9 +24,11 @@
 #include "renderer/passes/VulkanGBufferPass.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
 #include "renderer/stores/GeometryStore.h"
+#include "renderer/stores/MaterialStore.h"
 #include "renderer/vulkan/VulkanRenderBackend.h"
 
 #include "core/Log.h"
+#include "core/Profiling.h"
 #include "core/scene/types/SceneAssets.h"
 
 #include <GLFW/glfw3.h>
@@ -35,6 +37,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 namespace hybrid::renderer
@@ -42,6 +45,68 @@ namespace hybrid::renderer
 
     namespace
     {
+        // CPU mirror of MaterialStore on the Vulkan path. MaterialStore
+        // itself stays GL-only — its Init touches GL textures and bindless
+        // handles which we don't have here. We translate MaterialAssets
+        // straight into GpuMaterial records; texture-handle fields stay 0
+        // for now (stage C1 has no textures yet, the shader doesn't sample).
+        // The default record at index 0 matches MaterialStore::Init's
+        // default.
+        struct VulkanMaterialMirror
+        {
+            std::unordered_map<uint64_t, uint32_t> index_by_asset_id;
+            std::vector<GpuMaterial>               records;
+        };
+
+        GpuMaterial MakeDefaultGpuMaterial()
+        {
+            GpuMaterial m{};
+            m.base_color_factor    = glm::vec4(1.0f);
+            m.emissive_and_cutoff  = glm::vec4(0.0f, 0.0f, 0.0f, 0.5f);
+            m.scalar_factors       = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f);
+            m.flags_texcoords      = glm::uvec4(0u);
+            return m;
+        }
+
+        uint32_t ResolveOrAppendMaterial(VulkanMaterialMirror &mirror,
+                                          const assets::AssetHandle<core::scene::MaterialAsset> &handle)
+        {
+            const core::scene::MaterialAsset *material = handle.Get();
+            const uint64_t asset_id = handle.Id().value;
+            if (material == nullptr || asset_id == 0)
+            {
+                return kDefaultMaterialIndex;
+            }
+            if (auto it = mirror.index_by_asset_id.find(asset_id);
+                it != mirror.index_by_asset_id.end())
+            {
+                return it->second;
+            }
+
+            GpuMaterial r{};
+            r.base_color_factor    = material->base_color_factor;
+            r.emissive_and_cutoff  = glm::vec4(material->emissive_factor, material->alpha_cutoff);
+            r.scalar_factors       = glm::vec4(material->metallic_factor,
+                                                material->roughness_factor,
+                                                material->normal_scale,
+                                                material->occlusion_strength);
+
+            uint32_t alpha_mode = 0u;
+            switch (material->alpha_mode)
+            {
+            case core::scene::AlphaMode::Opaque: alpha_mode = 0u; break;
+            case core::scene::AlphaMode::Mask:   alpha_mode = 1u; break;
+            case core::scene::AlphaMode::Blend:  alpha_mode = 2u; break;
+            }
+            r.flags_texcoords = glm::uvec4(alpha_mode, 0u, 0u, 0u);
+            // texture-handle fields stay zero — stage C3 wires them up.
+
+            const uint32_t index = static_cast<uint32_t>(mirror.records.size());
+            mirror.records.push_back(r);
+            mirror.index_by_asset_id.emplace(asset_id, index);
+            return index;
+        }
+
         void ImageBarrier(VkCommandBuffer cmd,
                           VkImage image,
                           VkImageLayout from, VkImageLayout to,
@@ -81,12 +146,13 @@ namespace hybrid::renderer
 
         TraversalHeatmapVulkanPass heatmap_pass{};
         VulkanGBufferPass gbuffer_pass{};
+        VulkanMaterialMirror materials{};
 
-        // Cached vertex/index byte counts so we know when the gbuffer
-        // pass's host-visible buffers need to be reuploaded (and when to
-        // wait_idle before reallocation).
-        size_t last_vertices_bytes = 0;
-        size_t last_indices_bytes  = 0;
+        // Cached byte counts for the gbuffer pass's host-visible buffers.
+        // Wait_idle + reupload happens whenever any of these changes.
+        size_t last_vertices_bytes  = 0;
+        size_t last_indices_bytes   = 0;
+        size_t last_materials_bytes = 0;
         std::vector<VulkanGBufferPass::DrawCall> draw_scratch{};
 
         // Scene plumbing — CPU-side only on the Vulkan path. We never call
@@ -110,11 +176,13 @@ namespace hybrid::renderer
 
     namespace
     {
-        // Mirror of GBufferPass's prepare-instance loop (GL path), minus the
-        // material upload — we only need geometry_store populated so the AS
-        // cache has stable primitive ids to address. Walks opaque + masked
-        // buckets only; transparent doesn't participate in the heatmap.
-        void PopulateGeometryStore(GeometryStore &store, const FrameSceneData &scene)
+        // Walks opaque + masked instances and ensures each primitive is in
+        // the geometry store (with the correct material_index cached on its
+        // GpuPrimitive descriptor) and each material is in the Vulkan-side
+        // mirror.
+        void PopulateGeometryStore(GeometryStore &store,
+                                    VulkanMaterialMirror &materials,
+                                    const FrameSceneData &scene)
         {
             auto eat = [&](const std::vector<RenderMeshInstance> &batch)
             {
@@ -126,15 +194,24 @@ namespace hybrid::renderer
                     for (size_t pi = 0; pi < mesh->primitives.size(); ++pi)
                     {
                         const core::scene::MeshPrimitive &primitive = mesh->primitives[pi];
+                        const uint32_t material_index = ResolveOrAppendMaterial(materials, primitive.material);
+
                         PrimitiveHandle handle{};
                         bool appended = false;
-                        // material_index = 0: heatmap doesn't read materials.
                         store.GetOrAppend(instance.mesh.Id().value,
                                           static_cast<uint32_t>(pi),
                                           primitive,
-                                          /*material_index=*/0u,
+                                          material_index,
                                           handle,
                                           appended);
+                        // GeometryStore only writes material_index when the
+                        // primitive is first appended. Patch on later runs
+                        // so material reassignment between frames isn't
+                        // silently ignored.
+                        if (!appended && handle.IsValid())
+                        {
+                            store.SetPrimitiveMaterial(handle.primitive_id, material_index);
+                        }
                     }
                 }
             };
@@ -186,6 +263,11 @@ namespace hybrid::renderer
             m_impl->backend.OffscreenFormat(),
             m_impl->backend.Rt1Format(),
         };
+        // Seed the material mirror with the neutral default at index 0 so
+        // primitives without a valid MaterialAsset still resolve to a
+        // safe record (matches MaterialStore::Init's convention).
+        m_impl->materials.records.push_back(MakeDefaultGpuMaterial());
+
         if (!m_impl->gbuffer_pass.Init(m_impl->backend.Device().Logical(),
                                         m_impl->backend.Allocator(),
                                         gbuffer_color_formats,
@@ -238,6 +320,7 @@ namespace hybrid::renderer
 
     RendererOutputs Renderer::EndFrame()
     {
+        HYBRID_PROFILE_ZONE_N("Renderer::EndFrame");
         if (!m_impl->frame_active)
         {
             return m_impl->outputs;
@@ -245,39 +328,53 @@ namespace hybrid::renderer
 
         // -- Drive the CPU side of the BVH / primitive store ----------------
         FrameSceneData scene_data{};
-        if (m_impl->submitted_scene_world != nullptr)
         {
-            m_impl->scene_frame_cache.Sync(*m_impl->submitted_scene_world);
-            scene_data = m_impl->scene_frame_cache.GetFrameData();
-        }
-        else
-        {
-            m_impl->scene_frame_cache.Reset();
+            HYBRID_PROFILE_ZONE_N("Renderer::BuildFrameSceneData");
+            if (m_impl->submitted_scene_world != nullptr)
+            {
+                m_impl->scene_frame_cache.Sync(*m_impl->submitted_scene_world);
+                scene_data = m_impl->scene_frame_cache.GetFrameData();
+            }
+            else
+            {
+                m_impl->scene_frame_cache.Reset();
+            }
         }
 
-        PopulateGeometryStore(m_impl->geometry_store, scene_data);
-        m_impl->as_cache.SyncBlas(scene_data, m_impl->geometry_store);
-        m_impl->as_cache.SyncTlas(scene_data, m_impl->geometry_store);
-        m_impl->as_stats = m_impl->as_cache.Stats();
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::PopulateGeometryStore");
+            PopulateGeometryStore(m_impl->geometry_store, m_impl->materials, scene_data);
+        }
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::AccelerationStructureSync");
+            m_impl->as_cache.SyncBlas(scene_data, m_impl->geometry_store);
+            m_impl->as_cache.SyncTlas(scene_data, m_impl->geometry_store);
+            m_impl->as_stats = m_impl->as_cache.Stats();
+        }
 
         const auto &vertices   = m_impl->geometry_store.Vertices();
         const auto &indices    = m_impl->geometry_store.Indices();
         const auto &primitives = m_impl->geometry_store.Primitives();
 
-        // -- Mirror geometry into the gbuffer pass's vertex/index buffers ---
-        const size_t vbytes = vertices.size() * sizeof(vertices[0]);
-        const size_t ibytes = indices.size()  * sizeof(indices[0]);
-        const bool geo_size_changed =
+        // -- Mirror geometry + materials into the gbuffer pass's buffers ---
+        const auto &material_records = m_impl->materials.records;
+        const size_t vbytes = vertices.size()         * sizeof(vertices[0]);
+        const size_t ibytes = indices.size()          * sizeof(indices[0]);
+        const size_t mbytes = material_records.size() * sizeof(material_records[0]);
+        const bool size_changed =
             vbytes != m_impl->last_vertices_bytes ||
-            ibytes != m_impl->last_indices_bytes;
-        if (geo_size_changed)
+            ibytes != m_impl->last_indices_bytes  ||
+            mbytes != m_impl->last_materials_bytes;
+        if (size_changed)
         {
             m_impl->backend.Device().WaitIdle();
-            m_impl->last_vertices_bytes = vbytes;
-            m_impl->last_indices_bytes  = ibytes;
+            m_impl->last_vertices_bytes  = vbytes;
+            m_impl->last_indices_bytes   = ibytes;
+            m_impl->last_materials_bytes = mbytes;
         }
         if (vbytes > 0 && ibytes > 0)
         {
+            HYBRID_PROFILE_ZONE_N("Renderer::UpdateGeometry");
             VulkanGBufferPass::GeometryUpload geo{};
             geo.vertices       = vertices.data();
             geo.vertices_bytes = vbytes;
@@ -285,8 +382,17 @@ namespace hybrid::renderer
             geo.indices_bytes  = ibytes;
             m_impl->gbuffer_pass.UpdateGeometry(geo);
         }
+        if (mbytes > 0)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::UpdateMaterials");
+            VulkanGBufferPass::MaterialUpload mats{};
+            mats.materials       = material_records.data();
+            mats.materials_bytes = mbytes;
+            m_impl->gbuffer_pass.UpdateMaterials(mats);
+        }
 
         // -- Build per-primitive draw calls from the submitted instances ----
+        HYBRID_PROFILE_ZONE_N("Renderer::BuildDrawList");
         m_impl->draw_scratch.clear();
         auto emit_batch = [&](const std::vector<RenderMeshInstance> &batch)
         {
@@ -308,16 +414,19 @@ namespace hybrid::renderer
                     if (gp.index_count == 0) continue;
 
                     VulkanGBufferPass::DrawCall draw{};
-                    draw.model         = instance.world_from_local;
-                    draw.first_index   = gp.index_offset;
-                    draw.index_count   = gp.index_count;
-                    draw.vertex_offset = static_cast<int32_t>(gp.vertex_offset);
+                    draw.model          = instance.world_from_local;
+                    draw.first_index    = gp.index_offset;
+                    draw.index_count    = gp.index_count;
+                    draw.vertex_offset  = static_cast<int32_t>(gp.vertex_offset);
+                    draw.material_index = gp.material_index;
                     m_impl->draw_scratch.push_back(draw);
                 }
             }
         };
         emit_batch(scene_data.opaque_mesh_instances);
         emit_batch(scene_data.masked_mesh_instances);
+
+        HYBRID_PROFILE_ZONE_N("Renderer::RecordCommands");
 
         VkCommandBuffer cmd       = m_impl->backend.CurrentCommandBuffer();
         VkImage         offscreen = m_impl->backend.OffscreenImage();

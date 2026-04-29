@@ -1,5 +1,6 @@
 #include "renderer/passes/VulkanGBufferPass.h"
 
+#include "core/Profiling.h"
 #include "renderer/vulkan/VulkanShader.h"
 
 #include <array>
@@ -18,6 +19,19 @@ namespace hybrid::renderer
             glm::mat4 projection;
         };
         static_assert(sizeof(FrameUbo) == 128, "FrameUbo std140 = 128 bytes");
+
+        // Push-constant block. Vulkan default push-constant layout follows
+        // the natural alignment rules; mat4 occupies 64 bytes at offset 0,
+        // uint material_index at offset 64. Pad to 80 bytes for 16-byte
+        // alignment of the whole block. Both stages see the same block —
+        // vert reads .model, frag reads .material_index.
+        struct PushBlock
+        {
+            glm::mat4 model;
+            uint32_t  material_index;
+            uint32_t  _pad[3];
+        };
+        static_assert(sizeof(PushBlock) == 80, "PushBlock layout drift vs gbuffer_vk shaders");
 
         // GpuVertex layout (renderer/stores/GeometryStore.h). Stride 80,
         // attribute offsets pinned by the existing std430-aligned struct.
@@ -43,17 +57,25 @@ namespace hybrid::renderer
         if (!AllocateDescriptorSets())                   { Shutdown(); return false; }
         WriteUboDescriptors();
 
-        // 1-byte placeholders so descriptor set / vkCmdBindVertexBuffers
-        // calls don't see VK_NULL_HANDLE before the first scene arrives.
-        // Replaced on first UpdateGeometry call.
+        // Placeholder buffers so descriptor sets / vkCmdBindVertexBuffers
+        // don't see VK_NULL_HANDLE before scene data arrives. Replaced on
+        // the first UpdateGeometry / UpdateMaterials call.
         uint32_t placeholder = 0;
-        GeometryUpload empty{};
-        empty.vertices       = &placeholder;
-        empty.vertices_bytes = sizeof(placeholder);
-        empty.indices        = &placeholder;
-        empty.indices_bytes  = sizeof(placeholder);
-        UpdateGeometry(empty);
-        return m_vertices.handle != VK_NULL_HANDLE && m_indices.handle != VK_NULL_HANDLE;
+        GeometryUpload geo_empty{};
+        geo_empty.vertices       = &placeholder;
+        geo_empty.vertices_bytes = sizeof(placeholder);
+        geo_empty.indices        = &placeholder;
+        geo_empty.indices_bytes  = sizeof(placeholder);
+        UpdateGeometry(geo_empty);
+
+        MaterialUpload mat_empty{};
+        mat_empty.materials       = &placeholder;
+        mat_empty.materials_bytes = sizeof(placeholder);
+        UpdateMaterials(mat_empty);
+
+        return m_vertices.handle  != VK_NULL_HANDLE &&
+               m_indices.handle   != VK_NULL_HANDLE &&
+               m_materials.handle != VK_NULL_HANDLE;
     }
 
     void VulkanGBufferPass::Shutdown()
@@ -73,6 +95,7 @@ namespace hybrid::renderer
         {
             vulkan::DestroyBuffer(m_allocator, m_vertices);
             vulkan::DestroyBuffer(m_allocator, m_indices);
+            vulkan::DestroyBuffer(m_allocator, m_materials);
             for (auto &ub : m_uniforms) vulkan::DestroyBuffer(m_allocator, ub);
         }
 
@@ -94,27 +117,28 @@ namespace hybrid::renderer
         m_frag_module = vulkan::CreateShaderModule(m_device, frag_spv);
         if (m_vert_module == VK_NULL_HANDLE || m_frag_module == VK_NULL_HANDLE) return false;
 
-        // ---- descriptor set layout: 1 UBO at binding 0 --------------------
-        VkDescriptorSetLayoutBinding binding{};
-        binding.binding         = 0;
-        binding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        binding.descriptorCount = 1;
-        binding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+        // ---- descriptor set layout ----------------------------------------
+        //   binding 0  = GBufferFrame UBO (vert)
+        //   binding 1  = MaterialBuffer SSBO (frag)
+        const std::array<VkDescriptorSetLayoutBinding, 2> bindings{{
+            { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT,   nullptr },
+            { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr },
+        }};
 
         VkDescriptorSetLayoutCreateInfo dsl_info{};
         dsl_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dsl_info.bindingCount = 1;
-        dsl_info.pBindings    = &binding;
+        dsl_info.bindingCount = static_cast<uint32_t>(bindings.size());
+        dsl_info.pBindings    = bindings.data();
         if (!HYBRID_VK_CHECK(vkCreateDescriptorSetLayout(m_device, &dsl_info, nullptr, &m_set_layout)))
         {
             return false;
         }
 
-        // ---- pipeline layout: set + push constant (mat4 model) ------------
+        // ---- pipeline layout: set + push constant (model + material idx) -
         VkPushConstantRange pc{};
-        pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pc.offset     = 0;
-        pc.size       = sizeof(glm::mat4);
+        pc.size       = sizeof(PushBlock);
 
         VkPipelineLayoutCreateInfo pl_info{};
         pl_info.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -260,15 +284,15 @@ namespace hybrid::renderer
 
     bool VulkanGBufferPass::CreateDescriptorPool()
     {
-        VkDescriptorPoolSize size{};
-        size.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        size.descriptorCount = kMaxFramesInFlight;
-
+        const std::array<VkDescriptorPoolSize, 2> sizes{{
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kMaxFramesInFlight },
+        }};
         VkDescriptorPoolCreateInfo info{};
         info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         info.maxSets       = kMaxFramesInFlight;
-        info.poolSizeCount = 1;
-        info.pPoolSizes    = &size;
+        info.poolSizeCount = static_cast<uint32_t>(sizes.size());
+        info.pPoolSizes    = sizes.data();
         return HYBRID_VK_CHECK(vkCreateDescriptorPool(m_device, &info, nullptr, &m_descriptor_pool));
     }
 
@@ -324,6 +348,48 @@ namespace hybrid::renderer
         sync(m_indices,  geo.indices,  geo.indices_bytes,  VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     }
 
+    void VulkanGBufferPass::UpdateMaterials(const MaterialUpload &mats)
+    {
+        if (mats.materials == nullptr || mats.materials_bytes == 0) return;
+        bool recreated = false;
+        if (m_materials.size != mats.materials_bytes)
+        {
+            vulkan::DestroyBuffer(m_allocator, m_materials);
+            m_materials = vulkan::CreateHostVisibleBuffer(
+                m_allocator, mats.materials_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+            recreated = true;
+        }
+        std::memcpy(m_materials.mapped, mats.materials, static_cast<size_t>(mats.materials_bytes));
+        if (recreated)
+        {
+            WriteMaterialDescriptors();
+        }
+    }
+
+    void VulkanGBufferPass::WriteMaterialDescriptors()
+    {
+        if (m_device == VK_NULL_HANDLE || m_materials.handle == VK_NULL_HANDLE) return;
+
+        std::array<VkDescriptorBufferInfo, kMaxFramesInFlight> infos{};
+        std::array<VkWriteDescriptorSet,   kMaxFramesInFlight> writes{};
+        for (uint32_t f = 0; f < kMaxFramesInFlight; ++f)
+        {
+            infos[f].buffer = m_materials.handle;
+            infos[f].offset = 0;
+            infos[f].range  = m_materials.size;
+
+            writes[f].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[f].dstSet          = m_descriptor_sets[f];
+            writes[f].dstBinding      = 1;
+            writes[f].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[f].descriptorCount = 1;
+            writes[f].pBufferInfo     = &infos[f];
+        }
+        vkUpdateDescriptorSets(m_device,
+                               static_cast<uint32_t>(writes.size()), writes.data(),
+                               0, nullptr);
+    }
+
     // -----------------------------------------------------------------------
     // Execute
     // -----------------------------------------------------------------------
@@ -336,6 +402,7 @@ namespace hybrid::renderer
                                      const FrameParams &params,
                                      const std::vector<DrawCall> &draws)
     {
+        HYBRID_PROFILE_ZONE_N("VulkanGBufferPass::Execute");
         if (cmd == VK_NULL_HANDLE) return;
         const uint32_t fi = frame_index % kMaxFramesInFlight;
 
@@ -408,10 +475,13 @@ namespace hybrid::renderer
 
         for (const DrawCall &draw : draws)
         {
+            PushBlock pb{};
+            pb.model          = draw.model;
+            pb.material_index = draw.material_index;
             vkCmdPushConstants(cmd, m_pipeline_layout,
-                               VK_SHADER_STAGE_VERTEX_BIT,
-                               0, sizeof(glm::mat4),
-                               &draw.model);
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(PushBlock),
+                               &pb);
             vkCmdDrawIndexed(cmd,
                              draw.index_count,
                              /*instanceCount*/1,

@@ -20,6 +20,7 @@ layout(set = 0, binding = 0) uniform GBufferFrame
 layout(push_constant) uniform PushConstants
 {
     mat4 model;
+    uint material_index;
 } pc;
 
 layout(location = 0) out vec3 v_world_normal;
