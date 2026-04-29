@@ -264,6 +264,17 @@ namespace hybrid::core
                         view.position = scene_view.position;
                         view.near_plane = scene_view.near_plane;
                         view.far_plane = scene_view.far_plane;
+#if defined(HYBRID_RHI_VULKAN)
+                        // Vulkan's NDC has Y down vs GL's Y up. Bake the Y
+                        // flip into the projection matrix so both the
+                        // gbuffer raster pass AND ImGui-side tools
+                        // (ImGuizmo) see the same screen-space mapping. The
+                        // alternative — negative-height viewport — only
+                        // flips at the rasterizer level and is invisible to
+                        // ImGuizmo, leaving the gizmo's input direction
+                        // mirrored relative to the rendered image.
+                        view.projection[1][1] *= -1.0f;
+#endif
                         resolved_view_valid = true;
                     }
                     resolved_view = view;

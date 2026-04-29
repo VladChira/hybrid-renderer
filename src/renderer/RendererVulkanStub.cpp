@@ -21,6 +21,7 @@
 #include "renderer/Renderer.h"
 #include "renderer/SceneWorldSnapshot.h"
 #include "renderer/passes/TraversalHeatmapVulkanPass.h"
+#include "renderer/passes/VulkanGBufferPass.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
 #include "renderer/stores/GeometryStore.h"
 #include "renderer/vulkan/VulkanRenderBackend.h"
@@ -34,6 +35,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cstring>
+#include <vector>
 
 namespace hybrid::renderer
 {
@@ -78,7 +80,14 @@ namespace hybrid::renderer
         Renderer::UiRenderHook ui_render_hook{};
 
         TraversalHeatmapVulkanPass heatmap_pass{};
-        VkExtent2D last_descriptor_extent{0, 0};
+        VulkanGBufferPass gbuffer_pass{};
+
+        // Cached vertex/index byte counts so we know when the gbuffer
+        // pass's host-visible buffers need to be reuploaded (and when to
+        // wait_idle before reallocation).
+        size_t last_vertices_bytes = 0;
+        size_t last_indices_bytes  = 0;
+        std::vector<VulkanGBufferPass::DrawCall> draw_scratch{};
 
         // Scene plumbing — CPU-side only on the Vulkan path. We never call
         // geometry_store.Init/Sync or as_cache.Init/Upload (those touch GL).
@@ -133,18 +142,6 @@ namespace hybrid::renderer
             eat(scene.masked_mesh_instances);
         }
 
-        TraversalHeatmapVulkanPass::FrameParams ComputeFrameParams(
-            const RenderView &view, VkExtent2D extent, uint32_t tlas_node_count)
-        {
-            TraversalHeatmapVulkanPass::FrameParams p{};
-            p.inv_view        = glm::affineInverse(view.view);
-            p.inv_projection  = glm::inverse(view.projection);
-            p.camera_position = view.position;
-            p.output_size     = glm::uvec2(extent.width, extent.height);
-            p.heatmap_scale   = 64.0f;
-            p.tlas_node_count = tlas_node_count;
-            return p;
-        }
     } // namespace
 
     Renderer::Renderer() : m_impl(std::make_unique<Impl>()) {}
@@ -184,9 +181,20 @@ namespace hybrid::renderer
             return false;
         }
         m_impl->heatmap_pass.SetOutputImageView(m_impl->backend.OffscreenImageView());
-        m_impl->last_descriptor_extent = m_impl->backend.OffscreenExtent();
 
-        LOG_INFO("[renderer/vulkan] Phase 2B: scene-driven BVH heatmap -> blit -> present");
+        if (!m_impl->gbuffer_pass.Init(m_impl->backend.Device().Logical(),
+                                        m_impl->backend.Allocator(),
+                                        m_impl->backend.OffscreenFormat(),
+                                        m_impl->backend.DepthFormat()))
+        {
+            LOG_ERROR("[renderer/vulkan] VulkanGBufferPass::Init failed");
+            m_impl->gbuffer_pass.Shutdown();
+            m_impl->heatmap_pass.Shutdown();
+            m_impl->backend.Shutdown();
+            return false;
+        }
+
+        LOG_INFO("[renderer/vulkan] Phase 3-stage-A: gbuffer raster -> ImGui sample -> present");
         m_impl->initialized = true;
         return true;
     }
@@ -195,6 +203,7 @@ namespace hybrid::renderer
     {
         if (!m_impl->initialized) return;
         m_impl->backend.Device().WaitIdle();
+        m_impl->gbuffer_pass.Shutdown();
         m_impl->heatmap_pass.Shutdown();
         m_impl->backend.Shutdown();
         m_impl->initialized = false;
@@ -230,16 +239,6 @@ namespace hybrid::renderer
             return m_impl->outputs;
         }
 
-        // Resize hand-off: re-point the storage-image binding when the
-        // backend rebuilt the offscreen image.
-        VkExtent2D current_extent = m_impl->backend.OffscreenExtent();
-        if (current_extent.width  != m_impl->last_descriptor_extent.width ||
-            current_extent.height != m_impl->last_descriptor_extent.height)
-        {
-            m_impl->heatmap_pass.SetOutputImageView(m_impl->backend.OffscreenImageView());
-            m_impl->last_descriptor_extent = current_extent;
-        }
-
         // -- Drive the CPU side of the BVH / primitive store ----------------
         FrameSceneData scene_data{};
         if (m_impl->submitted_scene_world != nullptr)
@@ -257,80 +256,119 @@ namespace hybrid::renderer
         m_impl->as_cache.SyncTlas(scene_data, m_impl->geometry_store);
         m_impl->as_stats = m_impl->as_cache.Stats();
 
-        // -- Mirror CPU vectors into the pass's SSBOs -----------------------
-        const auto &primitives    = m_impl->geometry_store.Primitives();
-        const auto &blas_nodes    = m_impl->as_cache.BlasNodes();
-        const auto &tlas_nodes    = m_impl->as_cache.TlasNodes();
-        const auto &tlas_inst     = m_impl->as_cache.TlasInstances();
+        const auto &vertices   = m_impl->geometry_store.Vertices();
+        const auto &indices    = m_impl->geometry_store.Indices();
+        const auto &primitives = m_impl->geometry_store.Primitives();
 
-        TraversalHeatmapVulkanPass::SsboData ssbo{};
-        ssbo.primitives           = primitives.data();
-        ssbo.primitives_bytes     = primitives.size()    * sizeof(primitives[0]);
-        ssbo.blas_nodes           = blas_nodes.data();
-        ssbo.blas_nodes_bytes     = blas_nodes.size()    * sizeof(blas_nodes[0]);
-        ssbo.tlas_nodes           = tlas_nodes.data();
-        ssbo.tlas_nodes_bytes     = tlas_nodes.size()    * sizeof(tlas_nodes[0]);
-        ssbo.tlas_instances       = tlas_inst.data();
-        ssbo.tlas_instances_bytes = tlas_inst.size()     * sizeof(tlas_inst[0]);
-
-        // Wait idle before UpdateSsbos when any size grew or the buffers are
-        // about to be reallocated. Cheap fix; the pass would otherwise race
-        // an in-flight read of a stale buffer. Track sizes externally so we
-        // only stall on actual change.
-        const bool size_changed =
-            ssbo.primitives_bytes     != m_impl->last_primitives_bytes ||
-            ssbo.blas_nodes_bytes     != m_impl->last_blas_nodes_bytes ||
-            ssbo.tlas_nodes_bytes     != m_impl->last_tlas_nodes_bytes ||
-            ssbo.tlas_instances_bytes != m_impl->last_tlas_instances_bytes;
-        if (size_changed)
+        // -- Mirror geometry into the gbuffer pass's vertex/index buffers ---
+        const size_t vbytes = vertices.size() * sizeof(vertices[0]);
+        const size_t ibytes = indices.size()  * sizeof(indices[0]);
+        const bool geo_size_changed =
+            vbytes != m_impl->last_vertices_bytes ||
+            ibytes != m_impl->last_indices_bytes;
+        if (geo_size_changed)
         {
             m_impl->backend.Device().WaitIdle();
-            m_impl->last_primitives_bytes     = ssbo.primitives_bytes;
-            m_impl->last_blas_nodes_bytes     = ssbo.blas_nodes_bytes;
-            m_impl->last_tlas_nodes_bytes     = ssbo.tlas_nodes_bytes;
-            m_impl->last_tlas_instances_bytes = ssbo.tlas_instances_bytes;
+            m_impl->last_vertices_bytes = vbytes;
+            m_impl->last_indices_bytes  = ibytes;
         }
-        // Skip the upload entirely when there's nothing yet — the pass keeps
-        // its placeholder SSBOs and the shader's tlas_node_count==0 path
-        // short-circuits.
-        if (ssbo.primitives_bytes > 0 &&
-            ssbo.blas_nodes_bytes > 0 &&
-            ssbo.tlas_nodes_bytes > 0 &&
-            ssbo.tlas_instances_bytes > 0)
+        if (vbytes > 0 && ibytes > 0)
         {
-            m_impl->heatmap_pass.UpdateSsbos(ssbo);
+            VulkanGBufferPass::GeometryUpload geo{};
+            geo.vertices       = vertices.data();
+            geo.vertices_bytes = vbytes;
+            geo.indices        = indices.data();
+            geo.indices_bytes  = ibytes;
+            m_impl->gbuffer_pass.UpdateGeometry(geo);
         }
+
+        // -- Build per-primitive draw calls from the submitted instances ----
+        m_impl->draw_scratch.clear();
+        auto emit_batch = [&](const std::vector<RenderMeshInstance> &batch)
+        {
+            for (const RenderMeshInstance &instance : batch)
+            {
+                const core::scene::MeshAsset *mesh = instance.mesh.Get();
+                if (mesh == nullptr) continue;
+                for (size_t pi = 0; pi < mesh->primitives.size(); ++pi)
+                {
+                    uint32_t primitive_id = 0;
+                    if (!m_impl->geometry_store.FindPrimitiveId(
+                            instance.mesh.Id().value,
+                            static_cast<uint32_t>(pi),
+                            primitive_id))
+                    {
+                        continue;
+                    }
+                    const GpuPrimitive &gp = primitives[primitive_id];
+                    if (gp.index_count == 0) continue;
+
+                    VulkanGBufferPass::DrawCall draw{};
+                    draw.model         = instance.world_from_local;
+                    draw.first_index   = gp.index_offset;
+                    draw.index_count   = gp.index_count;
+                    draw.vertex_offset = static_cast<int32_t>(gp.vertex_offset);
+                    m_impl->draw_scratch.push_back(draw);
+                }
+            }
+        };
+        emit_batch(scene_data.opaque_mesh_instances);
+        emit_batch(scene_data.masked_mesh_instances);
 
         VkCommandBuffer cmd       = m_impl->backend.CurrentCommandBuffer();
         VkImage         offscreen = m_impl->backend.OffscreenImage();
+        VkImage         depth     = m_impl->backend.DepthImage();
         VkImage         swap      = m_impl->backend.CurrentSwapchainImage();
-        VkExtent2D      extent    = m_impl->backend.SwapchainExtent();
+        VkExtent2D      extent    = m_impl->backend.OffscreenExtent();
 
-        // 1) offscreen UNDEFINED -> GENERAL for compute write
+        // 1) offscreen UNDEFINED -> COLOR_ATTACHMENT, depth UNDEFINED ->
+        //    DEPTH_ATTACHMENT for the gbuffer raster scope.
         ImageBarrier(cmd, offscreen,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                     0, VK_ACCESS_SHADER_WRITE_BIT,
+                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
-        // 2) heatmap dispatch — uses real view if SubmitScene happened, else
-        //    a degenerate identity view that produces an all-cool image.
+        VkImageMemoryBarrier depth_barrier{};
+        depth_barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        depth_barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+        depth_barrier.newLayout                   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_barrier.srcAccessMask               = 0;
+        depth_barrier.dstAccessMask               = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth_barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+        depth_barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+        depth_barrier.image                       = depth;
+        depth_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depth_barrier.subresourceRange.levelCount = 1;
+        depth_barrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &depth_barrier);
+
+        // 2) gbuffer raster — clears + draws every visible primitive.
         const RenderView view_to_use = m_impl->view_submitted
             ? m_impl->submitted_view : RenderView{};
-        const auto params = ComputeFrameParams(
-            view_to_use, extent, m_impl->as_stats.tlas_nodes);
-        m_impl->heatmap_pass.Execute(cmd,
+        VulkanGBufferPass::FrameParams params{};
+        params.view       = view_to_use.view;
+        params.projection = view_to_use.projection;
+        m_impl->gbuffer_pass.Execute(cmd,
                                       m_impl->backend.FrameIndexInFlight(),
                                       extent,
-                                      params);
+                                      m_impl->backend.OffscreenImageView(),
+                                      m_impl->backend.DepthImageView(),
+                                      params,
+                                      m_impl->draw_scratch);
 
-        // 3) offscreen GENERAL -> SHADER_READ_ONLY (ImGui samples it via the
-        //    ViewportPanel) and swapchain UNDEFINED -> COLOR_ATTACHMENT for
-        //    the dynamic-rendering scope below.
+        // 3) offscreen COLOR_ATTACHMENT -> SHADER_READ (ImGui samples it via
+        //    the ViewportPanel) and swapchain UNDEFINED -> COLOR_ATTACHMENT
+        //    for the ImGui render scope below.
         ImageBarrier(cmd, offscreen,
-                     VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         ImageBarrier(cmd, swap,
                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

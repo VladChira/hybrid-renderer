@@ -53,17 +53,24 @@ namespace hybrid::renderer
         uint32_t   FrameIndexInFlight() const { return m_frame_index; }
 
         // ---- offscreen target -------------------------------------------
-        // STORAGE + SAMPLED RGBA8 image, sized to swapchain extent.
-        // Recreated alongside the swapchain on resize. ImageView is suitable
-        // for VK_DESCRIPTOR_TYPE_STORAGE_IMAGE bindings (heatmap pass writes)
-        // and VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER bindings (ImGui's
-        // ViewportPanel reads). The shared sampler is owned by the backend
-        // for the lifetime of the device.
+        // STORAGE + SAMPLED + COLOR_ATTACHMENT RGBA8 image, sized to
+        // swapchain extent. Recreated alongside the swapchain on resize.
+        // ImageView is bound as a storage image by the heatmap compute pass,
+        // as a color attachment by the gbuffer raster pass, and as a
+        // combined-image-sampler by ImGui's ViewportPanel. The shared
+        // sampler is owned by the backend for the lifetime of the device.
         VkImage     OffscreenImage()      const { return m_offscreen.image; }
         VkImageView OffscreenImageView()  const { return m_offscreen.view; }
         VkFormat    OffscreenFormat()     const { return m_offscreen.format; }
         VkExtent2D  OffscreenExtent()     const { return m_offscreen.extent; }
         VkSampler   OffscreenSampler()    const { return m_offscreen_sampler; }
+
+        // ---- depth target -----------------------------------------------
+        // D32_SFLOAT depth image at the same extent. Used by the gbuffer
+        // raster pass for per-pixel depth testing. Recreated on resize.
+        VkImage     DepthImage()       const { return m_depth.image; }
+        VkImageView DepthImageView()   const { return m_depth.view; }
+        VkFormat    DepthFormat()      const { return m_depth.format; }
 
         // ---- sub-objects ------------------------------------------------
         vulkan::Instance &Instance()           { return m_instance; }
@@ -90,12 +97,23 @@ namespace hybrid::renderer
             VkExtent2D extent       = {0, 0};
         };
 
+        struct DepthTarget
+        {
+            VkImage image           = VK_NULL_HANDLE;
+            VkImageView view        = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkFormat format         = VK_FORMAT_D32_SFLOAT;
+            VkExtent2D extent       = {0, 0};
+        };
+
         bool CreateAllocator();
         void DestroyAllocator();
         bool CreateFrameData();
         void DestroyFrameData();
         bool CreateOffscreenTarget(uint32_t width, uint32_t height);
         void DestroyOffscreenTarget();
+        bool CreateDepthTarget(uint32_t width, uint32_t height);
+        void DestroyDepthTarget();
         bool CreateOffscreenSampler();
         void DestroyOffscreenSampler();
         bool RecreateSwapchainFromWindow();
@@ -114,6 +132,7 @@ namespace hybrid::renderer
         VkCommandBuffer m_current_command_buffer = VK_NULL_HANDLE;
 
         OffscreenTarget m_offscreen{};
+        DepthTarget m_depth{};
         VkSampler m_offscreen_sampler = VK_NULL_HANDLE;
     };
 

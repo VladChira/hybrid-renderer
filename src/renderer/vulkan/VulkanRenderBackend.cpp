@@ -12,11 +12,11 @@ namespace hybrid::renderer
         m_window = window;
 
         vulkan::InstanceConfig cfg{};
-#ifdef HYBRID_DEBUG
+        // Validation layers are cheap relative to the perf cost of
+        // debugging Vulkan misuse without them. Keep on in all configs;
+        // swap to a HYBRID_VK_VALIDATION compile flag if we want to flip
+        // it off for release builds later.
         cfg.enable_validation = true;
-#else
-        cfg.enable_validation = false;
-#endif
 #if defined(__APPLE__)
         cfg.require_macos_portability = true;
 #else
@@ -99,12 +99,28 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!CreateDepthTarget(m_swapchain.Extent().width,
+                                m_swapchain.Extent().height))
+        {
+            DestroyDepthTarget();
+            DestroyOffscreenTarget();
+            DestroyOffscreenSampler();
+            DestroyFrameData();
+            m_swapchain.Destroy(m_device);
+            DestroyAllocator();
+            m_device.Destroy();
+            m_instance.DestroySurface(m_surface);
+            m_instance.Destroy();
+            return false;
+        }
+
         return true;
     }
 
     void VulkanRenderBackend::Shutdown()
     {
         m_device.WaitIdle();
+        DestroyDepthTarget();
         DestroyOffscreenTarget();
         DestroyOffscreenSampler();
         DestroyFrameData();
@@ -229,7 +245,8 @@ namespace hybrid::renderer
         img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
         img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
         img_info.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
-                                  VK_IMAGE_USAGE_SAMPLED_BIT;
+                                  VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
         img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -274,6 +291,65 @@ namespace hybrid::renderer
         m_offscreen.extent = {0, 0};
     }
 
+    bool VulkanRenderBackend::CreateDepthTarget(uint32_t width, uint32_t height)
+    {
+        m_depth.format = VK_FORMAT_D32_SFLOAT;
+        m_depth.extent = {width, height};
+
+        VkImageCreateInfo img_info{};
+        img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        img_info.imageType     = VK_IMAGE_TYPE_2D;
+        img_info.format        = m_depth.format;
+        img_info.extent.width  = width;
+        img_info.extent.height = height;
+        img_info.extent.depth  = 1;
+        img_info.mipLevels     = 1;
+        img_info.arrayLayers   = 1;
+        img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+        img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        img_info.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VmaAllocationCreateInfo alloc_info{};
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (!HYBRID_VK_CHECK(vmaCreateImage(m_allocator, &img_info, &alloc_info,
+                                             &m_depth.image,
+                                             &m_depth.allocation,
+                                             nullptr)))
+        {
+            return false;
+        }
+
+        VkImageViewCreateInfo view_info{};
+        view_info.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image    = m_depth.image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format   = m_depth.format;
+        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
+        view_info.subresourceRange.levelCount     = 1;
+        view_info.subresourceRange.layerCount     = 1;
+
+        return HYBRID_VK_CHECK(vkCreateImageView(m_device.Logical(), &view_info, nullptr, &m_depth.view));
+    }
+
+    void VulkanRenderBackend::DestroyDepthTarget()
+    {
+        if (m_depth.view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(m_device.Logical(), m_depth.view, nullptr);
+            m_depth.view = VK_NULL_HANDLE;
+        }
+        if (m_depth.image != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(m_allocator, m_depth.image, m_depth.allocation);
+            m_depth.image = VK_NULL_HANDLE;
+            m_depth.allocation = VK_NULL_HANDLE;
+        }
+        m_depth.extent = {0, 0};
+    }
+
     bool VulkanRenderBackend::CreateOffscreenSampler()
     {
         VkSamplerCreateInfo s{};
@@ -315,7 +391,9 @@ namespace hybrid::renderer
             return false;
         }
         DestroyOffscreenTarget();
-        if (!CreateOffscreenTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)))
+        DestroyDepthTarget();
+        if (!CreateOffscreenTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)) ||
+            !CreateDepthTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)))
         {
             return false;
         }

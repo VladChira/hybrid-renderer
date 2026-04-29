@@ -324,6 +324,7 @@ elseif(HYBRID_RHI STREQUAL "vulkan")
   target_sources(hybrid_engine PRIVATE
     src/renderer/RendererVulkanStub.cpp
     src/renderer/passes/TraversalHeatmapVulkanPass.cpp
+    src/renderer/passes/VulkanGBufferPass.cpp
     src/renderer/vulkan/VulkanCommon.cpp
     src/renderer/vulkan/VulkanRenderBackend.cpp
     src/renderer/vulkan/VulkanInstance.cpp
@@ -341,6 +342,11 @@ elseif(HYBRID_RHI STREQUAL "vulkan")
     src/renderer/opengl/GLVertexArray.cpp
   )
   target_compile_definitions(hybrid_engine PUBLIC HYBRID_RHI_VULKAN=1)
+  # Make glm::perspective produce Vulkan-style depth [0, 1] instead of GL's
+  # [-1, 1]. We still flip Y at rasterizer level via a negative-height
+  # viewport in the gbuffer pass — that keeps the rest of the codebase's
+  # glm-style camera math identical between backends.
+  target_compile_definitions(hybrid_engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
   target_link_libraries(hybrid_engine PRIVATE thirdparty::vulkan)
 endif()
 
@@ -351,6 +357,8 @@ if(HYBRID_RHI STREQUAL "vulkan" AND HYBRID_BUILD_SPIRV)
   set(_HYBRID_VULKAN_SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute/swapchain_clear.comp"
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute/traversal_heatmap.comp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/gbuffer_vk.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/gbuffer_vk.frag"
   )
   hybrid_compile_shaders(hybrid_shaders
     SHADER_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/shaders"

@@ -266,11 +266,23 @@ namespace hybrid::ui
             const ImVec2 image_min = ImGui::GetCursorScreenPos();
             const ImVec2 image_max(image_min.x + image_size.x, image_min.y + image_size.y);
 
+            // GL framebuffers are Y-up — the rendered texture has world-up
+            // at the texture's high-Y row. Flipped UVs (0,1)-(1,0) sample
+            // it upright into ImGui's Y-down display.
+            // Vulkan framebuffers are Y-down — world-up is already at row 0,
+            // matching ImGui's UV convention. Standard UVs.
+#if defined(HYBRID_RHI_VULKAN)
+            const ImVec2 uv0(0.0f, 0.0f);
+            const ImVec2 uv1(1.0f, 1.0f);
+#else
+            const ImVec2 uv0(0.0f, 1.0f);
+            const ImVec2 uv1(1.0f, 0.0f);
+#endif
             ImGui::Image(
                 static_cast<ImTextureID>(static_cast<intptr_t>(viewport_texture)),
                 image_size,
-                ImVec2(0.0f, 1.0f),
-                ImVec2(1.0f, 0.0f));
+                uv0,
+                uv1);
 
             const bool image_hovered = ImGui::IsItemHovered();
             const ImVec2 mouse = ImGui::GetMousePos();
