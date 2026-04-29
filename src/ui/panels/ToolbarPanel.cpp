@@ -1,8 +1,11 @@
 #include "ToolbarPanel.h"
 
 #include "core/Log.h"
+#include "ui/Ui.h"
 
+#ifdef HYBRID_RHI_OPENGL
 #include <glad.h>
+#endif
 #include <imgui.h>
 #include <stb_image.h>
 
@@ -15,7 +18,7 @@ namespace hybrid::ui
     {
         constexpr ImVec2 kIconButtonSize{32.0f, 32.0f};
 
-        bool DrawIconButton(const char *id, const char *tooltip, uint32_t texture_id)
+        bool DrawIconButton(const char *id, const char *tooltip, uint64_t texture_id)
         {
             bool pressed = false;
             if (texture_id != 0)
@@ -38,7 +41,7 @@ namespace hybrid::ui
             return pressed;
         }
 
-        bool DrawToggleIconButton(const char *id, const char *tooltip, bool active, uint32_t texture_id)
+        bool DrawToggleIconButton(const char *id, const char *tooltip, bool active, uint64_t texture_id)
         {
             if (active)
             {
@@ -56,8 +59,8 @@ namespace hybrid::ui
         }
     } // namespace
 
-    ToolbarPanel::ToolbarPanel()
-        : Panel("Toolbar")
+    ToolbarPanel::ToolbarPanel(Ui *ui)
+        : Panel("Toolbar"), m_ui(ui)
     {
         m_light_icon = LoadIconTexture("point_dark.png");
         m_camera_icon = LoadIconTexture("camera_dark.png");
@@ -87,6 +90,8 @@ namespace hybrid::ui
             return {};
         }
 
+        uint64_t handle = 0;
+#ifdef HYBRID_RHI_OPENGL
         GLuint texture = 0;
         glGenTextures(1, &texture);
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -104,9 +109,16 @@ namespace hybrid::ui
                      GL_UNSIGNED_BYTE,
                      pixels);
         glBindTexture(GL_TEXTURE_2D, 0);
+        handle = static_cast<uint64_t>(texture);
+#elif defined(HYBRID_RHI_VULKAN)
+        if (m_ui != nullptr)
+        {
+            handle = m_ui->UploadIconTexture(pixels, width, height);
+        }
+#endif
         stbi_image_free(pixels);
 
-        return IconTexture{texture, width, height};
+        return IconTexture{handle, width, height};
     }
 
     ImGuiWindowFlags ToolbarPanel::WindowFlags() const

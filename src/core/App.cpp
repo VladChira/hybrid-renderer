@@ -104,6 +104,8 @@ namespace hybrid::core
             vk_ctx.color_format    = backend->SwapchainFormat();
             vk_ctx.min_image_count = renderer::VulkanRenderBackend::kMaxFramesInFlight;
             vk_ctx.image_count     = backend->Swapchain().ImageCount();
+            vk_ctx.allocator       = backend->Allocator();
+            vk_ctx.default_sampler = backend->OffscreenSampler();
             if (!ui.InitVulkan(config.ui, platform.GetNativeHandle(), vk_ctx))
             {
                 LOG_CRITICAL("UI module failed to start, aborting...");

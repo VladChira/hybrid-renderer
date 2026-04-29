@@ -138,10 +138,17 @@ We keep it simple:
 
 ### 4.5 Swapchain and present
 
-- Triple-buffered VK_PRESENT_MODE_MAILBOX_KHR if available, else FIFO.
+- FIFO (vsync) by default. MAILBOX is opt-in via `SwapchainConfig::
+  prefer_mailbox`. Originally the plan called for MAILBOX-when-available,
+  but that produced inconsistent behavior between platforms: MoltenVK
+  ends up vsync-capped under MAILBOX (Metal's CADisplayLink), while the
+  Windows WSI loader honors MAILBOX literally and runs uncapped (1.3k+
+  fps on the editor — wasted GPU and power). FIFO gives identical
+  behavior on Mac/Windows/Linux and is the right default for an editor.
 - Swapchain images are color-only. The render pipeline targets offscreen
-  attachments (matches today's GBuffer / scene framebuffers); a final
-  blit/copy lands the result on the swapchain image.
+  attachments (matches today's GBuffer / scene framebuffers); the
+  ViewportPanel samples the offscreen via ImGui — the offscreen→swap
+  blit was dropped in Phase 7-stage-2.
 
 ### 4.6 Window integration
 
@@ -439,6 +446,62 @@ Flag any of them that block progress.
 
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
+
+### Phase 7-stage-2 landing notes (2026-04-29) — ViewportPanel sampling the offscreen, blit dropped
+
+The editor on Vulkan is now feature-complete bar the toolbar icons. The
+ViewportPanel inside the dockspace shows the live BVH heatmap of the
+loaded scene, the AS panel surfaces real BVH stats, every other panel
+renders normally, and resize works (the offscreen image is recreated
+and re-registered with ImGui within the same frame).
+
+**What changed**:
+- Offscreen image usage flipped from `STORAGE | TRANSFER_SRC` to
+  `STORAGE | SAMPLED`. The renderer also creates a single shared
+  `VkSampler` (linear, clamp-to-edge) for the lifetime of the device.
+- The compute → blit → present chain became compute → sampler-read →
+  present. After the heatmap dispatch the offscreen transitions GENERAL
+  → SHADER_READ_ONLY_OPTIMAL; the swapchain transitions UNDEFINED →
+  COLOR_ATTACHMENT_OPTIMAL with `loadOp=CLEAR` (dark gray, only visible
+  at panel gaps because the dockspace fills the viewport). One fewer
+  barrier and one fewer image copy per frame.
+- `Ui::RegisterVulkanTexture(sampler, view) -> uint64_t` /
+  `UnregisterVulkanTexture(handle)` wrap `ImGui_ImplVulkan_AddTexture`
+  / `RemoveTexture`. The returned `VkDescriptorSet` is cast to a
+  uint64_t that flows through the existing `UiState::
+  viewport_color_texture` field — no panel changes needed; the same
+  `static_cast<ImTextureID>(static_cast<intptr_t>(viewport_texture))`
+  cast in `ViewportPanel::DrawContents` works for both backends.
+- App.cpp owns the lifecycle: registers the offscreen after
+  `ui.InitVulkan` succeeds, polls `OffscreenImageView()` each frame
+  before `ui.Frame`, and on handle change calls Unregister + Register.
+  The renderer's resize path already waits idle before recreating the
+  offscreen, so the descriptor swap is safe immediately. Unregisters
+  on shutdown.
+
+**Why this works without explicit gamma handling**: the offscreen is
+RGBA8_UNORM (linear values from the heatmap shader), the swapchain is
+the platform's preferred SRGB format, and ImGui's pipeline samples the
+linear texture and writes through the SRGB framebuffer encoder. The
+old blit path got the same conversion via the framebuffer; nothing
+changed at the gamma boundary.
+
+**The view-handle poll pattern** is worth keeping in mind: any time
+the renderer recreates a long-lived ImGui-registered resource (target
+textures, render-target arrays in later phases), a similar
+"compare-cached-handle each frame, refresh on mismatch" loop is the
+shortest correct fix. The alternative — explicit invalidation
+callbacks from the renderer — adds API surface; the poll is one
+pointer compare per frame.
+
+**Remaining Phase 7 cleanup**:
+- ToolbarPanel icons. Stbi loads the PNGs fine; the GL upload at
+  ctor-time is the broken piece. Port to a one-shot Vulkan upload
+  (staging buffer → device-local image → `ImGui_ImplVulkan_
+  AddTexture`). Probably 100–150 LoC; can live in a small
+  `VulkanIconCache` helper or directly inside the panel.
+- `ImGui_ImplVulkan_SetMinImageCount` on swapchain recreation when
+  image count actually changes (not just extent). Low priority.
 
 ### Phase 7-stage-1 landing notes (2026-04-29) — ImGui editor running on Vulkan
 

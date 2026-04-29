@@ -32,6 +32,8 @@
 #endif
 #ifdef HYBRID_RHI_VULKAN
 #include <backends/imgui_impl_vulkan.h>
+#include <vk_mem_alloc.h>
+#include <cstring>
 #endif
 
 #include <ImGuizmo.h>
@@ -66,13 +68,11 @@ namespace hybrid::ui
     {
         if (m_panels.Empty())
         {
-#if defined(HYBRID_RHI_OPENGL)
-            // ToolbarPanel loads GL textures for its icons. Phase 7-stage-2
-            // will port it to ImGui_ImplVulkan_AddTexture; for now skip it
-            // on the Vulkan path so we don't crash on null gl* function
-            // pointers.
-            RegisterPanel(std::make_unique<ToolbarPanel>(), DockTarget::Top);
-#endif
+            // ToolbarPanel uploads icons via the active backend's path —
+            // glGenTextures on GL, Ui::UploadIconTexture on Vulkan. Both
+            // produce a uint64-sized handle that DrawIconButton casts into
+            // ImTextureID.
+            RegisterPanel(std::make_unique<ToolbarPanel>(this), DockTarget::Top);
             RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
             RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
             RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
@@ -222,9 +222,13 @@ namespace hybrid::ui
 
         LOG_INFO("ImGui initialized (Vulkan backend)");
 
-        m_window         = window;
-        m_using_vulkan   = true;
-        m_vk_device      = vulkan.device;
+        m_window             = window;
+        m_using_vulkan       = true;
+        m_vk_device          = vulkan.device;
+        m_vk_allocator       = vulkan.allocator;
+        m_vk_default_sampler = vulkan.default_sampler;
+        m_vk_queue           = vulkan.queue;
+        m_vk_queue_family    = vulkan.queue_family;
         core::ResourceMonitor::Init();
         RegisterDefaultPanels();
         m_initialized = true;
@@ -255,6 +259,187 @@ namespace hybrid::ui
         if (handle == 0 || !m_initialized || !m_using_vulkan) return;
         ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(handle));
     }
+
+    namespace
+    {
+        // Local helper: tight image-layout transition for the one-shot icon
+        // upload command buffer. Same shape as the renderer's barriers but
+        // duplicated here to avoid pulling renderer/vulkan into the ui
+        // module.
+        void IconBarrier(VkCommandBuffer cmd, VkImage image,
+                          VkImageLayout from, VkImageLayout to,
+                          VkAccessFlags src_access, VkAccessFlags dst_access,
+                          VkPipelineStageFlags src_stage,
+                          VkPipelineStageFlags dst_stage)
+        {
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = from;
+            b.newLayout = to;
+            b.srcAccessMask = src_access;
+            b.dstAccessMask = dst_access;
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = image;
+            b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            b.subresourceRange.levelCount = 1;
+            b.subresourceRange.layerCount = 1;
+            vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
+                                 0, nullptr, 0, nullptr, 1, &b);
+        }
+    } // namespace
+
+    uint64_t Ui::UploadIconTexture(const uint8_t *rgba, int width, int height)
+    {
+        if (!m_initialized || !m_using_vulkan) return 0;
+        if (rgba == nullptr || width <= 0 || height <= 0) return 0;
+        if (m_vk_allocator == nullptr || m_vk_default_sampler == VK_NULL_HANDLE ||
+            m_vk_queue == VK_NULL_HANDLE)
+        {
+            return 0;
+        }
+
+        const VkDeviceSize byte_size =
+            static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4;
+
+        // ---- staging buffer (host-visible, persistently mapped) -----------
+        VkBuffer        staging        = VK_NULL_HANDLE;
+        VmaAllocation   staging_alloc  = VK_NULL_HANDLE;
+        VmaAllocationInfo staging_info{};
+        {
+            VkBufferCreateInfo bi{};
+            bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bi.size        = byte_size;
+            bi.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            VmaAllocationCreateInfo aci{};
+            aci.usage = VMA_MEMORY_USAGE_AUTO;
+            aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                        VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+            if (vmaCreateBuffer(m_vk_allocator, &bi, &aci,
+                                 &staging, &staging_alloc, &staging_info) != VK_SUCCESS)
+            {
+                return 0;
+            }
+            std::memcpy(staging_info.pMappedData, rgba, static_cast<size_t>(byte_size));
+        }
+
+        // ---- device-local image -------------------------------------------
+        VkImage       image      = VK_NULL_HANDLE;
+        VmaAllocation image_alloc = VK_NULL_HANDLE;
+        {
+            VkImageCreateInfo ii{};
+            ii.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            ii.imageType     = VK_IMAGE_TYPE_2D;
+            ii.format        = VK_FORMAT_R8G8B8A8_UNORM;
+            ii.extent.width  = static_cast<uint32_t>(width);
+            ii.extent.height = static_cast<uint32_t>(height);
+            ii.extent.depth  = 1;
+            ii.mipLevels     = 1;
+            ii.arrayLayers   = 1;
+            ii.samples       = VK_SAMPLE_COUNT_1_BIT;
+            ii.tiling        = VK_IMAGE_TILING_OPTIMAL;
+            ii.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT;
+            ii.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+            ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+            VmaAllocationCreateInfo iaci{};
+            iaci.usage = VMA_MEMORY_USAGE_AUTO;
+
+            if (vmaCreateImage(m_vk_allocator, &ii, &iaci,
+                                &image, &image_alloc, nullptr) != VK_SUCCESS)
+            {
+                vmaDestroyBuffer(m_vk_allocator, staging, staging_alloc);
+                return 0;
+            }
+        }
+
+        // ---- one-shot upload command buffer -------------------------------
+        VkCommandPool   pool = VK_NULL_HANDLE;
+        VkCommandBuffer cb   = VK_NULL_HANDLE;
+        {
+            VkCommandPoolCreateInfo pci{};
+            pci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            pci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+            pci.queueFamilyIndex = m_vk_queue_family;
+            if (vkCreateCommandPool(m_vk_device, &pci, nullptr, &pool) != VK_SUCCESS)
+            {
+                vmaDestroyImage(m_vk_allocator, image, image_alloc);
+                vmaDestroyBuffer(m_vk_allocator, staging, staging_alloc);
+                return 0;
+            }
+            VkCommandBufferAllocateInfo cbi{};
+            cbi.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            cbi.commandPool        = pool;
+            cbi.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            cbi.commandBufferCount = 1;
+            vkAllocateCommandBuffers(m_vk_device, &cbi, &cb);
+        }
+
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cb, &bi);
+
+        IconBarrier(cb, image,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {static_cast<uint32_t>(width),
+                              static_cast<uint32_t>(height), 1};
+        vkCmdCopyBufferToImage(cb, staging, image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                1, &region);
+
+        IconBarrier(cb, image,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+        vkEndCommandBuffer(cb);
+
+        VkSubmitInfo si{};
+        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers    = &cb;
+        vkQueueSubmit(m_vk_queue, 1, &si, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_vk_queue);
+
+        vkDestroyCommandPool(m_vk_device, pool, nullptr);
+        vmaDestroyBuffer(m_vk_allocator, staging, staging_alloc);
+
+        // ---- view + register with ImGui ------------------------------------
+        VkImageView view = VK_NULL_HANDLE;
+        VkImageViewCreateInfo vci{};
+        vci.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vci.image    = image;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format   = VK_FORMAT_R8G8B8A8_UNORM;
+        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.levelCount = 1;
+        vci.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(m_vk_device, &vci, nullptr, &view) != VK_SUCCESS)
+        {
+            vmaDestroyImage(m_vk_allocator, image, image_alloc);
+            return 0;
+        }
+
+        VkDescriptorSet set = ImGui_ImplVulkan_AddTexture(
+            m_vk_default_sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        m_vk_icons.push_back({image, view, image_alloc, set});
+        return reinterpret_cast<uint64_t>(set);
+    }
 #endif
 
     void Ui::Shutdown()
@@ -267,13 +452,23 @@ namespace hybrid::ui
         LOG_WARN("UI module shutting down...");
 
 #if defined(HYBRID_RHI_VULKAN)
+        for (UploadedIcon &icon : m_vk_icons)
+        {
+            ImGui_ImplVulkan_RemoveTexture(icon.descriptor_set);
+            vkDestroyImageView(m_vk_device, icon.view, nullptr);
+            vmaDestroyImage(m_vk_allocator, icon.image, icon.allocation);
+        }
+        m_vk_icons.clear();
         ImGui_ImplVulkan_Shutdown();
         if (m_vk_imgui_pool != VK_NULL_HANDLE)
         {
             vkDestroyDescriptorPool(m_vk_device, m_vk_imgui_pool, nullptr);
             m_vk_imgui_pool = VK_NULL_HANDLE;
         }
-        m_vk_device    = VK_NULL_HANDLE;
+        m_vk_device          = VK_NULL_HANDLE;
+        m_vk_allocator       = nullptr;
+        m_vk_default_sampler = VK_NULL_HANDLE;
+        m_vk_queue           = VK_NULL_HANDLE;
         m_using_vulkan = false;
 #elif defined(HYBRID_RHI_OPENGL)
         ImGui_ImplOpenGL3_Shutdown();

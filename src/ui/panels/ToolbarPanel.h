@@ -10,25 +10,34 @@
 namespace hybrid::ui
 {
 
+    class Ui;  // forward — used to dispatch icon uploads on the Vulkan path
+
     class ToolbarPanel final : public Panel
     {
     public:
-        ToolbarPanel();
+        // `ui` is consulted to upload icon textures on the Vulkan path. May
+        // be nullptr in OpenGL mode (icons are uploaded inline via glad).
+        explicit ToolbarPanel(Ui *ui = nullptr);
 
     private:
         struct IconTexture
         {
-            uint32_t id = 0;
+            // GLuint (uint32) on the GL path or VkDescriptorSet (cast to
+            // uint64) on the Vulkan path. ImGui's ImTextureID accepts both
+            // via the same intptr_t cast in DrawIconButton.
+            uint64_t id = 0;
             int width = 0;
             int height = 0;
         };
 
         static std::string BuildIconPath(const char *icon_file);
-        static IconTexture LoadIconTexture(const char *icon_file);
+        IconTexture LoadIconTexture(const char *icon_file);
 
         ImGuiWindowFlags WindowFlags() const override;
         ImGuiDockNodeFlags DockNodeFlags() const override;
         void DrawContents(PanelContext &context) override;
+
+        Ui *m_ui = nullptr;
 
         IconTexture m_light_icon{};
         IconTexture m_camera_icon{};

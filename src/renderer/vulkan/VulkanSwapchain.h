@@ -14,7 +14,13 @@ namespace hybrid::renderer::vulkan
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         uint32_t width = 0;
         uint32_t height = 0;
-        bool prefer_mailbox = true;
+        // FIFO (vsync) by default — uniform behavior across MoltenVK and
+        // the Windows/Linux WSI loaders. MAILBOX stays an opt-in: under
+        // MoltenVK it ends up vsync-capped anyway (Metal's CADisplayLink),
+        // but on Windows/Linux it runs uncapped and burns GPU/power for no
+        // visual gain in an editor. Flip this to true when minimum latency
+        // matters more than vsync.
+        bool prefer_mailbox = false;
     };
 
     class Swapchain
