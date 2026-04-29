@@ -122,7 +122,7 @@ namespace hybrid::renderer
         Shutdown();
     }
 
-    bool Renderer::Init()
+    bool Renderer::Init(platform::NativeWindowHandle /*window*/)
     {
         HYBRID_PROFILE_ZONE_N("Renderer::Init");
 

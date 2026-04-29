@@ -2,6 +2,7 @@
 
 #include "renderer/RendererTypes.h"
 #include "core/scene/SceneWorld.h"
+#include "platform/PlatformEvents.h"
 
 #include <memory>
 
@@ -25,7 +26,10 @@ namespace hybrid::renderer
         Renderer(Renderer &&) noexcept = default;
         Renderer &operator=(Renderer &&) noexcept = default;
 
-        bool Init();
+        // The native window is used by the Vulkan backend to create its
+        // surface + swapchain. The OpenGL backend ignores it (the GL context
+        // is bound to the current thread by the platform layer).
+        bool Init(platform::NativeWindowHandle window = {});
         void Shutdown();
 
         void Resize(const RenderExtent &extent);

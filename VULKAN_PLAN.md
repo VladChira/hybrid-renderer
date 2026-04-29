@@ -299,6 +299,15 @@ This section captures decisions we make as we go, with the *why* — so future
 work doesn't re-litigate them.
 
 - **2026-04-29**: Plan started. Branch is `vulkan`.
+- **2026-04-29**: Don't pull `vulkan-loader` (or `vulkan-headers`) from vcpkg.
+  vcpkg's vulkan-loader 1.4.328 has a relative-path resolution bug for ICD
+  manifests on macOS — when MoltenVK_icd.json's `library_path` is
+  `../../../lib/libMoltenVK.dylib`, this loader resolves it against the
+  binary's CWD rather than against the manifest file. The dlopen silently
+  fails, `vkCreateInstance` succeeds with no real driver, and `vkCreate
+  MetalSurfaceEXT` is unresolvable → `VK_ERROR_EXTENSION_NOT_PRESENT`. The
+  LunarG SDK loader (1.4.341+) resolves correctly. CMake now uses
+  `find_package(Vulkan)` which picks up `$VULKAN_SDK`. Lost ~1 hour to this.
 - **Pick Vulkan over WebGPU/bgfx**: Vulkan is the closest semantic match to
   what we're already doing; WebGPU is younger and bgfx wraps things at a
   higher level than we'd want for this project. MoltenVK gives us Mac

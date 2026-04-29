@@ -63,7 +63,7 @@ namespace hybrid::core
 
         LOG_INFO("Starting Renderer module...");
         renderer::Renderer renderer;
-        if (!renderer.Init())
+        if (!renderer.Init(platform.GetNativeHandle()))
         {
             LOG_CRITICAL("Renderer module failed to start, aborting...");
             platform.Shutdown();

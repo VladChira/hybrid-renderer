@@ -113,6 +113,19 @@ namespace hybrid::renderer::vulkan
             create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
         }
 
+        // Dump what we're asking for — useful for surface-creation
+        // EXTENSION_NOT_PRESENT failures, where the instance creates fine
+        // but a downstream call wants a platform-surface extension we
+        // forgot to enable.
+        for (uint32_t i = 0; i < glfw_ext_count; ++i)
+        {
+            LOG_INFO("[vulkan] GLFW required ext: {}", glfw_exts[i]);
+        }
+        for (const char *name : m_enabled_extensions)
+        {
+            LOG_INFO("[vulkan] enabling instance ext: {}", name);
+        }
+
         if (!HYBRID_VK_CHECK(vkCreateInstance(&create_info, nullptr, &m_instance)))
         {
             return false;
@@ -170,8 +183,8 @@ namespace hybrid::renderer::vulkan
     VkSurfaceKHR Instance::CreateSurface(GLFWwindow *window) const
     {
         VkSurfaceKHR surface = VK_NULL_HANDLE;
-        VkResult r = glfwCreateWindowSurface(m_instance, window, nullptr, &surface);
-        if (!HYBRID_VK_CHECK(r))
+        VkResult result = glfwCreateWindowSurface(m_instance, window, nullptr, &surface);
+        if (!VkCheck(result, "glfwCreateWindowSurface"))
         {
             return VK_NULL_HANDLE;
         }

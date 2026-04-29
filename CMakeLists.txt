@@ -69,16 +69,13 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
-# Vulkan dependencies — required when HYBRID_RHI=vulkan, but we still pull
-# the headers in for the OpenGL build so the rhi/ shared types compile.
-find_package(VulkanHeaders CONFIG QUIET)
-if(NOT VulkanHeaders_FOUND)
-  find_package(Vulkan QUIET)
-endif()
+# Vulkan dependencies. We deliberately do NOT pull `vulkan-loader` from
+# vcpkg — older vcpkg loaders have a relative-path resolution bug for ICD
+# manifests on macOS that breaks MoltenVK. Letting `find_package(Vulkan)`
+# walk to the LunarG SDK (via $VULKAN_SDK) gets us a recent loader that
+# resolves the path correctly. See VULKAN_PLAN.md decision log.
 if(HYBRID_RHI STREQUAL "vulkan")
-  if(NOT Vulkan_FOUND)
-    find_package(Vulkan REQUIRED)
-  endif()
+  find_package(Vulkan REQUIRED)
   find_package(VulkanMemoryAllocator CONFIG QUIET)
   if(NOT VulkanMemoryAllocator_FOUND)
     find_package(unofficial-vulkan-memory-allocator CONFIG QUIET)
