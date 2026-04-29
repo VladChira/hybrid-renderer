@@ -53,13 +53,17 @@ namespace hybrid::renderer
         uint32_t   FrameIndexInFlight() const { return m_frame_index; }
 
         // ---- offscreen target -------------------------------------------
-        // Storage-bit RGBA8 image, sized to swapchain extent. Recreated
-        // alongside the swapchain on resize. ImageView is suitable for
-        // VK_DESCRIPTOR_TYPE_STORAGE_IMAGE bindings in compute shaders.
+        // STORAGE + SAMPLED RGBA8 image, sized to swapchain extent.
+        // Recreated alongside the swapchain on resize. ImageView is suitable
+        // for VK_DESCRIPTOR_TYPE_STORAGE_IMAGE bindings (heatmap pass writes)
+        // and VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER bindings (ImGui's
+        // ViewportPanel reads). The shared sampler is owned by the backend
+        // for the lifetime of the device.
         VkImage     OffscreenImage()      const { return m_offscreen.image; }
         VkImageView OffscreenImageView()  const { return m_offscreen.view; }
         VkFormat    OffscreenFormat()     const { return m_offscreen.format; }
         VkExtent2D  OffscreenExtent()     const { return m_offscreen.extent; }
+        VkSampler   OffscreenSampler()    const { return m_offscreen_sampler; }
 
         // ---- sub-objects ------------------------------------------------
         vulkan::Instance &Instance()           { return m_instance; }
@@ -92,6 +96,8 @@ namespace hybrid::renderer
         void DestroyFrameData();
         bool CreateOffscreenTarget(uint32_t width, uint32_t height);
         void DestroyOffscreenTarget();
+        bool CreateOffscreenSampler();
+        void DestroyOffscreenSampler();
         bool RecreateSwapchainFromWindow();
 
         GLFWwindow *m_window = nullptr;
@@ -108,6 +114,7 @@ namespace hybrid::renderer
         VkCommandBuffer m_current_command_buffer = VK_NULL_HANDLE;
 
         OffscreenTarget m_offscreen{};
+        VkSampler m_offscreen_sampler = VK_NULL_HANDLE;
     };
 
 } // namespace hybrid::renderer

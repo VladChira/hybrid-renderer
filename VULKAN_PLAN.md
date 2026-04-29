@@ -387,6 +387,34 @@ work doesn't re-litigate them.
   for both backends until the GL path is retired. Required because
   ported passes still need to work on the GL side until each pass's GL
   cpp moves out of the build.
+- **2026-04-29**: Phase 7 brought up before Phase 3. Plan estimates Phase 3
+  (GBuffer / first raster pass) at ~1 week and Phase 7 (ImGui Vulkan) at 2
+  days. Doing the cheap one first restores the editor UI which makes every
+  subsequent phase nicer to develop against (panels, scene browser, AS
+  stats panel reading real BVH numbers). Doesn't add risk to Phase 3.
+- **2026-04-29**: ImGui-Vulkan via dynamic rendering, not legacy render
+  pass. `VK_KHR_dynamic_rendering` is core in Vulkan 1.3 and supported by
+  MoltenVK. Avoids per-swapchain-image framebuffer setup + resize
+  bookkeeping. Cost: must enable `VkPhysicalDeviceVulkan13Features::
+  dynamicRendering` on device init. Future raster passes will use this
+  too — Phase 3's GBuffer pipeline can target it directly.
+- **2026-04-29**: UI hook pattern instead of restructuring `Renderer`'s
+  Begin/End API. Renderer exposes `SetUiRenderHook(std::function<void(
+  VkCommandBuffer)>)`; EndFrame opens a `vkCmdBeginRendering` scope on
+  the swapchain image (post-blit, layout = COLOR_ATTACHMENT_OPTIMAL,
+  loadOp=LOAD) and invokes the hook before transitioning to PRESENT_SRC.
+  One command buffer, one submit, no extra sync. Trade-off: hook-style
+  coupling instead of an API split, but the API split would have rippled
+  through every call site. Easy to revisit if more hooks accumulate.
+- **2026-04-29**: Frame ordering differs by backend. GL builds ImGui state
+  AND submits draws inside `Ui::Frame` (after `EndFrame` so it has the
+  frame's textures). Vulkan splits this — `Ui::Frame` builds draw lists
+  *before* `EndFrame`, the renderer's hook records them later. App.cpp
+  has an `#ifdef` to swap the order. This means the Vulkan path's
+  `ui_state` doesn't see this-frame's renderer outputs (they aren't
+  available yet) — fine while the per-frame texture handles are all 0
+  in stage-1; will need attention when ViewportPanel goes to sample the
+  offscreen image (stage-2).
 
 ## 8. Open questions
 
@@ -411,6 +439,86 @@ Flag any of them that block progress.
 
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
+
+### Phase 7-stage-1 landing notes (2026-04-29) — ImGui editor running on Vulkan
+
+What runs now: the editor UI is back. Dockspace, scene hierarchy, properties,
+content browser, console, settings, render-targets, performance, and the
+acceleration-structure panel all render via ImGui's Vulkan backend through
+dynamic rendering. The AS panel surfaces the real BVH stats from the loaded
+scene (helmet glTF), validating the Phase 2B data flow end-to-end through
+the Ui side.
+
+**Architecture**: the Renderer exposes a single hook
+(`SetUiRenderHook(std::function<void(VkCommandBuffer)>)`). Inside
+`EndFrame`, after the offscreen→swapchain blit, the renderer transitions
+the swapchain image `TRANSFER_DST → COLOR_ATTACHMENT_OPTIMAL`, opens a
+`vkCmdBeginRendering` scope (loadOp=LOAD so the heatmap blit is
+preserved), invokes the hook, closes the scope, then transitions to
+PRESENT_SRC. The hook is implemented as `Ui::RenderImGuiInto(cmd)` which
+just calls `ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd)`.
+One command buffer, one submit, no extra sync.
+
+**The frame-ordering split** (see decision-log entry above) is the only
+non-trivial structural difference: Vulkan calls `ui.Frame` *before*
+`renderer.EndFrame` so ImGui draw lists exist when the hook fires. GL
+keeps the prior order. App.cpp has a small `#ifdef` to handle both.
+
+**Per-pass plumbing template** (see `Ui::InitVulkan` for the worked
+example):
+1. `IMGUI_CHECKVERSION` + `ImGui::CreateContext` + `ImPlot::CreateContext`
+   + font + theme — backend-agnostic, common with the GL path.
+2. `ImGui_ImplGlfw_InitForVulkan(window, true)`.
+3. `vkCreateDescriptorPool` for ImGui's font + user textures (1000
+   entries, `FREE_DESCRIPTOR_SET` flag — the standard ImGui example pool).
+4. Fill `ImGui_ImplVulkan_InitInfo`. Critical fields: `ApiVersion =
+   VK_API_VERSION_1_3`, `UseDynamicRendering = true`, and
+   `PipelineInfoMain.PipelineRenderingCreateInfo` with the swapchain
+   color format. ImGui_ImplVulkan_Init creates the pipeline internally
+   when those are set.
+5. Skipped: explicit `ImGui_ImplVulkan_CreateFontsTexture` — modern
+   ImGui versions upload fonts lazily on first RenderDrawData call.
+
+**Build-system gotcha worth keeping in mind**: ToolbarPanel's ctor calls
+`stbi_load` + `glGenTextures` for its icons. With glad uninitialized in
+Vulkan mode, the gl* function pointers are null and the call segfaults
+on construction. Stage-1 fix: `#ifdef HYBRID_RHI_OPENGL` around the
+ToolbarPanel registration in `Ui::RegisterDefaultPanels`. Stage-2 will
+register icon textures via `ImGui_ImplVulkan_AddTexture`.
+
+**Sidequest**: `core::ResourceMonitor::QueryProcessRamMB` had a
+hardcoded fall-through-to-zero on macOS (no procfs). Added a Mach
+`task_info(... MACH_TASK_BASIC_INFO ...)` branch so the PerformancePanel
+shows real RAM usage on Mac. RSS-equivalent across all three platforms now.
+
+**Validation layers off in RelWithDebInfo**. We learned this the hard way
+chasing the ToolbarPanel segfault: HYBRID_DEBUG (and therefore
+`enable_validation`) only fires in Debug builds. RelWithDebInfo runs the
+release Vulkan path with no validation. For runtime debugging, either
+switch to Debug (`-DCMAKE_BUILD_TYPE=Debug`) or set
+`VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` in the env. Worth
+considering whether we want validation in RelWithDebInfo too — the perf
+hit is small for development.
+
+**Open items for Phase 7-stage-2**:
+- ViewportPanel sampling the offscreen image. Needs `VK_IMAGE_USAGE_
+  SAMPLED_BIT` on the offscreen, a sampler, an `ImGui_ImplVulkan_
+  AddTexture` registration that gets refreshed on resize, and an
+  `ImageLayout = SHADER_READ_ONLY_OPTIMAL` transition after the heatmap
+  dispatch (replacing the current TRANSFER_SRC blit path). Once that's
+  in, the offscreen→swapchain blit can be dropped entirely — ImGui
+  clears the swapchain itself and the panel composes the rendered
+  image inside the dockspace.
+- ToolbarPanel icons via `ImGui_ImplVulkan_AddTexture`. Each icon would
+  be a small VkImage uploaded once at startup and registered as an
+  ImTextureID.
+- ImGui_ImplVulkan_SetMinImageCount on swapchain recreation. Currently
+  we don't call this; if the swapchain image count ever changes (e.g.
+  after a present mode switch) we'd be inconsistent with ImGui's
+  internal state. Low risk in practice but worth fixing.
+- Tracy GPU zones — still GL-only. ImGui's render time is now part of
+  the renderer's command buffer; would be useful to wrap it in a Tracy
+  zone alongside the heatmap dispatch and blit.
 
 ### Phase 2B landing notes (2026-04-29) — heatmap driven by real scene BVH
 

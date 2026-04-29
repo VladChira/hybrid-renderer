@@ -6,6 +6,7 @@
 #include "renderer/Renderer.h"
 #include "ui/Ui.h"
 
+#include <cstdint>
 #include <string>
 
 namespace hybrid::core
@@ -35,6 +36,14 @@ namespace hybrid::core
         assets::AssetId m_active_scene{};
         renderer::RenderSettings m_render_settings{};
         bool m_should_quit = false;
+
+        // Vulkan offscreen-as-ImTextureID lifecycle. Zero / nullptr in GL
+        // builds. The view handle is cached (as void*) so we can detect
+        // when the renderer recreates the offscreen image on resize and
+        // re-register with ImGui. uint64_t is the storage type of
+        // UiState::viewport_color_texture.
+        uint64_t m_vk_viewport_texture = 0;
+        void *m_vk_offscreen_view_cache = nullptr;
     };
 
 } // namespace hybrid::core

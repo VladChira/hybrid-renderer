@@ -59,6 +59,15 @@ namespace hybrid::ui
         // Records ImGui draws into `cmd`. Called by Renderer's UiRenderHook
         // inside a vkCmdBeginRendering scope.
         void RenderImGuiInto(VkCommandBuffer cmd);
+
+        // Registers (sampler, view) with ImGui's Vulkan backend so the
+        // texture can be sampled inside ImGui::Image. Returns the handle
+        // cast to uint64_t (fits ImTextureID and UiState's
+        // viewport_color_texture). Caller must Unregister on resize/
+        // shutdown — view handles change when the underlying image is
+        // recreated. Returns 0 on failure or if Ui isn't initialised.
+        uint64_t RegisterVulkanTexture(VkSampler sampler, VkImageView view);
+        void UnregisterVulkanTexture(uint64_t handle);
 #endif
         void Shutdown();
 

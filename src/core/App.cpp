@@ -114,6 +114,15 @@ namespace hybrid::core
             renderer.SetUiRenderHook([&ui](VkCommandBuffer cmd) {
                 ui.RenderImGuiInto(cmd);
             });
+
+            // Register the renderer's offscreen image as an ImGui texture so
+            // the ViewportPanel can sample it. The handle is refreshed in
+            // the main loop whenever the renderer recreates the offscreen
+            // (resize). Cached view-handle for change detection.
+            VkImageView offscreen_view = backend->OffscreenImageView();
+            m_vk_viewport_texture = ui.RegisterVulkanTexture(
+                backend->OffscreenSampler(), offscreen_view);
+            m_vk_offscreen_view_cache = reinterpret_cast<void *>(offscreen_view);
         }
 #endif
         LOG_INFO("UI module started");
@@ -136,6 +145,20 @@ namespace hybrid::core
 
         RunMainLoop(platform, ui, renderer);
 
+#if defined(HYBRID_RHI_VULKAN)
+        if (m_vk_viewport_texture != 0)
+        {
+            // Wait idle so we don't unregister a descriptor still in use by
+            // the last frame.
+            if (auto *backend = renderer.GetVulkanRenderBackend())
+            {
+                backend->Device().WaitIdle();
+            }
+            ui.UnregisterVulkanTexture(m_vk_viewport_texture);
+            m_vk_viewport_texture = 0;
+            m_vk_offscreen_view_cache = nullptr;
+        }
+#endif
         ui.Shutdown();
         renderer.Shutdown();
         platform.Shutdown();
@@ -245,15 +268,34 @@ namespace hybrid::core
                     renderer.SubmitScene(*active_scene_world, view, m_render_settings);
                 }
 #if defined(HYBRID_RHI_VULKAN)
+                // Refresh the offscreen-as-ImTextureID registration if the
+                // renderer recreated the offscreen image (resize). Compare
+                // raw view handles; the renderer's resize path already
+                // waited idle, so an immediate Unregister/Register is safe.
+                if (auto *backend = renderer.GetVulkanRenderBackend())
+                {
+                    VkImageView current_view = backend->OffscreenImageView();
+                    if (reinterpret_cast<void *>(current_view) != m_vk_offscreen_view_cache)
+                    {
+                        if (m_vk_viewport_texture != 0)
+                        {
+                            ui.UnregisterVulkanTexture(m_vk_viewport_texture);
+                        }
+                        m_vk_viewport_texture = ui.RegisterVulkanTexture(
+                            backend->OffscreenSampler(), current_view);
+                        m_vk_offscreen_view_cache = reinterpret_cast<void *>(current_view);
+                    }
+                }
+
                 // Vulkan needs ImGui draw lists built before EndFrame so the
                 // renderer's UiRenderHook (called inside EndFrame) has draw
                 // data to record. Outputs from this frame aren't available
-                // yet — ui_state's per-frame texture fields stay default,
-                // ViewportPanel skips. Stage-1 doesn't surface a Vulkan
-                // texture there yet.
+                // yet, but the offscreen texture handle is — feed it as
+                // viewport_color_texture so ViewportPanel can sample.
                 {
                     ui::UiState early_ui_state{};
                     early_ui_state.scene_world = active_scene_world;
+                    early_ui_state.viewport_color_texture = m_vk_viewport_texture;
                     early_ui_state.viewport_render_extent = frame_context.render_extent;
                     early_ui_state.viewport_render_view = resolved_view;
                     early_ui_state.viewport_render_view_valid = resolved_view_valid;

@@ -73,10 +73,23 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!CreateOffscreenSampler())
+        {
+            DestroyOffscreenSampler();
+            DestroyFrameData();
+            m_swapchain.Destroy(m_device);
+            DestroyAllocator();
+            m_device.Destroy();
+            m_instance.DestroySurface(m_surface);
+            m_instance.Destroy();
+            return false;
+        }
+
         if (!CreateOffscreenTarget(m_swapchain.Extent().width,
                                     m_swapchain.Extent().height))
         {
             DestroyOffscreenTarget();
+            DestroyOffscreenSampler();
             DestroyFrameData();
             m_swapchain.Destroy(m_device);
             DestroyAllocator();
@@ -93,6 +106,7 @@ namespace hybrid::renderer
     {
         m_device.WaitIdle();
         DestroyOffscreenTarget();
+        DestroyOffscreenSampler();
         DestroyFrameData();
         m_swapchain.Destroy(m_device);
         DestroyAllocator();
@@ -215,7 +229,7 @@ namespace hybrid::renderer
         img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
         img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
         img_info.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                                  VK_IMAGE_USAGE_SAMPLED_BIT;
         img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
         img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -258,6 +272,30 @@ namespace hybrid::renderer
             m_offscreen.allocation = VK_NULL_HANDLE;
         }
         m_offscreen.extent = {0, 0};
+    }
+
+    bool VulkanRenderBackend::CreateOffscreenSampler()
+    {
+        VkSamplerCreateInfo s{};
+        s.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        s.magFilter    = VK_FILTER_LINEAR;
+        s.minFilter    = VK_FILTER_LINEAR;
+        s.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        s.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        s.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        s.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        s.minLod       = 0.0f;
+        s.maxLod       = 0.0f;
+        return HYBRID_VK_CHECK(vkCreateSampler(m_device.Logical(), &s, nullptr, &m_offscreen_sampler));
+    }
+
+    void VulkanRenderBackend::DestroyOffscreenSampler()
+    {
+        if (m_offscreen_sampler != VK_NULL_HANDLE)
+        {
+            vkDestroySampler(m_device.Logical(), m_offscreen_sampler, nullptr);
+            m_offscreen_sampler = VK_NULL_HANDLE;
+        }
     }
 
     // -----------------------------------------------------------------------

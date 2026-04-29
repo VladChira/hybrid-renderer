@@ -240,6 +240,21 @@ namespace hybrid::ui
             ImGui_ImplVulkan_RenderDrawData(draw_data, cmd);
         }
     }
+
+    uint64_t Ui::RegisterVulkanTexture(VkSampler sampler, VkImageView view)
+    {
+        if (!m_initialized || !m_using_vulkan) return 0;
+        if (sampler == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return 0;
+        VkDescriptorSet set = ImGui_ImplVulkan_AddTexture(
+            sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        return reinterpret_cast<uint64_t>(set);
+    }
+
+    void Ui::UnregisterVulkanTexture(uint64_t handle)
+    {
+        if (handle == 0 || !m_initialized || !m_using_vulkan) return;
+        ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(handle));
+    }
 #endif
 
     void Ui::Shutdown()

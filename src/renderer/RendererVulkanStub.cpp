@@ -324,49 +324,30 @@ namespace hybrid::renderer
                                       extent,
                                       params);
 
-        // 3) offscreen GENERAL -> TRANSFER_SRC and swapchain UNDEFINED -> TRANSFER_DST
+        // 3) offscreen GENERAL -> SHADER_READ_ONLY (ImGui samples it via the
+        //    ViewportPanel) and swapchain UNDEFINED -> COLOR_ATTACHMENT for
+        //    the dynamic-rendering scope below.
         ImageBarrier(cmd, offscreen,
-                     VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                     VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                     VK_PIPELINE_STAGE_TRANSFER_BIT);
+                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         ImageBarrier(cmd, swap,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        // 4) blit offscreen -> swapchain (handles SRGB encoding via blit)
-        VkImageBlit blit{};
-        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.srcSubresource.layerCount = 1;
-        blit.srcOffsets[1] = {static_cast<int32_t>(extent.width),
-                               static_cast<int32_t>(extent.height), 1};
-        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.dstSubresource.layerCount = 1;
-        blit.dstOffsets[1] = blit.srcOffsets[1];
-        vkCmdBlitImage(cmd,
-                       offscreen, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swap,      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit,
-                       VK_FILTER_NEAREST);
-
-        // 5) Open a dynamic-rendering scope on the swapchain image so the UI
-        //    hook can record ImGui draws on top of the heatmap. loadOp=LOAD
-        //    preserves the blit. If no hook is registered we still open and
-        //    close the scope — cheap and keeps the layout flow uniform.
-        ImageBarrier(cmd, swap,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                     VK_PIPELINE_STAGE_TRANSFER_BIT,
                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
+        // 4) Open a dynamic-rendering scope on the swapchain image. ImGui's
+        //    dockspace covers the viewport so loadOp=CLEAR is fine — clear
+        //    color is only visible at panel gaps.
         VkRenderingAttachmentInfo color_attach{};
         color_attach.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         color_attach.imageView   = m_impl->backend.CurrentSwapchainImageView();
         color_attach.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color_attach.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD;
+        color_attach.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
         color_attach.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
+        color_attach.clearValue.color = {{0.05f, 0.05f, 0.05f, 1.0f}};
 
         VkRenderingInfo rendering{};
         rendering.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -383,7 +364,7 @@ namespace hybrid::renderer
         }
         vkCmdEndRendering(cmd);
 
-        // 6) swapchain COLOR_ATTACHMENT -> PRESENT
+        // 5) swapchain COLOR_ATTACHMENT -> PRESENT
         ImageBarrier(cmd, swap,
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
