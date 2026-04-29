@@ -372,7 +372,13 @@ namespace hybrid::renderer
             m_impl->last_indices_bytes   = ibytes;
             m_impl->last_materials_bytes = mbytes;
         }
-        if (vbytes > 0 && ibytes > 0)
+        // Skip upload when sizes are unchanged — GeometryStore /
+        // MaterialStore are append-only, so size-stable means nothing
+        // changed and the host-visible buffers already hold the right
+        // bytes. Sponza-class scenes are static after load; this turns
+        // the per-frame ~200MB memcpy into a one-shot upload at scene
+        // load time.
+        if (size_changed && vbytes > 0 && ibytes > 0)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::UpdateGeometry");
             VulkanGBufferPass::GeometryUpload geo{};
@@ -382,7 +388,7 @@ namespace hybrid::renderer
             geo.indices_bytes  = ibytes;
             m_impl->gbuffer_pass.UpdateGeometry(geo);
         }
-        if (mbytes > 0)
+        if (size_changed && mbytes > 0)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::UpdateMaterials");
             VulkanGBufferPass::MaterialUpload mats{};
