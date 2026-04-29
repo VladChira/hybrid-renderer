@@ -172,11 +172,20 @@ namespace hybrid::ui
         const float aspect = render_width / render_height;
         const float preview_height = preview_width / aspect;
 
+        // GL framebuffers are Y-up; Vulkan framebuffers are Y-down. Match
+        // the convention ViewportPanel uses (see comment there).
+#if defined(HYBRID_RHI_VULKAN)
+        const ImVec2 uv0(0.0f, 0.0f);
+        const ImVec2 uv1(1.0f, 1.0f);
+#else
+        const ImVec2 uv0(0.0f, 1.0f);
+        const ImVec2 uv1(1.0f, 0.0f);
+#endif
         ImGui::Image(
             static_cast<ImTextureID>(static_cast<intptr_t>(preview_texture)),
             ImVec2(preview_width, preview_height),
-            ImVec2(0.0f, 1.0f),
-            ImVec2(1.0f, 0.0f));
+            uv0,
+            uv1);
     }
 
 } // namespace hybrid::ui

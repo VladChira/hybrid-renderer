@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -65,6 +66,15 @@ namespace hybrid::renderer
         VkExtent2D  OffscreenExtent()     const { return m_offscreen.extent; }
         VkSampler   OffscreenSampler()    const { return m_offscreen_sampler; }
 
+        // ---- gbuffer RT1 (normal + roughness) ---------------------------
+        // SAMPLED + COLOR_ATTACHMENT RGBA8 image, same lifecycle as the
+        // offscreen / RT0. Bound as the second color attachment by the
+        // gbuffer raster pass; sampled by ImGui when the ViewportPanel's
+        // visualization is set to "GBuffer RT1".
+        VkImage     Rt1Image()       const { return m_rt1.image; }
+        VkImageView Rt1ImageView()   const { return m_rt1.view; }
+        VkFormat    Rt1Format()      const { return m_rt1.format; }
+
         // ---- depth target -----------------------------------------------
         // D32_SFLOAT depth image at the same extent. Used by the gbuffer
         // raster pass for per-pixel depth testing. Recreated on resize.
@@ -84,7 +94,6 @@ namespace hybrid::renderer
             VkCommandPool command_pool      = VK_NULL_HANDLE;
             VkCommandBuffer command_buffer  = VK_NULL_HANDLE;
             VkSemaphore image_available     = VK_NULL_HANDLE;
-            VkSemaphore render_finished     = VK_NULL_HANDLE;
             VkFence in_flight               = VK_NULL_HANDLE;
         };
 
@@ -112,6 +121,8 @@ namespace hybrid::renderer
         void DestroyFrameData();
         bool CreateOffscreenTarget(uint32_t width, uint32_t height);
         void DestroyOffscreenTarget();
+        bool CreateRt1Target(uint32_t width, uint32_t height);
+        void DestroyRt1Target();
         bool CreateDepthTarget(uint32_t width, uint32_t height);
         void DestroyDepthTarget();
         bool CreateOffscreenSampler();
@@ -126,12 +137,19 @@ namespace hybrid::renderer
         VmaAllocator m_allocator = VK_NULL_HANDLE;
 
         std::array<FrameData, kMaxFramesInFlight> m_frames{};
+        // render_finished is per-swapchain-image (NOT per-frame-in-flight):
+        // it's signaled by vkQueueSubmit and waited on by vkQueuePresentKHR,
+        // and present can still be in flight for an image when the next
+        // acquire of the same image happens. Per-image lets us avoid
+        // reusing a semaphore that's still in use by present.
+        std::vector<VkSemaphore> m_render_finished;
         uint32_t m_frame_index = 0;            // index into m_frames
         uint32_t m_image_index = 0;            // current swapchain image
         bool m_swapchain_invalid = false;
         VkCommandBuffer m_current_command_buffer = VK_NULL_HANDLE;
 
         OffscreenTarget m_offscreen{};
+        OffscreenTarget m_rt1{};
         DepthTarget m_depth{};
         VkSampler m_offscreen_sampler = VK_NULL_HANDLE;
     };

@@ -86,8 +86,11 @@ namespace hybrid::renderer
         }
 
         if (!CreateOffscreenTarget(m_swapchain.Extent().width,
-                                    m_swapchain.Extent().height))
+                                    m_swapchain.Extent().height) ||
+            !CreateRt1Target(m_swapchain.Extent().width,
+                              m_swapchain.Extent().height))
         {
+            DestroyRt1Target();
             DestroyOffscreenTarget();
             DestroyOffscreenSampler();
             DestroyFrameData();
@@ -103,6 +106,7 @@ namespace hybrid::renderer
                                 m_swapchain.Extent().height))
         {
             DestroyDepthTarget();
+            DestroyRt1Target();
             DestroyOffscreenTarget();
             DestroyOffscreenSampler();
             DestroyFrameData();
@@ -121,6 +125,7 @@ namespace hybrid::renderer
     {
         m_device.WaitIdle();
         DestroyDepthTarget();
+        DestroyRt1Target();
         DestroyOffscreenTarget();
         DestroyOffscreenSampler();
         DestroyFrameData();
@@ -196,8 +201,7 @@ namespace hybrid::renderer
 
             VkSemaphoreCreateInfo sem_info{};
             sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            if (!HYBRID_VK_CHECK(vkCreateSemaphore(m_device.Logical(), &sem_info, nullptr, &f.image_available)) ||
-                !HYBRID_VK_CHECK(vkCreateSemaphore(m_device.Logical(), &sem_info, nullptr, &f.render_finished)))
+            if (!HYBRID_VK_CHECK(vkCreateSemaphore(m_device.Logical(), &sem_info, nullptr, &f.image_available)))
             {
                 return false;
             }
@@ -210,6 +214,18 @@ namespace hybrid::renderer
                 return false;
             }
         }
+
+        // render_finished is per-swapchain-image. See header comment.
+        m_render_finished.resize(m_swapchain.ImageCount(), VK_NULL_HANDLE);
+        for (VkSemaphore &sem : m_render_finished)
+        {
+            VkSemaphoreCreateInfo sem_info{};
+            sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            if (!HYBRID_VK_CHECK(vkCreateSemaphore(m_device.Logical(), &sem_info, nullptr, &sem)))
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -218,10 +234,18 @@ namespace hybrid::renderer
         for (FrameData &f : m_frames)
         {
             if (f.in_flight)        { vkDestroyFence(m_device.Logical(), f.in_flight, nullptr);          f.in_flight = VK_NULL_HANDLE; }
-            if (f.render_finished)  { vkDestroySemaphore(m_device.Logical(), f.render_finished, nullptr); f.render_finished = VK_NULL_HANDLE; }
             if (f.image_available)  { vkDestroySemaphore(m_device.Logical(), f.image_available, nullptr); f.image_available = VK_NULL_HANDLE; }
             if (f.command_pool)     { vkDestroyCommandPool(m_device.Logical(), f.command_pool, nullptr);  f.command_pool = VK_NULL_HANDLE; f.command_buffer = VK_NULL_HANDLE; }
         }
+        for (VkSemaphore &sem : m_render_finished)
+        {
+            if (sem != VK_NULL_HANDLE)
+            {
+                vkDestroySemaphore(m_device.Logical(), sem, nullptr);
+                sem = VK_NULL_HANDLE;
+            }
+        }
+        m_render_finished.clear();
     }
 
     // -----------------------------------------------------------------------
@@ -289,6 +313,68 @@ namespace hybrid::renderer
             m_offscreen.allocation = VK_NULL_HANDLE;
         }
         m_offscreen.extent = {0, 0};
+    }
+
+    bool VulkanRenderBackend::CreateRt1Target(uint32_t width, uint32_t height)
+    {
+        m_rt1.format = VK_FORMAT_R8G8B8A8_UNORM;
+        m_rt1.extent = {width, height};
+
+        VkImageCreateInfo img_info{};
+        img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        img_info.imageType     = VK_IMAGE_TYPE_2D;
+        img_info.format        = m_rt1.format;
+        img_info.extent.width  = width;
+        img_info.extent.height = height;
+        img_info.extent.depth  = 1;
+        img_info.mipLevels     = 1;
+        img_info.arrayLayers   = 1;
+        img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+        img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        // RT1 doesn't need STORAGE — only the gbuffer raster pass writes
+        // (via COLOR_ATTACHMENT) and ImGui samples.
+        img_info.usage         = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                  VK_IMAGE_USAGE_SAMPLED_BIT;
+        img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VmaAllocationCreateInfo alloc_info{};
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (!HYBRID_VK_CHECK(vmaCreateImage(m_allocator, &img_info, &alloc_info,
+                                             &m_rt1.image,
+                                             &m_rt1.allocation,
+                                             nullptr)))
+        {
+            return false;
+        }
+
+        VkImageViewCreateInfo view_info{};
+        view_info.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image    = m_rt1.image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format   = m_rt1.format;
+        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.levelCount     = 1;
+        view_info.subresourceRange.layerCount     = 1;
+
+        return HYBRID_VK_CHECK(vkCreateImageView(m_device.Logical(), &view_info, nullptr, &m_rt1.view));
+    }
+
+    void VulkanRenderBackend::DestroyRt1Target()
+    {
+        if (m_rt1.view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(m_device.Logical(), m_rt1.view, nullptr);
+            m_rt1.view = VK_NULL_HANDLE;
+        }
+        if (m_rt1.image != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(m_allocator, m_rt1.image, m_rt1.allocation);
+            m_rt1.image = VK_NULL_HANDLE;
+            m_rt1.allocation = VK_NULL_HANDLE;
+        }
+        m_rt1.extent = {0, 0};
     }
 
     bool VulkanRenderBackend::CreateDepthTarget(uint32_t width, uint32_t height)
@@ -390,9 +476,30 @@ namespace hybrid::renderer
         {
             return false;
         }
+        // Image count may change across swapchain recreation; rebuild the
+        // render_finished semaphore pool to match.
+        for (VkSemaphore &sem : m_render_finished)
+        {
+            if (sem != VK_NULL_HANDLE)
+            {
+                vkDestroySemaphore(m_device.Logical(), sem, nullptr);
+            }
+        }
+        m_render_finished.assign(m_swapchain.ImageCount(), VK_NULL_HANDLE);
+        for (VkSemaphore &sem : m_render_finished)
+        {
+            VkSemaphoreCreateInfo sem_info{};
+            sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            if (!HYBRID_VK_CHECK(vkCreateSemaphore(m_device.Logical(), &sem_info, nullptr, &sem)))
+            {
+                return false;
+            }
+        }
         DestroyOffscreenTarget();
+        DestroyRt1Target();
         DestroyDepthTarget();
         if (!CreateOffscreenTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)) ||
+            !CreateRt1Target(static_cast<uint32_t>(w), static_cast<uint32_t>(h)) ||
             !CreateDepthTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)))
         {
             return false;
@@ -453,6 +560,8 @@ namespace hybrid::renderer
             return;
         }
 
+        VkSemaphore signal_sem = m_render_finished[m_image_index];
+
         VkSubmitInfo submit{};
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         VkPipelineStageFlags wait_stage =
@@ -464,14 +573,14 @@ namespace hybrid::renderer
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &f.command_buffer;
         submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores = &f.render_finished;
+        submit.pSignalSemaphores = &signal_sem;
         HYBRID_VK_CHECK(vkQueueSubmit(m_device.GraphicsQueue(), 1, &submit, f.in_flight));
 
         VkSwapchainKHR swapchain = m_swapchain.Handle();
         VkPresentInfoKHR present{};
         present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         present.waitSemaphoreCount = 1;
-        present.pWaitSemaphores = &f.render_finished;
+        present.pWaitSemaphores = &signal_sem;
         present.swapchainCount = 1;
         present.pSwapchains = &swapchain;
         present.pImageIndices = &m_image_index;

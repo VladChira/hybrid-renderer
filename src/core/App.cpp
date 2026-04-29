@@ -117,14 +117,19 @@ namespace hybrid::core
                 ui.RenderImGuiInto(cmd);
             });
 
-            // Register the renderer's offscreen image as an ImGui texture so
-            // the ViewportPanel can sample it. The handle is refreshed in
-            // the main loop whenever the renderer recreates the offscreen
-            // (resize). Cached view-handle for change detection.
+            // Register both gbuffer color targets (RT0 = offscreen, RT1)
+            // with ImGui so panels can sample them. Handles are refreshed
+            // in the main loop whenever the renderer recreates a target
+            // (resize).
             VkImageView offscreen_view = backend->OffscreenImageView();
             m_vk_viewport_texture = ui.RegisterVulkanTexture(
                 backend->OffscreenSampler(), offscreen_view);
             m_vk_offscreen_view_cache = reinterpret_cast<void *>(offscreen_view);
+
+            VkImageView rt1_view = backend->Rt1ImageView();
+            m_vk_rt1_texture = ui.RegisterVulkanTexture(
+                backend->OffscreenSampler(), rt1_view);
+            m_vk_rt1_view_cache = reinterpret_cast<void *>(rt1_view);
         }
 #endif
         LOG_INFO("UI module started");
@@ -148,17 +153,26 @@ namespace hybrid::core
         RunMainLoop(platform, ui, renderer);
 
 #if defined(HYBRID_RHI_VULKAN)
-        if (m_vk_viewport_texture != 0)
+        if (m_vk_viewport_texture != 0 || m_vk_rt1_texture != 0)
         {
-            // Wait idle so we don't unregister a descriptor still in use by
+            // Wait idle so we don't unregister descriptors still in use by
             // the last frame.
             if (auto *backend = renderer.GetVulkanRenderBackend())
             {
                 backend->Device().WaitIdle();
             }
-            ui.UnregisterVulkanTexture(m_vk_viewport_texture);
-            m_vk_viewport_texture = 0;
-            m_vk_offscreen_view_cache = nullptr;
+            if (m_vk_viewport_texture != 0)
+            {
+                ui.UnregisterVulkanTexture(m_vk_viewport_texture);
+                m_vk_viewport_texture = 0;
+                m_vk_offscreen_view_cache = nullptr;
+            }
+            if (m_vk_rt1_texture != 0)
+            {
+                ui.UnregisterVulkanTexture(m_vk_rt1_texture);
+                m_vk_rt1_texture = 0;
+                m_vk_rt1_view_cache = nullptr;
+            }
         }
 #endif
         ui.Shutdown();
@@ -287,16 +301,27 @@ namespace hybrid::core
                 // waited idle, so an immediate Unregister/Register is safe.
                 if (auto *backend = renderer.GetVulkanRenderBackend())
                 {
-                    VkImageView current_view = backend->OffscreenImageView();
-                    if (reinterpret_cast<void *>(current_view) != m_vk_offscreen_view_cache)
+                    VkImageView current_offscreen = backend->OffscreenImageView();
+                    if (reinterpret_cast<void *>(current_offscreen) != m_vk_offscreen_view_cache)
                     {
                         if (m_vk_viewport_texture != 0)
                         {
                             ui.UnregisterVulkanTexture(m_vk_viewport_texture);
                         }
                         m_vk_viewport_texture = ui.RegisterVulkanTexture(
-                            backend->OffscreenSampler(), current_view);
-                        m_vk_offscreen_view_cache = reinterpret_cast<void *>(current_view);
+                            backend->OffscreenSampler(), current_offscreen);
+                        m_vk_offscreen_view_cache = reinterpret_cast<void *>(current_offscreen);
+                    }
+                    VkImageView current_rt1 = backend->Rt1ImageView();
+                    if (reinterpret_cast<void *>(current_rt1) != m_vk_rt1_view_cache)
+                    {
+                        if (m_vk_rt1_texture != 0)
+                        {
+                            ui.UnregisterVulkanTexture(m_vk_rt1_texture);
+                        }
+                        m_vk_rt1_texture = ui.RegisterVulkanTexture(
+                            backend->OffscreenSampler(), current_rt1);
+                        m_vk_rt1_view_cache = reinterpret_cast<void *>(current_rt1);
                     }
                 }
 
@@ -308,7 +333,9 @@ namespace hybrid::core
                 {
                     ui::UiState early_ui_state{};
                     early_ui_state.scene_world = active_scene_world;
-                    early_ui_state.viewport_color_texture = m_vk_viewport_texture;
+                    early_ui_state.viewport_color_texture       = m_vk_viewport_texture;
+                    early_ui_state.viewport_gbuffer_rt0_texture = m_vk_viewport_texture;
+                    early_ui_state.viewport_gbuffer_rt1_texture = m_vk_rt1_texture;
                     early_ui_state.viewport_render_extent = frame_context.render_extent;
                     early_ui_state.viewport_render_view = resolved_view;
                     early_ui_state.viewport_render_view_valid = resolved_view_valid;

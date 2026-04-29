@@ -182,9 +182,13 @@ namespace hybrid::renderer
         }
         m_impl->heatmap_pass.SetOutputImageView(m_impl->backend.OffscreenImageView());
 
+        const std::vector<VkFormat> gbuffer_color_formats = {
+            m_impl->backend.OffscreenFormat(),
+            m_impl->backend.Rt1Format(),
+        };
         if (!m_impl->gbuffer_pass.Init(m_impl->backend.Device().Logical(),
                                         m_impl->backend.Allocator(),
-                                        m_impl->backend.OffscreenFormat(),
+                                        gbuffer_color_formats,
                                         m_impl->backend.DepthFormat()))
         {
             LOG_ERROR("[renderer/vulkan] VulkanGBufferPass::Init failed");
@@ -317,13 +321,19 @@ namespace hybrid::renderer
 
         VkCommandBuffer cmd       = m_impl->backend.CurrentCommandBuffer();
         VkImage         offscreen = m_impl->backend.OffscreenImage();
+        VkImage         rt1       = m_impl->backend.Rt1Image();
         VkImage         depth     = m_impl->backend.DepthImage();
         VkImage         swap      = m_impl->backend.CurrentSwapchainImage();
         VkExtent2D      extent    = m_impl->backend.OffscreenExtent();
 
-        // 1) offscreen UNDEFINED -> COLOR_ATTACHMENT, depth UNDEFINED ->
+        // 1) RT0 + RT1 UNDEFINED -> COLOR_ATTACHMENT, depth UNDEFINED ->
         //    DEPTH_ATTACHMENT for the gbuffer raster scope.
         ImageBarrier(cmd, offscreen,
+                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+        ImageBarrier(cmd, rt1,
                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -354,18 +364,27 @@ namespace hybrid::renderer
         VulkanGBufferPass::FrameParams params{};
         params.view       = view_to_use.view;
         params.projection = view_to_use.projection;
+        const std::vector<VkImageView> color_views = {
+            m_impl->backend.OffscreenImageView(),
+            m_impl->backend.Rt1ImageView(),
+        };
         m_impl->gbuffer_pass.Execute(cmd,
                                       m_impl->backend.FrameIndexInFlight(),
                                       extent,
-                                      m_impl->backend.OffscreenImageView(),
+                                      color_views,
                                       m_impl->backend.DepthImageView(),
                                       params,
                                       m_impl->draw_scratch);
 
-        // 3) offscreen COLOR_ATTACHMENT -> SHADER_READ (ImGui samples it via
-        //    the ViewportPanel) and swapchain UNDEFINED -> COLOR_ATTACHMENT
+        // 3) RT0 + RT1 COLOR_ATTACHMENT -> SHADER_READ (ImGui samples them
+        //    via ViewportPanel) and swapchain UNDEFINED -> COLOR_ATTACHMENT
         //    for the ImGui render scope below.
         ImageBarrier(cmd, offscreen,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        ImageBarrier(cmd, rt1,
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,

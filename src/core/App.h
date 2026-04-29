@@ -44,6 +44,12 @@ namespace hybrid::core
         // UiState::viewport_color_texture.
         uint64_t m_vk_viewport_texture = 0;
         void *m_vk_offscreen_view_cache = nullptr;
+        // Phase 3-stage-B: gbuffer RT1 (normal+roughness). Registered with
+        // ImGui alongside the offscreen / RT0 so the RenderTargetsPanel can
+        // display both. Re-registered on resize via the same view-handle
+        // poll as RT0.
+        uint64_t m_vk_rt1_texture = 0;
+        void *m_vk_rt1_view_cache = nullptr;
     };
 
 } // namespace hybrid::core

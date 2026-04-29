@@ -31,13 +31,13 @@ namespace hybrid::renderer
 
     bool VulkanGBufferPass::Init(VkDevice device,
                                   VmaAllocator allocator,
-                                  VkFormat color_format,
+                                  const std::vector<VkFormat> &color_formats,
                                   VkFormat depth_format)
     {
         m_device    = device;
         m_allocator = allocator;
 
-        if (!CreatePipeline(color_format, depth_format)) { Shutdown(); return false; }
+        if (!CreatePipeline(color_formats, depth_format)) { Shutdown(); return false; }
         if (!CreatePerFrameUniforms())                   { Shutdown(); return false; }
         if (!CreateDescriptorPool())                     { Shutdown(); return false; }
         if (!AllocateDescriptorSets())                   { Shutdown(); return false; }
@@ -84,7 +84,7 @@ namespace hybrid::renderer
     // Pipeline
     // -----------------------------------------------------------------------
 
-    bool VulkanGBufferPass::CreatePipeline(VkFormat color_format, VkFormat depth_format)
+    bool VulkanGBufferPass::CreatePipeline(const std::vector<VkFormat> &color_formats, VkFormat depth_format)
     {
         // ---- shader modules -----------------------------------------------
         auto vert_spv = vulkan::LoadSpirv("gbuffer_vk.vert.spv");
@@ -191,15 +191,20 @@ namespace hybrid::renderer
         ds.depthBoundsTestEnable = VK_FALSE;
         ds.stencilTestEnable     = VK_FALSE;
 
-        VkPipelineColorBlendAttachmentState ba{};
-        ba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        ba.blendEnable    = VK_FALSE;
+        // One blend state per color attachment. All opaque, full write mask.
+        std::vector<VkPipelineColorBlendAttachmentState> blend_attachments(
+            color_formats.size());
+        for (auto &ba : blend_attachments)
+        {
+            ba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                 VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+            ba.blendEnable    = VK_FALSE;
+        }
 
         VkPipelineColorBlendStateCreateInfo cb{};
         cb.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        cb.attachmentCount = 1;
-        cb.pAttachments    = &ba;
+        cb.attachmentCount = static_cast<uint32_t>(blend_attachments.size());
+        cb.pAttachments    = blend_attachments.data();
 
         const std::array<VkDynamicState, 2> dynamic_states{{
             VK_DYNAMIC_STATE_VIEWPORT,
@@ -214,8 +219,8 @@ namespace hybrid::renderer
         // will be used with. Chained via pNext on the graphics pipeline info.
         VkPipelineRenderingCreateInfo render_info{};
         render_info.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        render_info.colorAttachmentCount    = 1;
-        render_info.pColorAttachmentFormats = &color_format;
+        render_info.colorAttachmentCount    = static_cast<uint32_t>(color_formats.size());
+        render_info.pColorAttachmentFormats = color_formats.data();
         render_info.depthAttachmentFormat   = depth_format;
 
         VkGraphicsPipelineCreateInfo gp{};
@@ -326,7 +331,7 @@ namespace hybrid::renderer
     void VulkanGBufferPass::Execute(VkCommandBuffer cmd,
                                      uint32_t frame_index,
                                      VkExtent2D extent,
-                                     VkImageView color_view,
+                                     const std::vector<VkImageView> &color_views,
                                      VkImageView depth_view,
                                      const FrameParams &params,
                                      const std::vector<DrawCall> &draws)
@@ -341,13 +346,18 @@ namespace hybrid::renderer
         std::memcpy(m_uniforms[fi].mapped, &ubo, sizeof(ubo));
 
         // ---- dynamic-rendering scope --------------------------------------
-        VkRenderingAttachmentInfo color_attach{};
-        color_attach.sType                = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        color_attach.imageView            = color_view;
-        color_attach.imageLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color_attach.loadOp               = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        color_attach.storeOp              = VK_ATTACHMENT_STORE_OP_STORE;
-        color_attach.clearValue.color     = {{0.05f, 0.05f, 0.05f, 1.0f}};
+        std::vector<VkRenderingAttachmentInfo> color_attachments(color_views.size());
+        for (size_t i = 0; i < color_views.size(); ++i)
+        {
+            auto &ca = color_attachments[i];
+            ca = {};
+            ca.sType            = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            ca.imageView        = color_views[i];
+            ca.imageLayout      = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            ca.loadOp           = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            ca.storeOp          = VK_ATTACHMENT_STORE_OP_STORE;
+            ca.clearValue.color = {{0.05f, 0.05f, 0.05f, 1.0f}};
+        }
 
         VkRenderingAttachmentInfo depth_attach{};
         depth_attach.sType                       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -364,8 +374,8 @@ namespace hybrid::renderer
         ri.renderArea.offset    = {0, 0};
         ri.renderArea.extent    = extent;
         ri.layerCount           = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments    = &color_attach;
+        ri.colorAttachmentCount = static_cast<uint32_t>(color_attachments.size());
+        ri.pColorAttachments    = color_attachments.data();
         ri.pDepthAttachment     = &depth_attach;
 
         vkCmdBeginRendering(cmd, &ri);

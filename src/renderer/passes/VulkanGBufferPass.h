@@ -57,7 +57,7 @@ namespace hybrid::renderer
 
         bool Init(VkDevice device,
                   VmaAllocator allocator,
-                  VkFormat color_format,
+                  const std::vector<VkFormat> &color_formats,
                   VkFormat depth_format);
         void Shutdown();
 
@@ -72,13 +72,13 @@ namespace hybrid::renderer
         void Execute(VkCommandBuffer cmd,
                      uint32_t frame_index,
                      VkExtent2D extent,
-                     VkImageView color_view,
+                     const std::vector<VkImageView> &color_views,
                      VkImageView depth_view,
                      const FrameParams &params,
                      const std::vector<DrawCall> &draws);
 
     private:
-        bool CreatePipeline(VkFormat color_format, VkFormat depth_format);
+        bool CreatePipeline(const std::vector<VkFormat> &color_formats, VkFormat depth_format);
         bool CreatePerFrameUniforms();
         bool CreateDescriptorPool();
         bool AllocateDescriptorSets();
