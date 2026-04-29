@@ -156,3 +156,29 @@ target_link_libraries(external_imgui_glfw_opengl3
     thirdparty::glfw
     thirdparty::opengl
 )
+
+# --------------------
+# ImGui backends: GLFW + Vulkan
+# Only built when the Vulkan RHI is selected (the headers won't exist on a
+# standard imgui checkout without the docking branch backends pulled in).
+# --------------------
+if(HYBRID_RHI STREQUAL "vulkan")
+  add_library(external_imgui_glfw_vulkan STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_vulkan.cpp"
+  )
+
+  add_library(external::imgui_glfw_vulkan ALIAS external_imgui_glfw_vulkan)
+
+  target_include_directories(external_imgui_glfw_vulkan SYSTEM PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends"
+  )
+
+  target_link_libraries(external_imgui_glfw_vulkan
+    PUBLIC
+      external::imgui
+      thirdparty::glfw
+      thirdparty::vulkan
+  )
+endif()

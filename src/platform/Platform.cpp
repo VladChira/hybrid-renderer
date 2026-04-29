@@ -105,9 +105,15 @@ namespace hybrid::platform
             return false;
         }
 
+#if defined(HYBRID_RHI_VULKAN)
+        // Vulkan path: create a window without an OpenGL context. The
+        // VulkanRenderBackend creates the surface from this window later.
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+#else
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#endif
 
         GLFWwindow *window = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
         if (!window)
@@ -128,6 +134,9 @@ namespace hybrid::platform
         glfwSetScrollCallback(window, ScrollCallback);
         glfwSetDropCallback(window, DropCallback);
 
+#if defined(HYBRID_RHI_VULKAN)
+        LOG_INFO("GLFW initialized for Vulkan (no GL context)");
+#else
         glfwMakeContextCurrent(window);
         glfwSwapInterval(config.vsync ? 1 : 0);
 
@@ -143,6 +152,7 @@ namespace hybrid::platform
         }
 
         LOG_INFO("GLFW initialized with OpenGL {}.{}", gl_major, gl_minor);
+#endif
 
         m_initialized = true;
         return true;

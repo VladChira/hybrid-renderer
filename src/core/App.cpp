@@ -71,8 +71,9 @@ namespace hybrid::core
         }
         LOG_INFO("Renderer module started");
 
-        LOG_INFO("Starting UI module...");
         ui::Ui ui;
+#if defined(HYBRID_RHI_OPENGL)
+        LOG_INFO("Starting UI module...");
         if (!ui.Init(config.ui, platform.GetNativeHandle()))
         {
             LOG_CRITICAL("UI module failed to start, aborting...");
@@ -87,6 +88,9 @@ namespace hybrid::core
         ui.RegisterPanel(std::make_unique<ui::AccelerationStructurePanel>(
                              renderer.GetAccelerationStructureStats()),
                          ui::DockTarget::LeftBottom);
+#else
+        LOG_WARN("UI module skipped (Vulkan path is in Phase 0 of migration)");
+#endif
 
         LOG_INFO("Starting Asset Manager...");
         m_assets.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
@@ -100,7 +104,9 @@ namespace hybrid::core
 
         RunMainLoop(platform, ui, renderer);
 
+#if defined(HYBRID_RHI_OPENGL)
         ui.Shutdown();
+#endif
         renderer.Shutdown();
         platform.Shutdown();
         PerformanceTelemetry::Shutdown();
@@ -260,10 +266,14 @@ namespace hybrid::core
             }
 
             ui::CommandBuffer commands;
+#if defined(HYBRID_RHI_OPENGL)
             {
                 HYBRID_PROFILE_ZONE_N("App::UiFrame");
                 commands = ui.Frame(delta_seconds, ui_state);
             }
+#else
+            (void)ui_state;
+#endif
 
             std::optional<std::string> requested_scene_path;
             {

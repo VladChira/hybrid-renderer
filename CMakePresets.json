@@ -20,6 +20,38 @@
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "mac-ninja",
+            "description": "macOS, OpenGL backend (legacy — won't work on Mac because of compute shaders, kept for parity).",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "HYBRID_RHI": "opengl"
+            }
+        },
+        {
+            "name": "mac-ninja-vulkan",
+            "description": "macOS, Vulkan via MoltenVK. RelWithDebInfo so validation messages are debuggable.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "HYBRID_RHI": "vulkan"
+            }
         }
     ],
     "buildPresets": [
@@ -30,6 +62,14 @@
         {
             "name": "linux-ninja",
             "configurePreset": "linux-ninja"
+        },
+        {
+            "name": "mac-ninja",
+            "configurePreset": "mac-ninja"
+        },
+        {
+            "name": "mac-ninja-vulkan",
+            "configurePreset": "mac-ninja-vulkan"
         }
     ],
     "testPresets": [
@@ -44,6 +84,14 @@
             "description": "",
             "displayName": "",
             "configurePreset": "linux-ninja"
+        },
+        {
+            "name": "tests-mac-ninja",
+            "configurePreset": "mac-ninja"
+        },
+        {
+            "name": "tests-mac-ninja-vulkan",
+            "configurePreset": "mac-ninja-vulkan"
         }
     ]
 }

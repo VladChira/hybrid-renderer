@@ -8,7 +8,12 @@
     "glm",
     "gtest",
     "spdlog",
-    "tracy"
+    "tracy",
+    "vulkan-headers",
+    "vulkan-loader",
+    "vulkan-memory-allocator",
+    "glslang",
+    "spirv-tools"
   ],
   "overrides": [
     {
