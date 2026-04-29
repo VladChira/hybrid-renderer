@@ -372,6 +372,21 @@ work doesn't re-litigate them.
   (`VMA_DYNAMIC_VULKAN_FUNCTIONS=1`). Resolves entry points via
   `vkGet*ProcAddr` at allocator-create time. Avoids link-time coupling to
   a specific loader version (which bit us once already, and might again).
+- **2026-04-29**: Defer the abstract `rhi::Device` impl past Phase 2.
+  Phase 1 landing notes called for implementing it as Phase 2's first
+  step, but the risk register lists "RHI abstraction is wrong" as
+  *certain*, and the heatmap pass is the only consumer right now. Wrote
+  the pass with direct Vulkan calls instead (mirrors the gradient stub),
+  on the bet that 2-3 ported passes will give us enough evidence to shape
+  `rhi::Device` correctly the first time. Revisit at Phase 4.
+- **2026-04-29**: Keep ported shaders dual-target via a `SET_BINDING(s,b)`
+  macro shim in `shaders/include/common.glsl` plus an `#ifdef VULKAN` UBO
+  vs loose-uniform split. The GL driver (Mac caps GL at 4.1, but other
+  platforms still run GL) doesn't recognize `set=`; glslang auto-defines
+  `VULKAN` under `-V`. The shim keeps the same `.comp` source compiling
+  for both backends until the GL path is retired. Required because
+  ported passes still need to work on the GL side until each pass's GL
+  cpp moves out of the build.
 
 ## 8. Open questions
 
@@ -396,6 +411,123 @@ Flag any of them that block progress.
 
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
+
+### Phase 2A landing notes (2026-04-29) — heatmap running on MoltenVK with synthetic BVH
+
+Phase 2 split into 2A (Vulkan-side bring-up of the pass, validated against
+hand-fabricated input) and 2B (real `SceneWorld → SubmitScene → BVH SSBOs`
+plumbing). 2A is done; 2B is next. What runs now: orbiting camera around a
+unit AABB at the origin; `TraversalHeatmapVulkanPass` writes the false-
+coloured visit count into the offscreen image; backend blits to swapchain.
+With the synthetic 1-instance / 1-BLAS-leaf input, the visit counts are 1
+(miss) vs 3 (hit), both of which land in the cool half of the LUT — so the
+visible result is two-tone blue, which is the correct prediction.
+
+**Shader-migration pattern** (template for the rest of the ported shaders).
+Worked example: `traversal_heatmap.comp` + `heatmap_bvh_traversal.glsl`.
+Ported shaders need to compile under both backends until the GL path is
+retired, so:
+
+1. Add `set=N` qualifiers via the `SET_BINDING(s, b)` macro from
+   `shaders/include/common.glsl`. It expands to `set = s, binding = b`
+   under Vulkan and `binding = b` under GL (glslang auto-defines `VULKAN`
+   when invoked with `-V`).
+2. Loose `uniform` declarations are illegal in Vulkan — pack them into a
+   UBO. Keep both shapes:
+
+   ```glsl
+   #ifdef VULKAN
+   layout(std140, SET_BINDING(0, 1)) uniform Params {
+       mat4 a;
+       mat4 b;
+       vec4 c;        // use vec4 not vec3 — std140 padding
+       /* ... */
+   };
+   #else
+   uniform mat4 a;
+   uniform mat4 b;
+   uniform vec3 c;
+   #endif
+   ```
+
+   Members are accessed as bare names in both cases. The Vulkan-side `vec4`
+   is read with `c.xyz` so the same shader body works for both shapes.
+
+3. Add `#extension GL_GOOGLE_include_directive : require` under the
+   `VULKAN` guard if the shader uses `#include` — glslang refuses to
+   process `#include` natively without it. The GL ShaderManager inlines
+   includes itself, so this extension line is Vulkan-only.
+
+4. Add the shader file to `_HYBRID_VULKAN_SHADERS` in CMakeLists.txt to
+   join the SPIR-V whitelist.
+
+**Per-pass plumbing template** (see `TraversalHeatmapVulkanPass.cpp`):
+
+1. CreateDescriptorSetLayout — one binding per shader binding, sparse
+   indices are fine (e.g., 0/1/2/7/9/10 for the heatmap pass).
+2. CreatePipelineLayout (no push constants for this one — params live in
+   a UBO).
+3. LoadSpirv + CreateShaderModule + CreateComputePipelines.
+4. CreateDescriptorPool sized for `kMaxFramesInFlight` sets, with pool
+   sizes summed across all bindings (e.g., 1×storage_image + 1×UBO +
+   4×SSBO per set, times frames-in-flight).
+5. AllocateDescriptorSets — one set per frame in flight.
+6. Allocate per-frame UBOs (host-visible, persistently mapped) so the CPU
+   can refresh per-dispatch params in `Execute` without sync.
+7. SSBOs that are static for the lifetime of the pass: also host-visible
+   for now (Phase 2A has tiny synthetic data; production will want
+   device-local + staging upload).
+8. `SetOutputImageView(view)` writes all per-frame descriptor sets in a
+   single `vkUpdateDescriptorSets` call. Called on Init and on resize
+   (resize already waits idle).
+
+**Per-frame execution template** (see `Execute` + `EndFrame`):
+
+1. memcpy params into this-frame's mapped UBO.
+2. transition output image UNDEFINED → GENERAL.
+3. bind pipeline + bind descriptor set (this frame's), dispatch.
+4. transition output GENERAL → TRANSFER_SRC, swapchain UNDEFINED →
+   TRANSFER_DST, blit, then TRANSFER_DST → PRESENT_SRC.
+
+The Renderer stub still owns the inbound/outbound image barriers around
+the dispatch — the pass doesn't transition layouts itself. This keeps
+the pass's responsibilities to "I write GENERAL when called". Whether
+that boundary is right will get re-evaluated when chaining passes shows
+up (Phase 4 has a denoise that consumes the shadow output).
+
+**Verification idiom: synthetic BVH for shape validation.** A
+hand-fabricated 1-instance / 1-BLAS-leaf BVH with deterministic visit
+counts is a small, predictable input that exercises the full descriptor
+chain (UBO + 4 SSBOs + storage image) without needing scene-data
+plumbing. The same pattern should work for the next compute passes:
+build the smallest input that still exercises every shader binding, ship
+it before driving from real scene data. The synthetic structs are local
+to `RendererVulkanStub.cpp` (search `BuildSyntheticBvh`) and can be
+deleted once 2B lands.
+
+**Open items carried into Phase 2B**:
+- The offscreen image is still backend-owned. The pass's descriptor
+  write reaches into the backend for `OffscreenImageView()` directly.
+  When `rhi::Device` lands (post-Phase 4 per the explicit decision-log
+  entry), this becomes a `RegisterExternalTexture` call or similar.
+- BVH SSBOs are host-visible. Fine for the synthetic 4×144-byte input;
+  not fine for a real scene with thousands of nodes. Phase 2B should
+  decide whether to upgrade to device-local + staging upload, or wait
+  until perf actually matters.
+- `VkPipelineCache` is still not used. Two passes is still small enough
+  that "fresh compile per pipeline" doesn't sting; revisit at Phase 4.
+- Tracy GPU zones are still GL-only. `HYBRID_PROFILE_GPU_*` abstraction
+  is still a TODO; do it when GPU profiling is needed for actual perf
+  work, not before.
+
+**Build-system gotchas worth keeping in mind**:
+- glslang's `-I"path"` under CMake `VERBATIM` mode passes the literal
+  quote characters through to the tool. Use `"-I${path}"` (quotes around
+  the whole arg) instead. Cost ~10 minutes.
+- The include search base for ported shaders is `shaders/`, not
+  `shaders/include/` — matches the GL ShaderManager. CMake's `-I` arg
+  needs to point at `shaders/` so `#include "include/foo.glsl"`
+  resolves.
 
 ### Phase 1 landing notes (2026-04-29) — gradient running on MoltenVK
 Concrete patterns established this session, to reuse as we port real passes:

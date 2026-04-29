@@ -318,12 +318,14 @@ if(HYBRID_RHI STREQUAL "opengl")
 elseif(HYBRID_RHI STREQUAL "vulkan")
   target_sources(hybrid_engine PRIVATE
     src/renderer/RendererVulkanStub.cpp
+    src/renderer/passes/TraversalHeatmapVulkanPass.cpp
     src/renderer/vulkan/VulkanCommon.cpp
     src/renderer/vulkan/VulkanRenderBackend.cpp
     src/renderer/vulkan/VulkanInstance.cpp
     src/renderer/vulkan/VulkanDevice.cpp
     src/renderer/vulkan/VulkanSwapchain.cpp
     src/renderer/vulkan/VulkanAllocator.cpp
+    src/renderer/vulkan/VulkanBuffer.cpp
     src/renderer/vulkan/VulkanShader.cpp
   )
   target_compile_definitions(hybrid_engine PUBLIC HYBRID_RHI_VULKAN=1)

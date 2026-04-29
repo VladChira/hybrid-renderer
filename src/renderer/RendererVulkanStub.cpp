@@ -1,31 +1,32 @@
 // Vulkan-mode stub for Renderer.
 //
-// Phase 1 progress (this file):
+// Phase 2 progress (this file):
 //   * Brings up VulkanRenderBackend (instance/device/swapchain/VMA/offscreen).
-//   * Creates a tiny compute pipeline that writes a time-varying gradient
-//     into the offscreen image, then blits the offscreen onto the
-//     swapchain.
+//   * Drives TraversalHeatmapVulkanPass each frame with a hand-fabricated
+//     1-instance / 1-BLAS / 1-triangle-leaf BVH and an orbit camera, so we
+//     get a recognizable heatmap silhouette of the synthetic AABB.
+//   * Blits the offscreen image onto the swapchain.
 //
-// This is the smallest "real" Vulkan workload — a compute shader writing
-// to a storage image — and it exercises the full toolchain we need for
-// every other compute pass: SPIR-V load, descriptor sets, pipeline
-// layouts, push constants, image layout transitions, dispatch, blit. As
-// real passes get ported, the pipeline-creation and per-frame logic here
-// becomes the template for them.
+// Real scene plumbing (driving GeometryStore + AccelerationStructureCache
+// from SceneWorld in SubmitScene) is the next session's work.
 //
 // Excluded from the build in opengl mode; the real
 // src/renderer/Renderer.cpp is used instead.
 
 #include "renderer/Renderer.h"
+#include "renderer/passes/TraversalHeatmapVulkanPass.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
 #include "renderer/vulkan/VulkanRenderBackend.h"
-#include "renderer/vulkan/VulkanShader.h"
 
 #include "core/Log.h"
 
 #include <GLFW/glfw3.h>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <array>
+#include <cmath>
 #include <cstring>
 
 namespace hybrid::renderer
@@ -33,20 +34,6 @@ namespace hybrid::renderer
 
     namespace
     {
-        // Push constants supplied to swapchain_clear.comp. Keep in sync.
-        struct ClearPushConstants
-        {
-            uint32_t size_x;
-            uint32_t size_y;
-            float    time_seconds;
-            float    _pad;
-        };
-        static_assert(sizeof(ClearPushConstants) == 16,
-                      "Push constant block layout drift vs swapchain_clear.comp");
-
-        constexpr uint32_t kComputeWorkgroupSize = 8;
-        uint32_t CeilDiv(uint32_t a, uint32_t b) { return (a + b - 1) / b; }
-
         void ImageBarrier(VkCommandBuffer cmd,
                           VkImage image,
                           VkImageLayout from, VkImageLayout to,
@@ -69,6 +56,110 @@ namespace hybrid::renderer
             vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
                                  0, nullptr, 0, nullptr, 1, &b);
         }
+
+        // ---- Synthetic BVH data --------------------------------------------
+        // Phase 2 scaffolding: one instance pointing at one BLAS, whose root
+        // is a leaf reporting one triangle's worth of cost. The heatmap
+        // shader doesn't actually intersect triangles — it just counts node
+        // visits — so we don't need real geometry, only the BVH skeleton.
+        // Layouts match shaders/include/common.glsl (BvhNode, GpuPrimitive,
+        // GpuTlasInstance).
+
+        struct SynthBvhNode
+        {
+            glm::vec3 bmin;
+            int32_t   left_or_first;
+            glm::vec3 bmax;
+            int32_t   right_or_count;
+        };
+        static_assert(sizeof(SynthBvhNode) == 32, "BvhNode std430 = 32 bytes");
+
+        struct SynthGpuPrimitive
+        {
+            uint32_t vertex_offset;
+            uint32_t vertex_count;
+            uint32_t index_offset;
+            uint32_t index_count;
+            uint32_t material_index;
+            uint32_t blas_root;
+            uint32_t blas_triangle_offset;
+            uint32_t _pad;
+        };
+        static_assert(sizeof(SynthGpuPrimitive) == 32,
+                      "GpuPrimitive std430 = 32 bytes");
+
+        struct SynthGpuTlasInstance
+        {
+            glm::mat4 world_from_local;
+            glm::mat4 local_from_world;
+            uint32_t  primitive_id;
+            uint32_t  entity_id;
+            uint32_t  _pad0;
+            uint32_t  _pad1;
+        };
+        static_assert(sizeof(SynthGpuTlasInstance) == 144,
+                      "GpuTlasInstance std430 = 144 bytes");
+
+        struct SyntheticBvh
+        {
+            std::array<SynthGpuPrimitive,    1> primitives;
+            std::array<SynthBvhNode,         1> blas_nodes;
+            std::array<SynthBvhNode,         1> tlas_nodes;
+            std::array<SynthGpuTlasInstance, 1> tlas_instances;
+        };
+
+        SyntheticBvh BuildSyntheticBvh()
+        {
+            SyntheticBvh b{};
+            b.primitives[0] = SynthGpuPrimitive{
+                /*vertex_offset=*/0, /*vertex_count=*/0,
+                /*index_offset=*/0,  /*index_count=*/3,
+                /*material_index=*/0,
+                /*blas_root=*/0,
+                /*blas_triangle_offset=*/0,
+                /*_pad=*/0,
+            };
+            b.blas_nodes[0] = SynthBvhNode{
+                /*bmin=*/glm::vec3(-1.0f), /*left_or_first=*/0,
+                /*bmax=*/glm::vec3( 1.0f), /*right_or_count=*/-1, // leaf, 1 tri
+            };
+            b.tlas_nodes[0] = SynthBvhNode{
+                /*bmin=*/glm::vec3(-1.0f), /*left_or_first=*/0,
+                /*bmax=*/glm::vec3( 1.0f), /*right_or_count=*/-1, // leaf, 1 inst
+            };
+            b.tlas_instances[0] = SynthGpuTlasInstance{
+                /*world_from_local=*/glm::mat4(1.0f),
+                /*local_from_world=*/glm::mat4(1.0f),
+                /*primitive_id=*/0,
+                /*entity_id=*/0,
+                /*_pad0=*/0, /*_pad1=*/0,
+            };
+            return b;
+        }
+
+        TraversalHeatmapVulkanPass::FrameParams ComputeFrameParams(
+            float time_seconds, VkExtent2D extent, uint32_t tlas_node_count)
+        {
+            TraversalHeatmapVulkanPass::FrameParams p{};
+            const float t = time_seconds * 0.5f;
+            const glm::vec3 cam_pos(3.0f * std::cos(t), 1.5f, 3.0f * std::sin(t));
+            const glm::mat4 view = glm::lookAt(cam_pos,
+                                                glm::vec3(0.0f),
+                                                glm::vec3(0.0f, 1.0f, 0.0f));
+            const float aspect = extent.height > 0
+                ? static_cast<float>(extent.width) / static_cast<float>(extent.height)
+                : 1.0f;
+            const glm::mat4 proj = glm::perspective(
+                glm::radians(60.0f), aspect, 0.1f, 100.0f);
+
+            p.inv_view        = glm::inverse(view);
+            p.inv_projection  = glm::inverse(proj);
+            p.camera_position = cam_pos;
+            p.output_size     = glm::uvec2(extent.width, extent.height);
+            p.heatmap_scale   = 4.0f;     // small: tiny BVH, single-digit visits
+            p.tlas_node_count = tlas_node_count;
+            return p;
+        }
     } // namespace
 
     struct Renderer::Impl
@@ -82,148 +173,10 @@ namespace hybrid::renderer
         bool frame_active = false;
         float current_time = 0.0f;
 
-        // Compute pipeline state for swapchain_clear.comp.
-        VkShaderModule        clear_shader      = VK_NULL_HANDLE;
-        VkDescriptorSetLayout clear_set_layout  = VK_NULL_HANDLE;
-        VkPipelineLayout      clear_pipe_layout = VK_NULL_HANDLE;
-        VkPipeline            clear_pipeline    = VK_NULL_HANDLE;
-        VkDescriptorPool      descriptor_pool   = VK_NULL_HANDLE;
-        std::array<VkDescriptorSet, VulkanRenderBackend::kMaxFramesInFlight> clear_sets{};
+        TraversalHeatmapVulkanPass heatmap_pass{};
+        SyntheticBvh synthetic_bvh{};
         VkExtent2D last_descriptor_extent{0, 0};
     };
-
-    namespace
-    {
-        bool CreateClearPipeline(Renderer::Impl &impl)
-        {
-            VkDevice device = impl.backend.Device().Logical();
-
-            // ---- shader module ------------------------------------------
-            auto spirv = vulkan::LoadSpirv("compute/swapchain_clear.comp.spv");
-            if (spirv.empty()) return false;
-            impl.clear_shader = vulkan::CreateShaderModule(device, spirv);
-            if (impl.clear_shader == VK_NULL_HANDLE) return false;
-
-            // ---- descriptor set layout: 1 storage image at (0,0) --------
-            VkDescriptorSetLayoutBinding binding{};
-            binding.binding = 0;
-            binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            binding.descriptorCount = 1;
-            binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-            VkDescriptorSetLayoutCreateInfo set_layout_info{};
-            set_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-            set_layout_info.bindingCount = 1;
-            set_layout_info.pBindings = &binding;
-            if (!HYBRID_VK_CHECK(vkCreateDescriptorSetLayout(device, &set_layout_info, nullptr, &impl.clear_set_layout)))
-            {
-                return false;
-            }
-
-            // ---- pipeline layout (set + push constants) -----------------
-            VkPushConstantRange pc{};
-            pc.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-            pc.offset = 0;
-            pc.size = sizeof(ClearPushConstants);
-
-            VkPipelineLayoutCreateInfo pl_info{};
-            pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-            pl_info.setLayoutCount = 1;
-            pl_info.pSetLayouts = &impl.clear_set_layout;
-            pl_info.pushConstantRangeCount = 1;
-            pl_info.pPushConstantRanges = &pc;
-            if (!HYBRID_VK_CHECK(vkCreatePipelineLayout(device, &pl_info, nullptr, &impl.clear_pipe_layout)))
-            {
-                return false;
-            }
-
-            // ---- compute pipeline ---------------------------------------
-            VkPipelineShaderStageCreateInfo stage{};
-            stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-            stage.module = impl.clear_shader;
-            stage.pName  = "main";
-
-            VkComputePipelineCreateInfo cp{};
-            cp.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-            cp.stage = stage;
-            cp.layout = impl.clear_pipe_layout;
-            if (!HYBRID_VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp, nullptr, &impl.clear_pipeline)))
-            {
-                return false;
-            }
-
-            // ---- descriptor pool ----------------------------------------
-            VkDescriptorPoolSize pool_size{};
-            pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            pool_size.descriptorCount = VulkanRenderBackend::kMaxFramesInFlight;
-
-            VkDescriptorPoolCreateInfo pool_info{};
-            pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-            pool_info.maxSets = VulkanRenderBackend::kMaxFramesInFlight;
-            pool_info.poolSizeCount = 1;
-            pool_info.pPoolSizes = &pool_size;
-            if (!HYBRID_VK_CHECK(vkCreateDescriptorPool(device, &pool_info, nullptr, &impl.descriptor_pool)))
-            {
-                return false;
-            }
-
-            // ---- allocate one set per frame in flight -------------------
-            std::array<VkDescriptorSetLayout, VulkanRenderBackend::kMaxFramesInFlight> layouts;
-            layouts.fill(impl.clear_set_layout);
-
-            VkDescriptorSetAllocateInfo alloc_info{};
-            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            alloc_info.descriptorPool = impl.descriptor_pool;
-            alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-            alloc_info.pSetLayouts = layouts.data();
-            if (!HYBRID_VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, impl.clear_sets.data())))
-            {
-                return false;
-            }
-            return true;
-        }
-
-        void DestroyClearPipeline(Renderer::Impl &impl)
-        {
-            VkDevice device = impl.backend.Device().Logical();
-            if (impl.descriptor_pool)   { vkDestroyDescriptorPool(device, impl.descriptor_pool, nullptr);   impl.descriptor_pool = VK_NULL_HANDLE; }
-            if (impl.clear_pipeline)    { vkDestroyPipeline(device, impl.clear_pipeline, nullptr);          impl.clear_pipeline = VK_NULL_HANDLE; }
-            if (impl.clear_pipe_layout) { vkDestroyPipelineLayout(device, impl.clear_pipe_layout, nullptr); impl.clear_pipe_layout = VK_NULL_HANDLE; }
-            if (impl.clear_set_layout)  { vkDestroyDescriptorSetLayout(device, impl.clear_set_layout, nullptr); impl.clear_set_layout = VK_NULL_HANDLE; }
-            if (impl.clear_shader)      { vkDestroyShaderModule(device, impl.clear_shader, nullptr);        impl.clear_shader = VK_NULL_HANDLE; }
-            for (auto &set : impl.clear_sets) set = VK_NULL_HANDLE;
-        }
-
-        // Re-write all per-frame descriptor sets to point at the current
-        // offscreen image view. Called whenever the offscreen extent
-        // changes (initial creation + resize). Safe because the backend's
-        // resize path waits idle before recreating.
-        void RewriteClearDescriptors(Renderer::Impl &impl)
-        {
-            VkDevice device = impl.backend.Device().Logical();
-
-            std::array<VkDescriptorImageInfo, VulkanRenderBackend::kMaxFramesInFlight> image_infos{};
-            std::array<VkWriteDescriptorSet, VulkanRenderBackend::kMaxFramesInFlight>  writes{};
-            for (uint32_t i = 0; i < VulkanRenderBackend::kMaxFramesInFlight; ++i)
-            {
-                image_infos[i].imageView = impl.backend.OffscreenImageView();
-                image_infos[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-                writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writes[i].dstSet = impl.clear_sets[i];
-                writes[i].dstBinding = 0;
-                writes[i].descriptorCount = 1;
-                writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                writes[i].pImageInfo = &image_infos[i];
-            }
-            vkUpdateDescriptorSets(device,
-                                   static_cast<uint32_t>(writes.size()),
-                                   writes.data(),
-                                   0, nullptr);
-            impl.last_descriptor_extent = impl.backend.OffscreenExtent();
-        }
-    } // namespace
 
     Renderer::Renderer() : m_impl(std::make_unique<Impl>()) {}
     Renderer::~Renderer() = default;
@@ -253,16 +206,30 @@ namespace hybrid::renderer
             return false;
         }
 
-        if (!CreateClearPipeline(*m_impl))
+        m_impl->synthetic_bvh = BuildSyntheticBvh();
+        TraversalHeatmapVulkanPass::SsboData ssbo{};
+        ssbo.primitives           = m_impl->synthetic_bvh.primitives.data();
+        ssbo.primitives_bytes     = sizeof(m_impl->synthetic_bvh.primitives);
+        ssbo.blas_nodes           = m_impl->synthetic_bvh.blas_nodes.data();
+        ssbo.blas_nodes_bytes     = sizeof(m_impl->synthetic_bvh.blas_nodes);
+        ssbo.tlas_nodes           = m_impl->synthetic_bvh.tlas_nodes.data();
+        ssbo.tlas_nodes_bytes     = sizeof(m_impl->synthetic_bvh.tlas_nodes);
+        ssbo.tlas_instances       = m_impl->synthetic_bvh.tlas_instances.data();
+        ssbo.tlas_instances_bytes = sizeof(m_impl->synthetic_bvh.tlas_instances);
+
+        if (!m_impl->heatmap_pass.Init(m_impl->backend.Device().Logical(),
+                                        m_impl->backend.Allocator(),
+                                        ssbo))
         {
-            LOG_ERROR("[renderer/vulkan] clear pipeline creation failed");
-            DestroyClearPipeline(*m_impl);
+            LOG_ERROR("[renderer/vulkan] TraversalHeatmapVulkanPass::Init failed");
+            m_impl->heatmap_pass.Shutdown();
             m_impl->backend.Shutdown();
             return false;
         }
-        RewriteClearDescriptors(*m_impl);
+        m_impl->heatmap_pass.SetOutputImageView(m_impl->backend.OffscreenImageView());
+        m_impl->last_descriptor_extent = m_impl->backend.OffscreenExtent();
 
-        LOG_INFO("[renderer/vulkan] Phase 1 stub: gradient compute -> blit -> present");
+        LOG_INFO("[renderer/vulkan] Phase 2: synthetic-BVH heatmap -> blit -> present");
         m_impl->initialized = true;
         return true;
     }
@@ -271,7 +238,7 @@ namespace hybrid::renderer
     {
         if (!m_impl->initialized) return;
         m_impl->backend.Device().WaitIdle();
-        DestroyClearPipeline(*m_impl);
+        m_impl->heatmap_pass.Shutdown();
         m_impl->backend.Shutdown();
         m_impl->initialized = false;
     }
@@ -297,20 +264,22 @@ namespace hybrid::renderer
             return m_impl->outputs;
         }
 
-        // If the backend recreated the offscreen image (initial + resize),
-        // re-point the descriptors at the new view.
+        // The backend recreates the offscreen image on resize. When the
+        // extent changes, re-point the pass's descriptor sets at the new
+        // view (the resize path already waits idle, so it's safe to write
+        // descriptors that other frames might be referencing).
         VkExtent2D current_extent = m_impl->backend.OffscreenExtent();
         if (current_extent.width  != m_impl->last_descriptor_extent.width ||
             current_extent.height != m_impl->last_descriptor_extent.height)
         {
-            RewriteClearDescriptors(*m_impl);
+            m_impl->heatmap_pass.SetOutputImageView(m_impl->backend.OffscreenImageView());
+            m_impl->last_descriptor_extent = current_extent;
         }
 
         VkCommandBuffer cmd       = m_impl->backend.CurrentCommandBuffer();
         VkImage         offscreen = m_impl->backend.OffscreenImage();
         VkImage         swap      = m_impl->backend.CurrentSwapchainImage();
         VkExtent2D      extent    = m_impl->backend.SwapchainExtent();
-        VkDescriptorSet set       = m_impl->clear_sets[m_impl->backend.FrameIndexInFlight()];
 
         // 1) offscreen UNDEFINED -> GENERAL for compute write
         ImageBarrier(cmd, offscreen,
@@ -319,23 +288,14 @@ namespace hybrid::renderer
                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-        // 2) bind compute pipeline + set, push constants, dispatch
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_impl->clear_pipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                m_impl->clear_pipe_layout, 0, 1, &set, 0, nullptr);
-
-        ClearPushConstants pc{};
-        pc.size_x = extent.width;
-        pc.size_y = extent.height;
-        pc.time_seconds = m_impl->current_time;
-        pc._pad = 0.0f;
-        vkCmdPushConstants(cmd, m_impl->clear_pipe_layout,
-                           VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pc), &pc);
-        vkCmdDispatch(cmd,
-                      CeilDiv(extent.width,  kComputeWorkgroupSize),
-                      CeilDiv(extent.height, kComputeWorkgroupSize),
-                      1);
+        // 2) heatmap dispatch
+        const auto params = ComputeFrameParams(
+            m_impl->current_time, extent,
+            static_cast<uint32_t>(m_impl->synthetic_bvh.tlas_nodes.size()));
+        m_impl->heatmap_pass.Execute(cmd,
+                                      m_impl->backend.FrameIndexInFlight(),
+                                      extent,
+                                      params);
 
         // 3) offscreen GENERAL -> TRANSFER_SRC and swapchain UNDEFINED -> TRANSFER_DST
         ImageBarrier(cmd, offscreen,
