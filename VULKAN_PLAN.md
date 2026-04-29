@@ -159,70 +159,102 @@ The passes graph defines the order. Anything upstream of a pass must be ready
 before that pass migrates. Estimates assume someone fluent in Vulkan; double
 them otherwise.
 
-### Phase 0 — infrastructure (in progress, partial)
-- [x] vcpkg deps: `vulkan-headers`, `vulkan-loader`, `vulkan-memory-allocator`,
-      `glslang`, `spirv-tools`.
-- [x] CMake: `HYBRID_RHI` option (opengl|vulkan, default opengl). Detects
-      `glslangValidator`. Wires `hybrid_compile_shaders()` to produce SPIR-V
-      under `${CMAKE_BINARY_DIR}/shaders/`.
-- [x] `src/renderer/vulkan/` core (real, working code, not stubs):
-      `VulkanInstance` (validation layer + portability for MoltenVK),
-      `VulkanDevice` (physical-device pick by score, descriptor-indexing
-      probe, graphics+present queues), `VulkanSwapchain` (mailbox-or-FIFO,
-      SRGB target, recreate-on-resize), `VulkanRenderBackend` orchestrator.
-- [x] `src/renderer/rhi/` headers: `RhiTypes.h` (opaque handles, formats,
-      usages, image layouts, descriptor model) and `Device.h` (`Device` and
-      `CommandList` interfaces). Header-only — no implementation yet.
-- [x] `src/platform/Platform.cpp` window-creation gated on
-      `HYBRID_RHI_VULKAN`: requests `GLFW_NO_API` rather than a 4.6 context.
-- [x] ImGui: `external::imgui_glfw_vulkan` static target wired up
-      (`imgui_impl_glfw.cpp` + `imgui_impl_vulkan.cpp`); only built when
-      `HYBRID_RHI=vulkan`.
-- [x] Stub `RendererVulkanStub.cpp` satisfies `Renderer.h`'s API in vulkan
-      mode so the editor links. It does no rendering — calls `LOG_WARN` once
-      at Init.
+### Phase 0 — infrastructure ✅ DONE
+- [x] vcpkg deps: `vulkan-memory-allocator`, `glslang`, `spirv-tools`.
+      Notably **not** `vulkan-loader` or `vulkan-headers` — see decision log.
+- [x] CMake: `HYBRID_RHI` option (opengl|vulkan, default opengl), `mac-ninja`
+      and `mac-ninja-vulkan` presets. `find_package(Vulkan)` resolves to the
+      LunarG SDK via `$VULKAN_SDK`. `hybrid_compile_shaders()` produces SPIR-V
+      from a *whitelist* of source files (not a glob — the existing GL
+      shaders need explicit `set/binding` qualifiers before they can join).
+- [x] `src/renderer/vulkan/` core: `VulkanInstance` (validation +
+      portability for MoltenVK), `VulkanDevice` (physical-device pick by
+      score, descriptor-indexing probe, graphics+present queues),
+      `VulkanSwapchain` (mailbox-or-FIFO, SRGB target, recreate-on-resize),
+      `VulkanRenderBackend` orchestrator (now also owns VMA + offscreen
+      target + per-frame command pool/sync).
+- [x] `src/renderer/rhi/` headers: `RhiTypes.h` and `Device.h`. Still
+      header-only — no implementation yet. Will get fleshed out in Phase 2
+      as the first pass needs them.
+- [x] `src/platform/Platform.cpp` gated on `HYBRID_RHI_VULKAN` —
+      `GLFW_NO_API` window hint when on Vulkan.
+- [x] ImGui: `external::imgui_glfw_vulkan` target wired up (only built when
+      `HYBRID_RHI=vulkan`). Not actually used yet; Phase 7 work.
 
-**Status**: `HYBRID_RHI=opengl` should still build and run unchanged.
-`HYBRID_RHI=vulkan` should compile and link, produce a hybrid_editor binary,
-but the binary will only spin a GLFW window without graphics output. Phase 1
-hooks the stub renderer up to the actual Vulkan device + presents the
-swapchain.
+### Phase 0.5 — verify the build ✅ DONE
+- [x] Vulkan SDK installed (1.4.341.1, with MoltenVK).
+- [x] vcpkg installed and configured (`$VCPKG_ROOT`).
+- [x] `cmake --preset mac-ninja` builds (and fails to *run* as expected:
+      Mac caps OpenGL at 4.1, GLFW can't honor the 4.6 request).
+- [x] `cmake --preset mac-ninja-vulkan` builds, links, runs. The stub
+      Renderer logs its Phase-0 warning and we open a blank GLFW window.
 
-**Estimate remaining for full Phase 0**: 0.5–1 day to verify the build on a
-machine with the Vulkan SDK installed and to fix whatever doesn't compile.
+### Phase 1A — clear-screen via vkCmdClearColorImage ✅ DONE
+- [x] `Renderer::Init(NativeWindowHandle)` — window plumbed in, OpenGL
+      ignores the param. App.cpp passes `platform.GetNativeHandle()`.
+- [x] App.cpp gates the UI module behind `HYBRID_RHI_OPENGL` so the editor
+      reaches its main loop on Vulkan. UI bringup is Phase 7.
+- [x] `VulkanRenderBackend::BeginFrame/EndFrame` with two frames in flight
+      (per-frame command pool, command buffer, image-acquire/render-finished
+      semaphores, in-flight fence). Auto-recreates swapchain on
+      `VK_SUBOPTIMAL_KHR` / `VK_ERROR_OUT_OF_DATE_KHR`.
+- [x] Stub Renderer's EndFrame: layout-transition swapchain image →
+      `vkCmdClearColorImage` → layout-transition to PRESENT_SRC.
+- [x] Validated on Mac/MoltenVK: teal swapchain, resizable.
 
-### Phase 0.5 — verify the build (next session entry point)
-This session was code-only; nothing has been compiled. The first thing to do
-next is:
-1. Install the Vulkan SDK (https://vulkan.lunarg.com/) on the dev machine.
-   On macOS this also pulls MoltenVK.
-2. `git submodule update --init --recursive` (the imgui submodule needs to
-   exist for the imgui Vulkan backend to compile).
-3. Configure with `cmake -DHYBRID_RHI=opengl …` first — verify the existing
-   path didn't break.
-4. Then `cmake -DHYBRID_RHI=vulkan …`. Expect a few CMake-finds to need
-   tweaking. Likely culprits:
-   - `find_package(VulkanMemoryAllocator)` target name varies by vcpkg
-     version. Check the actual exported name and adjust the `if(TARGET …)`
-     fallback chain in the root CMakeLists.
-   - `find_package(glslang)` may require pulling specific components.
-5. Once the vulkan build links, run it. Confirm:
-   - The validation layer loads (look for "[vulkan] instance created
-     (validation=true, …)" in logs).
-   - The swapchain creates ("[vulkan] swapchain WxH N images, present=…").
-   - The window comes up empty (the stub Renderer logs the "Phase 0" warning
-     and doesn't draw).
+### Phase 1B — compute foundation ✅ DONE
+- [x] `VulkanAllocator.cpp` defines `VMA_IMPLEMENTATION` (single TU). VMA
+      uses dynamic-vulkan-functions mode so it resolves entry points via
+      `vkGet*ProcAddr` rather than at link time.
+- [x] `VulkanRenderBackend` owns `VmaAllocator` and an offscreen RGBA8
+      storage image (size = swapchain extent, recreated on resize).
+- [x] `VulkanShader.{h,cpp}`: SPIR-V file loader + `VkShaderModule` wrapper.
+- [x] `shaders/compute/swapchain_clear.comp` — first real Vulkan shader,
+      writes a time-varying gradient to a `set=0, binding=0` storage image
+      with size + time in push constants. SPIR-V whitelist enabled so this
+      one shader compiles to `.spv` at build time.
+- [x] Compute pipeline state in the stub Renderer: descriptor set layout (1
+      storage image), pipeline layout (set + 16-byte push constants),
+      `VkPipeline`, descriptor pool, two per-frame descriptor sets (one per
+      frame in flight, written when the offscreen image gets recreated).
+- [x] EndFrame: offscreen `UNDEFINED→GENERAL`, dispatch compute,
+      `GENERAL→TRANSFER_SRC` and swapchain `UNDEFINED→TRANSFER_DST`,
+      `vkCmdBlitImage` offscreen→swapchain, `TRANSFER_DST→PRESENT_SRC`.
+- [x] Validated on Mac/MoltenVK: gradient renders, animates with time,
+      survives resize.
 
-### Phase 1 — RHI interface and clear-screen
-- Define `rhi::Device`, `rhi::CommandList`, `rhi::BufferHandle`,
-  `rhi::TextureHandle`, `rhi::PipelineHandle`.
-- Stand up enough Vulkan to clear the swapchain and present. Verify on a Mac
-  with `vkconfig` / Xcode capture.
-- Implement the OpenGL backend of the same RHI. Keep current `gl*` calls
-  inside it; expose the RHI surface to the renderer.
+**This is the foundation every remaining compute-pass port reuses:**
+SPIR-V load → descriptor set layout → pipeline layout → pipeline →
+descriptor pool → per-frame sets → barriers + dispatch.
 
-**Estimate**: 4–5 days. **Risk**: the RHI shape will be wrong on first try.
-Expect to iterate when the second pass migrates.
+### Phase 2 — first real pass: TraversalHeatmapPass (next session entry point)
+Smallest existing compute pass. Inputs: gbuffer depth, BVH SSBOs (TLAS +
+BLAS nodes, triangle indices, primitives, instances). Output: a storage
+image (the heatmap target). Tests:
+
+- Adding the existing shader to the SPIR-V whitelist *after* porting its
+  `uniform sampler2D` declarations to explicit `layout(set, binding)`.
+- SSBO descriptors (`VK_DESCRIPTOR_TYPE_STORAGE_BUFFER`).
+- Pulling `GeometryStore` / `AccelerationStructureCache` SSBOs across the
+  GL→Vulkan boundary. The buffer data formats (`std430`) are already
+  Vulkan-compatible.
+- The first time we have to actually flesh out `rhi::Device` for Vulkan —
+  the inline-everything-in-the-stub-Renderer pattern won't survive contact
+  with a real pass that needs SSBO uploads + lifetime management.
+
+**Recommended attack order**:
+1. Migrate the *shader*: add `layout(set, binding)` to every uniform sampler
+   in `traversal_heatmap.comp`. Add it to the SPIR-V whitelist. Verify
+   `.spv` builds.
+2. Implement *just enough* of `rhi::Device` for buffer creation +
+   descriptor writes. Don't try to retrofit GLBuffer → it stays GL-only.
+3. Stand up a `TraversalHeatmapVulkanPass` (or rename and dual-implement
+   the existing class) that creates SSBOs from the GeometryStore data and
+   runs the dispatch.
+4. Pipe the result back into the same display path the gradient uses now
+   (blit to swapchain).
+
+**Estimate**: 2–3 days of focused work.
 
 ### Phase 2 — first pass: TraversalHeatmapPass
 Smallest compute pass. One input (BVH SSBO + gbuffer depth), one storage image
@@ -318,6 +350,28 @@ work doesn't re-litigate them.
 - **No rendergraph in V1**: 8 passes. Hand-coded ordering and barriers fit
   in someone's head. We can introduce a rendergraph if/when we double the
   pass count.
+- **2026-04-29**: Whitelist of SPIR-V-compiled shaders (not glob). Existing
+  shaders use bare `uniform sampler2D` and rely on `glUniform1i` for unit
+  assignment — that's not legal in Vulkan/SPIR-V. Each shader joins the
+  whitelist when its samplers are migrated to explicit `layout(set, binding)`.
+  Stops the SPIR-V build from failing on shaders we haven't ported yet
+  while still letting us validate the toolchain on the ones we have.
+- **2026-04-29**: Compute-via-blit, not compute-into-swapchain. Apple's
+  surface formats often don't expose `STORAGE` usage (and even when they
+  do, the SRGB encoding semantics get awkward). Compute writes into an
+  offscreen RGBA8 image with `STORAGE | TRANSFER_SRC`, and a final
+  `vkCmdBlitImage` copies into the swapchain. Same pattern the production
+  renderer will use anyway (offscreen scene-color → blit to present).
+- **2026-04-29**: Per-frame descriptor sets, written on resize. Two
+  descriptor sets (one per frame in flight), each pre-allocated from a
+  small pool. They get re-pointed at the offscreen image whenever the
+  offscreen extent changes — which is once at startup and again on resize,
+  both of which already wait-idle. Avoids the complexity of
+  `UPDATE_AFTER_BIND` while still being safe under in-flight commands.
+- **2026-04-29**: VMA in dynamic-function-loading mode
+  (`VMA_DYNAMIC_VULKAN_FUNCTIONS=1`). Resolves entry points via
+  `vkGet*ProcAddr` at allocator-create time. Avoids link-time coupling to
+  a specific loader version (which bit us once already, and might again).
 
 ## 8. Open questions
 
@@ -342,6 +396,57 @@ Flag any of them that block progress.
 
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
+
+### Phase 1 landing notes (2026-04-29) — gradient running on MoltenVK
+Concrete patterns established this session, to reuse as we port real passes:
+
+**Per-pass plumbing template** (see `RendererVulkanStub.cpp` for the worked
+example, search for `CreateClearPipeline`):
+
+```
+1. LoadSpirv("compute/<shader>.spv") + CreateShaderModule
+2. vkCreateDescriptorSetLayout (bindings on set=0)
+3. vkCreatePipelineLayout (set + push constants)
+4. vkCreateComputePipelines
+5. vkCreateDescriptorPool sized for the frames-in-flight count
+6. vkAllocateDescriptorSets (one set per frame in flight)
+7. vkUpdateDescriptorSets (called whenever the bound resources change —
+   typically only on swapchain resize)
+```
+
+**Per-frame execution template** (see `EndFrame` in the same file):
+```
+1. transition writeable images to GENERAL (or COLOR_ATTACHMENT later)
+2. bind pipeline + bind descriptor set (this frame's) + push constants
+3. vkCmdDispatch
+4. transition outputs to whatever the next consumer needs
+5. (eventually) chain to the next pass's barrier+dispatch
+6. last pass: blit to swapchain image, transition to PRESENT_SRC
+```
+
+**Things that haven't been tested yet but we'll need soon**:
+- Sampling a texture (combined image sampler) — only storage images so far.
+- Reading SSBOs from compute — straight extension of the descriptor model.
+- Per-frame uniform buffer updates — VMA's `HOST_VISIBLE`/persistently-mapped
+  pattern.
+- Pipeline cache — currently `vkCreateComputePipelines` is called fresh
+  each run. Fine for one shader, will want a `VkPipelineCache` once we
+  have many.
+- `VkDescriptorPool` resets / freeing — current pool is a fixed size; for
+  per-pass-per-frame sets we'll likely want a pool-per-frame that gets
+  `vkResetDescriptorPool`'d at the top of each frame.
+
+**The `rhi/` interface is still header-only.** The stub Renderer talks to
+`VulkanRenderBackend` directly. That was right for Phase 1 (one shader,
+one pass — abstraction would have been premature). It stops being right
+when the second pass arrives. **Phase 2 should implement
+`rhi::Device::CreateBuffer/CreateTexture/CreateComputePipeline` etc. for
+Vulkan as it ports the heatmap pass.**
+
+**Tracy GPU zones are still GL-only.** The `HYBRID_PROFILE_GL_*` macros
+aren't in the Vulkan path. Add `HYBRID_PROFILE_GPU_*` (Tracy `TracyVkZone`
+on Vulkan, existing macros on GL) when GPU profiling becomes important —
+probably while debugging the first real pass.
 
 ### Phase 0 landing notes (2026-04-29)
 - The Renderer.h public API is small (Init/Shutdown/Resize/BeginFrame/

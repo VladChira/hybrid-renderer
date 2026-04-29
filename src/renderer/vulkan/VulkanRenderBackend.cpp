@@ -41,12 +41,21 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!CreateAllocator())
+        {
+            m_device.Destroy();
+            m_instance.DestroySurface(m_surface);
+            m_instance.Destroy();
+            return false;
+        }
+
         vulkan::SwapchainConfig sc{};
         sc.surface = m_surface;
         sc.width = framebuffer_width;
         sc.height = framebuffer_height;
         if (!m_swapchain.Create(m_device, sc))
         {
+            DestroyAllocator();
             m_device.Destroy();
             m_instance.DestroySurface(m_surface);
             m_instance.Destroy();
@@ -57,6 +66,20 @@ namespace hybrid::renderer
         {
             DestroyFrameData();
             m_swapchain.Destroy(m_device);
+            DestroyAllocator();
+            m_device.Destroy();
+            m_instance.DestroySurface(m_surface);
+            m_instance.Destroy();
+            return false;
+        }
+
+        if (!CreateOffscreenTarget(m_swapchain.Extent().width,
+                                    m_swapchain.Extent().height))
+        {
+            DestroyOffscreenTarget();
+            DestroyFrameData();
+            m_swapchain.Destroy(m_device);
+            DestroyAllocator();
             m_device.Destroy();
             m_instance.DestroySurface(m_surface);
             m_instance.Destroy();
@@ -69,8 +92,10 @@ namespace hybrid::renderer
     void VulkanRenderBackend::Shutdown()
     {
         m_device.WaitIdle();
+        DestroyOffscreenTarget();
         DestroyFrameData();
         m_swapchain.Destroy(m_device);
+        DestroyAllocator();
         m_device.Destroy();
         if (m_surface != VK_NULL_HANDLE)
         {
@@ -80,6 +105,39 @@ namespace hybrid::renderer
         m_instance.Destroy();
         m_window = nullptr;
     }
+
+    // -----------------------------------------------------------------------
+    // VMA
+    // -----------------------------------------------------------------------
+
+    bool VulkanRenderBackend::CreateAllocator()
+    {
+        VmaVulkanFunctions vfns{};
+        vfns.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+        vfns.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+
+        VmaAllocatorCreateInfo info{};
+        info.physicalDevice = m_device.Physical();
+        info.device         = m_device.Logical();
+        info.instance       = m_instance.Handle();
+        info.vulkanApiVersion = VK_API_VERSION_1_3;
+        info.pVulkanFunctions = &vfns;
+
+        return HYBRID_VK_CHECK(vmaCreateAllocator(&info, &m_allocator));
+    }
+
+    void VulkanRenderBackend::DestroyAllocator()
+    {
+        if (m_allocator != VK_NULL_HANDLE)
+        {
+            vmaDestroyAllocator(m_allocator);
+            m_allocator = VK_NULL_HANDLE;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-frame command pool / sync
+    // -----------------------------------------------------------------------
 
     bool VulkanRenderBackend::CreateFrameData()
     {
@@ -116,7 +174,6 @@ namespace hybrid::renderer
 
             VkFenceCreateInfo fence_info{};
             fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-            // Created signalled so the first frame's wait doesn't deadlock.
             fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
             if (!HYBRID_VK_CHECK(vkCreateFence(m_device.Logical(), &fence_info, nullptr, &f.in_flight)))
             {
@@ -137,9 +194,78 @@ namespace hybrid::renderer
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Offscreen target
+    // -----------------------------------------------------------------------
+
+    bool VulkanRenderBackend::CreateOffscreenTarget(uint32_t width, uint32_t height)
+    {
+        m_offscreen.format = VK_FORMAT_R8G8B8A8_UNORM;
+        m_offscreen.extent = {width, height};
+
+        VkImageCreateInfo img_info{};
+        img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        img_info.imageType     = VK_IMAGE_TYPE_2D;
+        img_info.format        = m_offscreen.format;
+        img_info.extent.width  = width;
+        img_info.extent.height = height;
+        img_info.extent.depth  = 1;
+        img_info.mipLevels     = 1;
+        img_info.arrayLayers   = 1;
+        img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+        img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        img_info.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VmaAllocationCreateInfo alloc_info{};
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (!HYBRID_VK_CHECK(vmaCreateImage(m_allocator, &img_info, &alloc_info,
+                                             &m_offscreen.image,
+                                             &m_offscreen.allocation,
+                                             nullptr)))
+        {
+            return false;
+        }
+
+        VkImageViewCreateInfo view_info{};
+        view_info.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image    = m_offscreen.image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format   = m_offscreen.format;
+        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.baseMipLevel   = 0;
+        view_info.subresourceRange.levelCount     = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount     = 1;
+
+        return HYBRID_VK_CHECK(vkCreateImageView(m_device.Logical(), &view_info, nullptr, &m_offscreen.view));
+    }
+
+    void VulkanRenderBackend::DestroyOffscreenTarget()
+    {
+        if (m_offscreen.view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(m_device.Logical(), m_offscreen.view, nullptr);
+            m_offscreen.view = VK_NULL_HANDLE;
+        }
+        if (m_offscreen.image != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(m_allocator, m_offscreen.image, m_offscreen.allocation);
+            m_offscreen.image = VK_NULL_HANDLE;
+            m_offscreen.allocation = VK_NULL_HANDLE;
+        }
+        m_offscreen.extent = {0, 0};
+    }
+
+    // -----------------------------------------------------------------------
+    // Frame loop
+    // -----------------------------------------------------------------------
+
     bool VulkanRenderBackend::RecreateSwapchainFromWindow()
     {
-        // GLFW reports zero size while minimised; just defer.
         int w = 0;
         int h = 0;
         glfwGetFramebufferSize(m_window, &w, &h);
@@ -147,6 +273,11 @@ namespace hybrid::renderer
 
         m_device.WaitIdle();
         if (!m_swapchain.Recreate(m_device, static_cast<uint32_t>(w), static_cast<uint32_t>(h)))
+        {
+            return false;
+        }
+        DestroyOffscreenTarget();
+        if (!CreateOffscreenTarget(static_cast<uint32_t>(w), static_cast<uint32_t>(h)))
         {
             return false;
         }
@@ -179,9 +310,7 @@ namespace hybrid::renderer
             HYBRID_VK_CHECK(acquire);
             return false;
         }
-        // Suboptimal is fine for this frame — we'll recreate after present.
 
-        // Reset only after we know we'll submit (avoid resetting then aborting).
         vkResetFences(m_device.Logical(), 1, &f.in_flight);
         vkResetCommandBuffer(f.command_buffer, 0);
 
@@ -210,10 +339,6 @@ namespace hybrid::renderer
 
         VkSubmitInfo submit{};
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        // Wait at the broadest stage we'll write at. Transfer covers the
-        // clear-image path; later, when raster passes target the swapchain,
-        // bumping this to COLOR_ATTACHMENT_OUTPUT (or ALL_GRAPHICS) is
-        // appropriate. Including both is safe and cheap.
         VkPipelineStageFlags wait_stage =
             VK_PIPELINE_STAGE_TRANSFER_BIT |
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

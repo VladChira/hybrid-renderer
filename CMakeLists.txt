@@ -9,10 +9,11 @@ option(HYBRID_BUILD_EDITOR "Build the editor application" ON)
 option(HYBRID_BUILD_TESTS  "Build tests" ON)
 option(HYBRID_IMGUI_DEMO   "Compile imgui_demo.cpp into ImGui library" OFF)
 option(HYBRID_ENABLE_TRACY "Enable Tracy profiling instrumentation" ON)
-# OFF during Phase 0 of the Vulkan migration — shaders still need explicit
-# Vulkan-style `layout(set, binding)` qualifiers on samplers and the stub
-# renderer doesn't load them anyway. Flip ON in Phase 1 as passes get ported.
-option(HYBRID_BUILD_SPIRV  "Compile GLSL shaders to SPIR-V at build time" OFF)
+# Whitelisted shader compilation. Only the shaders in HYBRID_VULKAN_SHADERS
+# (set below for the vulkan path) get compiled to SPIR-V. Existing shaders
+# need their samplers ported to explicit `layout(set, binding)` before
+# joining the list — that's per-pass migration work.
+option(HYBRID_BUILD_SPIRV  "Compile GLSL shaders to SPIR-V at build time" ON)
 
 # Render-hardware-interface backend. opengl is the legacy default while the
 # vulkan path is being brought up. See VULKAN_PLAN.md.
@@ -320,22 +321,24 @@ elseif(HYBRID_RHI STREQUAL "vulkan")
     src/renderer/vulkan/VulkanInstance.cpp
     src/renderer/vulkan/VulkanDevice.cpp
     src/renderer/vulkan/VulkanSwapchain.cpp
+    src/renderer/vulkan/VulkanAllocator.cpp
+    src/renderer/vulkan/VulkanShader.cpp
   )
   target_compile_definitions(hybrid_engine PUBLIC HYBRID_RHI_VULKAN=1)
   target_link_libraries(hybrid_engine PRIVATE thirdparty::vulkan)
 endif()
 
-# Compile shaders to SPIR-V at build time when targeting Vulkan and the
-# shaders have been ported to Vulkan-style explicit layouts.
+# Compile shaders to SPIR-V at build time. Shaders are added to this
+# whitelist as they get ported to Vulkan-style explicit layouts. Anything
+# not on the list is still GL-only.
 if(HYBRID_RHI STREQUAL "vulkan" AND HYBRID_BUILD_SPIRV)
-  file(GLOB_RECURSE _HYBRID_SHADER_SRC CONFIGURE_DEPENDS
-       "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert"
-       "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.frag"
-       "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp")
+  set(_HYBRID_VULKAN_SHADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute/swapchain_clear.comp"
+  )
   hybrid_compile_shaders(hybrid_shaders
     SHADER_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     OUTPUT_DIR   "${CMAKE_BINARY_DIR}/shaders"
-    FILES        ${_HYBRID_SHADER_SRC}
+    FILES        ${_HYBRID_VULKAN_SHADERS}
   )
   add_dependencies(hybrid_engine hybrid_shaders)
   target_compile_definitions(hybrid_engine PRIVATE

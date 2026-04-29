@@ -1,0 +1,33 @@
+#version 460 core
+
+// Phase 1 of the Vulkan migration: writes a gradient to an offscreen
+// storage image. The backend then blits this image onto the swapchain.
+// Replaces the placeholder vkCmdClearColorImage that was used to validate
+// the swapchain.
+//
+// First "real" Vulkan shader in the project, so it intentionally uses the
+// explicit `set` + `binding` layout qualifiers that the rest of the
+// shaders will be migrated to as the per-pass port progresses.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D o_color;
+
+layout(push_constant) uniform PushConstants
+{
+    uvec2 size;
+    float time_seconds;
+} pc;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(pc.size.x) || pixel.y >= int(pc.size.y))
+    {
+        return;
+    }
+
+    vec2 uv = vec2(pixel) / vec2(pc.size);
+    vec3 color = vec3(uv, 0.5 + 0.5 * sin(pc.time_seconds));
+    imageStore(o_color, pixel, vec4(color, 1.0));
+}
