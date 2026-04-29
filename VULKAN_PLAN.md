@@ -412,6 +412,76 @@ Flag any of them that block progress.
 This is where we write things down as the migration progresses, so the next
 session has context. Append; don't overwrite.
 
+### Phase 2B landing notes (2026-04-29) — heatmap driven by real scene BVH
+
+What runs now: editor loads a glTF (e.g. `scenes/helmet/DamagedHelmet.gltf`)
+via the existing asset path, App.cpp resolves the scene's primary camera,
+calls `renderer.SubmitScene(scene_world, view, settings)`. The Vulkan
+Renderer drives `SceneFrameCache` → walks mesh instances and calls
+`GeometryStore::GetOrAppend` per primitive → `AccelerationStructureCache::
+SyncBlas` / `SyncTlas` → mirrors the CPU vectors (`Primitives()`,
+`BlasNodes()`, `TlasNodes()`, `TlasInstances()`) into the heatmap pass's
+host-visible SSBOs. The pass dispatches with the real camera. The
+heatmap viz now silhouettes the actual scene mesh.
+
+**The data-flow shape we landed on**:
+- `GeometryStore` and `AccelerationStructureCache` keep their existing
+  CPU-side vectors. The Vulkan path just *never calls* their GL methods
+  (`Init` / `Sync` / `Upload` / `Bind*`). New CPU-side accessors
+  (`BlasNodes` / `BlasTriangles` / `TlasNodes` / `TlasInstances`) were
+  added to `AccelerationStructureCache` to expose what was already
+  there. No refactor of the stores; the Vulkan path is a parallel
+  reader.
+- The pass owns its host-visible SSBOs and re-uploads on every dirty
+  frame. Reallocation (when sizes grow) is gated behind a
+  `Device::WaitIdle` in the Renderer; the dirty-detection currently
+  compares last-uploaded byte counts. This stalls the pipeline once on
+  scene load and again whenever BVH topology changes — fine for the
+  editor's mostly-static workload, will need revisiting under dynamic
+  scenes.
+
+**The descriptor-write split** in the pass is now three helpers, each
+touching only the bindings it owns:
+- `WriteImageDescriptors(view)` → binding 0, called on Init + on resize
+- `WriteUboDescriptors()` → binding 1, called once on Init
+- `WriteSsboDescriptors()` → bindings 2/7/9/10, called when any SSBO is
+  reallocated by `UpdateSsbos`
+
+This reads cleaner than Phase 2A's all-in-one `SetOutputImageView` and
+gives us a clear pattern for the next pass: split descriptor writes by
+who controls the lifetime of the underlying resource.
+
+**The GL-wrapper link footgun**: `GeometryStore` and
+`AccelerationStructureCache` hold `GLBuffer` / `GLVertexArray` members
+directly. Even though the Vulkan path never calls their GL methods,
+the C++ destructors and ctors reference the GL wrapper symbols, and
+those don't link unless their .cpp files are compiled. Workaround:
+add `src/renderer/opengl/GLBuffer.cpp` + `GLVertexArray.cpp` to the
+Vulkan target sources. They're dead at runtime — glad's function
+pointers exist (linked transitively via `imgui_glfw_opengl3`), the
+methods just never get called. Cost: ~200 LoC of dead code in the
+Vulkan binary.
+
+The clean fix is to refactor the stores to split CPU side from GL side
+(or template-parameterize the GPU buffer type). Tracked as cleanup, not
+urgent.
+
+**Open items carried into Phase 3**:
+- Stores still have `GLBuffer`/`GLVertexArray` members in Vulkan mode.
+  When we get to Phase 3 (GBuffer / first raster pass), the stores will
+  also need to upload to Vulkan vertex/index buffers — that's the right
+  forcing function for the CPU/GPU split refactor.
+- `Device::WaitIdle` on every BVH dirty-frame is a placeholder. Two
+  cleaner options: (a) per-frame-in-flight SSBO copies (memory cost,
+  no stalls), (b) gate descriptor rewrites + memcpy on the per-frame
+  fence (no extra memory, no stalls, but more bookkeeping). Pick when
+  perf actually hurts — currently the editor's BVH only changes on
+  scene load.
+- Heatmap is the only consumer of the BVH SSBOs right now. When
+  `RayTracedShadowPass` lands (Phase 4), the SSBOs should move out of
+  the heatmap pass into a shared place — either `rhi::Device` or a
+  `VulkanGeometryStore`/`VulkanAccelerationStructureCache` mirror.
+
 ### Phase 2A landing notes (2026-04-29) — heatmap running on MoltenVK with synthetic BVH
 
 Phase 2 split into 2A (Vulkan-side bring-up of the pass, validated against

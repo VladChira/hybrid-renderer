@@ -216,7 +216,12 @@ target_link_libraries(hybrid_engine
   PRIVATE
     thirdparty::assimp
     thirdparty::glfw
+    # ImGui's GL3 backend is linked unconditionally because the Vulkan
+    # build still includes a few GL wrapper TUs (GLBuffer / GLVertexArray
+    # — see Phase 2B notes); having the GL3 ImGui backend around as well
+    # is harmless and keeps glad linkage uniform.
     external::imgui_glfw_opengl3
+    $<$<STREQUAL:${HYBRID_RHI},vulkan>:external::imgui_glfw_vulkan>
     external::implot
     thirdparty::spdlog
     external::imguizmo
@@ -327,6 +332,13 @@ elseif(HYBRID_RHI STREQUAL "vulkan")
     src/renderer/vulkan/VulkanAllocator.cpp
     src/renderer/vulkan/VulkanBuffer.cpp
     src/renderer/vulkan/VulkanShader.cpp
+    # GL wrapper TUs are linked even on the Vulkan path — GeometryStore and
+    # AccelerationStructureCache hold GLBuffer/GLVertexArray members for the
+    # legacy GL upload methods. The Vulkan path never calls Init/Sync on the
+    # stores, so these symbols are dead at runtime; we just need them to
+    # link. Drops out once the stores get refactored to split CPU/GPU.
+    src/renderer/opengl/GLBuffer.cpp
+    src/renderer/opengl/GLVertexArray.cpp
   )
   target_compile_definitions(hybrid_engine PUBLIC HYBRID_RHI_VULKAN=1)
   target_link_libraries(hybrid_engine PRIVATE thirdparty::vulkan)

@@ -53,13 +53,21 @@ namespace hybrid::renderer
             uint32_t    tlas_node_count = 0;
         };
 
-        bool Init(VkDevice device, VmaAllocator allocator, const SsboData &ssbo_data);
+        bool Init(VkDevice device, VmaAllocator allocator);
         void Shutdown();
 
-        // Re-point all per-frame descriptor sets at `view`. Must be called
-        // once after Init (initial wire-up) and again any time the caller
-        // recreates the offscreen image (resize). Caller waits idle first.
+        // Re-point all per-frame descriptor sets' storage-image binding at
+        // `view`. Must be called once after Init and again any time the
+        // caller recreates the offscreen image (resize). Caller waits idle
+        // first when racing with in-flight reads.
         void SetOutputImageView(VkImageView view);
+
+        // Replace the SSBO contents. Reallocates a buffer when its incoming
+        // size differs from the existing buffer; in that case rewrites the
+        // affected per-frame descriptor bindings. Caller MUST have waited
+        // idle when reallocation is possible (i.e. whenever scene data
+        // changed shape between frames).
+        void UpdateSsbos(const SsboData &data);
 
         // Records the dispatch into `cmd`. Caller is responsible for
         // transitioning the output image to GENERAL beforehand and out of
@@ -71,10 +79,12 @@ namespace hybrid::renderer
 
     private:
         bool CreatePipeline();
-        bool CreateSsbos(const SsboData &data);
         bool CreatePerFrameUniforms();
         bool CreateDescriptorPool();
         bool AllocateDescriptorSets();
+        void WriteUboDescriptors();
+        void WriteSsboDescriptors();
+        void WriteImageDescriptors(VkImageView view);
 
         VkDevice     m_device    = VK_NULL_HANDLE;
         VmaAllocator m_allocator = VK_NULL_HANDLE;

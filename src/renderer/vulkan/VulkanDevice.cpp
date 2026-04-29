@@ -149,9 +149,12 @@ namespace hybrid::renderer::vulkan
             return false;
         }
 
-        // Probe descriptor indexing as part of Vulkan 1.2 features.
+        // Probe descriptor indexing (1.2) and dynamic rendering (1.3).
+        VkPhysicalDeviceVulkan13Features features13{};
+        features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         VkPhysicalDeviceVulkan12Features features12{};
         features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        features12.pNext = &features13;
         VkPhysicalDeviceFeatures2 features2{};
         features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         features2.pNext = &features12;
@@ -165,6 +168,12 @@ namespace hybrid::renderer::vulkan
         {
             LOG_WARN("[vulkan] descriptor indexing not fully supported; "
                      "bindless materials path will need a fallback");
+        }
+        if (!features13.dynamicRendering)
+        {
+            LOG_ERROR("[vulkan] dynamicRendering not supported by physical device; "
+                      "ImGui Vulkan backend integration requires it");
+            return false;
         }
 
         std::set<uint32_t> unique_families = {*m_queues.graphics, *m_queues.present};
@@ -180,8 +189,13 @@ namespace hybrid::renderer::vulkan
             queue_infos.push_back(qi);
         }
 
+        VkPhysicalDeviceVulkan13Features enabled13{};
+        enabled13.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        enabled13.dynamicRendering = VK_TRUE;
+
         VkPhysicalDeviceVulkan12Features enabled12{};
         enabled12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        enabled12.pNext = &enabled13;
         enabled12.descriptorIndexing                            = features12.descriptorIndexing;
         enabled12.shaderSampledImageArrayNonUniformIndexing     = features12.shaderSampledImageArrayNonUniformIndexing;
         enabled12.runtimeDescriptorArray                        = features12.runtimeDescriptorArray;

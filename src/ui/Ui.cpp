@@ -17,7 +17,9 @@
 #include "panels/ToolbarPanel.h"
 #include "panels/ViewportPanel.h"
 
+#ifdef HYBRID_RHI_OPENGL
 #include <glad.h>
+#endif
 
 #include <utility>
 
@@ -25,12 +27,63 @@
 #include <imgui.h>
 #include <implot.h>
 #include <backends/imgui_impl_glfw.h>
+#ifdef HYBRID_RHI_OPENGL
 #include <backends/imgui_impl_opengl3.h>
+#endif
+#ifdef HYBRID_RHI_VULKAN
+#include <backends/imgui_impl_vulkan.h>
+#endif
 
 #include <ImGuizmo.h>
 
 namespace hybrid::ui
 {
+
+    bool Ui::InitCommon(const UiConfig &config)
+    {
+        LOG_INFO("Initializing ImGui...");
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImPlot::CreateContext();
+
+        io = &ImGui::GetIO();
+        io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        const std::string font_path = std::string(HYBRID_PROJECT_ROOT) + "/assets/fonts/DMSans-Regular.ttf";
+        io->Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0);
+
+        LOG_INFO("Default theme is " + ThemeKindToString(config.theme));
+        ApplyTheme(config.theme);
+
+        m_config = config;
+        m_layout = DockspaceLayout::Default();
+        m_theme = config.theme;
+        m_theme_palette = BuildThemePalette(m_theme);
+        return true;
+    }
+
+    void Ui::RegisterDefaultPanels()
+    {
+        if (m_panels.Empty())
+        {
+#if defined(HYBRID_RHI_OPENGL)
+            // ToolbarPanel loads GL textures for its icons. Phase 7-stage-2
+            // will port it to ImGui_ImplVulkan_AddTexture; for now skip it
+            // on the Vulkan path so we don't crash on null gl* function
+            // pointers.
+            RegisterPanel(std::make_unique<ToolbarPanel>(), DockTarget::Top);
+#endif
+            RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
+            RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
+            RegisterPanel(std::make_unique<ContentBrowserPanel>(), DockTarget::RightTop);
+            RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
+            RegisterPanel(std::make_unique<SettingsPanel>(), DockTarget::LeftTop);
+            RegisterPanel(std::make_unique<RenderTargetsPanel>(), DockTarget::LeftTop);
+            RegisterPanel(std::make_unique<ViewportPanel>(), DockTarget::Main);
+            RegisterPanel(std::make_unique<PerformancePanel>(), DockTarget::LeftBottom);
+        }
+    }
 
     bool Ui::Init(const UiConfig &config, const platform::NativeWindowHandle &window_handle)
     {
@@ -45,6 +98,7 @@ namespace hybrid::ui
             return false;
         }
 
+#ifdef HYBRID_RHI_OPENGL
         if (glfwGetCurrentContext() == nullptr)
         {
             LOG_ERROR("UI init failed: no current OpenGL context");
@@ -57,20 +111,7 @@ namespace hybrid::ui
             return false;
         }
 
-        LOG_INFO("Initializing ImGui...");
-
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImPlot::CreateContext();
-
-        io = &ImGui::GetIO();
-        io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-        std::string font_path = std::string(HYBRID_PROJECT_ROOT) + "/assets/fonts/DMSans-Regular.ttf";
-        io->Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0);
-
-        LOG_INFO("Default theme is " + ThemeKindToString(config.theme));
-        ApplyTheme(config.theme);
-        
+        if (!InitCommon(config)) return false;
 
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
         {
@@ -87,30 +128,119 @@ namespace hybrid::ui
             return false;
         }
 
-        LOG_INFO("ImGui initialized");
+        LOG_INFO("ImGui initialized (OpenGL backend)");
 
         m_window = window;
-        m_config = config;
-        m_layout = DockspaceLayout::Default();
-        m_theme = config.theme;
-        m_theme_palette = BuildThemePalette(m_theme);
         core::ResourceMonitor::Init();
-        if (m_panels.Empty())
+        RegisterDefaultPanels();
+        m_initialized = true;
+        return true;
+#else
+        (void)window;
+        (void)config;
+        LOG_ERROR("Ui::Init called in non-OpenGL build; use InitVulkan");
+        return false;
+#endif
+    }
+
+#ifdef HYBRID_RHI_VULKAN
+    bool Ui::InitVulkan(const UiConfig &config,
+                        const platform::NativeWindowHandle &window_handle,
+                        const VulkanUiContext &vulkan)
+    {
+        if (m_initialized)
         {
-            RegisterPanel(std::make_unique<ToolbarPanel>(), DockTarget::Top);
-            RegisterPanel(std::make_unique<SceneHierarchyPanel>(), DockTarget::RightTop);
-            RegisterPanel(std::make_unique<PropertiesPanel>(), DockTarget::RightBottom);
-            RegisterPanel(std::make_unique<MaterialsPanel>(), DockTarget::BottomLeft);
-            RegisterPanel(std::make_unique<ContentBrowserPanel>(), DockTarget::RightTop);
-            RegisterPanel(std::make_unique<ConsolePanel>(), DockTarget::BottomRight);
-            RegisterPanel(std::make_unique<SettingsPanel>(), DockTarget::LeftTop);
-            RegisterPanel(std::make_unique<RenderTargetsPanel>(), DockTarget::LeftTop);
-            RegisterPanel(std::make_unique<ViewportPanel>(), DockTarget::Main);
-            RegisterPanel(std::make_unique<PerformancePanel>(), DockTarget::LeftBottom);
+            return true;
         }
+
+        auto *window = static_cast<GLFWwindow *>(window_handle.window);
+        if (!window)
+        {
+            LOG_ERROR("Ui::InitVulkan missing window handle");
+            return false;
+        }
+
+        if (!InitCommon(config)) return false;
+
+        if (!ImGui_ImplGlfw_InitForVulkan(window, true))
+        {
+            ImPlot::DestroyContext();
+            ImGui::DestroyContext();
+            return false;
+        }
+
+        // Descriptor pool for ImGui's font texture and any user textures
+        // registered via ImGui_ImplVulkan_AddTexture (Phase 7-stage-2 will
+        // use these for the ViewportPanel). 1000 entries is what ImGui's
+        // example uses.
+        VkDescriptorPoolSize pool_size{};
+        pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pool_size.descriptorCount = 1000;
+        VkDescriptorPoolCreateInfo pool_info{};
+        pool_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        pool_info.maxSets       = 1000;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes    = &pool_size;
+        if (vkCreateDescriptorPool(vulkan.device, &pool_info, nullptr, &m_vk_imgui_pool) != VK_SUCCESS)
+        {
+            LOG_ERROR("Ui::InitVulkan: vkCreateDescriptorPool failed");
+            ImGui_ImplGlfw_Shutdown();
+            ImPlot::DestroyContext();
+            ImGui::DestroyContext();
+            return false;
+        }
+
+        ImGui_ImplVulkan_InitInfo init_info{};
+        init_info.ApiVersion          = VK_API_VERSION_1_3;
+        init_info.Instance            = vulkan.instance;
+        init_info.PhysicalDevice      = vulkan.physical_device;
+        init_info.Device              = vulkan.device;
+        init_info.QueueFamily         = vulkan.queue_family;
+        init_info.Queue               = vulkan.queue;
+        init_info.DescriptorPool      = m_vk_imgui_pool;
+        init_info.MinImageCount       = vulkan.min_image_count;
+        init_info.ImageCount          = vulkan.image_count;
+        init_info.UseDynamicRendering = true;
+
+        VkPipelineRenderingCreateInfoKHR pipeline_rendering{};
+        pipeline_rendering.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        pipeline_rendering.colorAttachmentCount    = 1;
+        pipeline_rendering.pColorAttachmentFormats = &vulkan.color_format;
+        init_info.PipelineInfoMain.PipelineRenderingCreateInfo = pipeline_rendering;
+
+        if (!ImGui_ImplVulkan_Init(&init_info))
+        {
+            LOG_ERROR("Ui::InitVulkan: ImGui_ImplVulkan_Init failed");
+            vkDestroyDescriptorPool(vulkan.device, m_vk_imgui_pool, nullptr);
+            m_vk_imgui_pool = VK_NULL_HANDLE;
+            ImGui_ImplGlfw_Shutdown();
+            ImPlot::DestroyContext();
+            ImGui::DestroyContext();
+            return false;
+        }
+
+        LOG_INFO("ImGui initialized (Vulkan backend)");
+
+        m_window         = window;
+        m_using_vulkan   = true;
+        m_vk_device      = vulkan.device;
+        core::ResourceMonitor::Init();
+        RegisterDefaultPanels();
         m_initialized = true;
         return true;
     }
+
+    void Ui::RenderImGuiInto(VkCommandBuffer cmd)
+    {
+        if (!m_initialized || !m_using_vulkan) return;
+        ImDrawData *draw_data = ImGui::GetDrawData();
+        if (draw_data != nullptr)
+        {
+            ImGui_ImplVulkan_RenderDrawData(draw_data, cmd);
+        }
+    }
+#endif
 
     void Ui::Shutdown()
     {
@@ -121,7 +251,18 @@ namespace hybrid::ui
 
         LOG_WARN("UI module shutting down...");
 
+#if defined(HYBRID_RHI_VULKAN)
+        ImGui_ImplVulkan_Shutdown();
+        if (m_vk_imgui_pool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(m_vk_device, m_vk_imgui_pool, nullptr);
+            m_vk_imgui_pool = VK_NULL_HANDLE;
+        }
+        m_vk_device    = VK_NULL_HANDLE;
+        m_using_vulkan = false;
+#elif defined(HYBRID_RHI_OPENGL)
         ImGui_ImplOpenGL3_Shutdown();
+#endif
         ImGui_ImplGlfw_Shutdown();
         core::ResourceMonitor::Shutdown();
         ImPlot::DestroyContext();
@@ -140,7 +281,11 @@ namespace hybrid::ui
             return commands;
         }
 
+#if defined(HYBRID_RHI_VULKAN)
+        ImGui_ImplVulkan_NewFrame();
+#elif defined(HYBRID_RHI_OPENGL)
         ImGui_ImplOpenGL3_NewFrame();
+#endif
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
@@ -174,15 +319,19 @@ namespace hybrid::ui
             ImGui::Render();
         }
 
-        int fb_width = 0;
-        int fb_height = 0;
-        glfwGetFramebufferSize(static_cast<GLFWwindow *>(m_window), &fb_width, &fb_height);
-
+        // GL backend submits draws inline; Vulkan backend defers actual
+        // command-buffer recording to RenderImGuiInto, called by the
+        // renderer's UiRenderHook inside its dynamic-rendering scope.
+#if defined(HYBRID_RHI_OPENGL)
         {
+            int fb_width = 0;
+            int fb_height = 0;
+            glfwGetFramebufferSize(static_cast<GLFWwindow *>(m_window), &fb_width, &fb_height);
             HYBRID_PROFILE_ZONE_N("Ui::Frame::BackendSubmit");
             glViewport(0, 0, fb_width, fb_height);
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
+#endif
 
         return commands;
     }

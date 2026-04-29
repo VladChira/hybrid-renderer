@@ -70,6 +70,15 @@ namespace hybrid::renderer::raytracing
 
         const AccelerationStructureStats &Stats() const { return m_stats; }
 
+        // CPU-side accessors. The Vulkan path mirrors these vectors into its
+        // own SSBOs since it does not call Upload() (GL-only). Layouts are
+        // std430-compatible (BvhNode = 32 B, GpuTlasInstance = 144 B,
+        // BLAS-triangle = uint).
+        const std::vector<BvhNode>           &BlasNodes()      const { return m_blas_nodes; }
+        const std::vector<uint32_t>          &BlasTriangles()  const { return m_blas_triangles; }
+        const std::vector<BvhNode>           &TlasNodes()      const { return m_tlas.nodes; }
+        const std::vector<GpuTlasInstance>   &TlasInstances()  const { return m_tlas.instances; }
+
         // Reserves (at least) `primitive_count` primitive slots in the cache.
         // Not required — append grows on demand — but useful for tests and
         // pre-allocation.

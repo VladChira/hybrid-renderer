@@ -30,19 +30,33 @@ namespace hybrid::renderer
         uint32_t CeilDiv(uint32_t a, uint32_t b) { return (a + b - 1) / b; }
     } // namespace
 
-    bool TraversalHeatmapVulkanPass::Init(VkDevice device,
-                                           VmaAllocator allocator,
-                                           const SsboData &ssbo_data)
+    bool TraversalHeatmapVulkanPass::Init(VkDevice device, VmaAllocator allocator)
     {
         m_device    = device;
         m_allocator = allocator;
 
         if (!CreatePipeline())          { Shutdown(); return false; }
-        if (!CreateSsbos(ssbo_data))    { Shutdown(); return false; }
         if (!CreatePerFrameUniforms())  { Shutdown(); return false; }
         if (!CreateDescriptorPool())    { Shutdown(); return false; }
         if (!AllocateDescriptorSets())  { Shutdown(); return false; }
-        return true;
+        WriteUboDescriptors();
+
+        // Placeholder SSBOs so descriptor sets are valid before any scene
+        // data has arrived. Contents are irrelevant — when tlas_node_count
+        // is 0 the shader's early-out skips reading them. UpdateSsbos
+        // replaces these once SubmitScene drives real data through.
+        uint32_t placeholder_word = 0;
+        SsboData empty{};
+        empty.primitives           = &placeholder_word;
+        empty.primitives_bytes     = sizeof(placeholder_word);
+        empty.blas_nodes           = &placeholder_word;
+        empty.blas_nodes_bytes     = sizeof(placeholder_word);
+        empty.tlas_nodes           = &placeholder_word;
+        empty.tlas_nodes_bytes     = sizeof(placeholder_word);
+        empty.tlas_instances       = &placeholder_word;
+        empty.tlas_instances_bytes = sizeof(placeholder_word);
+        UpdateSsbos(empty);
+        return m_primitives.handle != VK_NULL_HANDLE;
     }
 
     void TraversalHeatmapVulkanPass::Shutdown()
@@ -129,36 +143,38 @@ namespace hybrid::renderer
     // Resources
     // -----------------------------------------------------------------------
 
-    namespace
+    void TraversalHeatmapVulkanPass::UpdateSsbos(const SsboData &d)
     {
-        bool UploadHostVisible(vulkan::Buffer &buf,
-                               VmaAllocator allocator,
-                               VkDeviceSize size,
-                               const void *src,
-                               VkBufferUsageFlags usage)
-        {
-            buf = vulkan::CreateHostVisibleBuffer(allocator, size, usage);
-            if (buf.handle == VK_NULL_HANDLE) return false;
-            std::memcpy(buf.mapped, src, static_cast<size_t>(size));
-            return true;
-        }
-    } // namespace
-
-    bool TraversalHeatmapVulkanPass::CreateSsbos(const SsboData &d)
-    {
-        if (!d.primitives || d.primitives_bytes == 0 ||
-            !d.blas_nodes || d.blas_nodes_bytes == 0 ||
-            !d.tlas_nodes || d.tlas_nodes_bytes == 0 ||
-            !d.tlas_instances || d.tlas_instances_bytes == 0)
-        {
-            LOG_ERROR("[heatmap-vk] CreateSsbos: empty input data");
-            return false;
-        }
         constexpr VkBufferUsageFlags kSsboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        return UploadHostVisible(m_primitives,     m_allocator, d.primitives_bytes,     d.primitives,     kSsboUsage)
-            && UploadHostVisible(m_blas_nodes,     m_allocator, d.blas_nodes_bytes,     d.blas_nodes,     kSsboUsage)
-            && UploadHostVisible(m_tlas_nodes,     m_allocator, d.tlas_nodes_bytes,     d.tlas_nodes,     kSsboUsage)
-            && UploadHostVisible(m_tlas_instances, m_allocator, d.tlas_instances_bytes, d.tlas_instances, kSsboUsage);
+        bool any_recreated = false;
+
+        auto sync = [&](vulkan::Buffer &buf, const void *src, VkDeviceSize size)
+        {
+            if (src == nullptr || size == 0)
+            {
+                // Caller is asking to leave this slot alone. Do nothing — but
+                // require it to have been initialised at some prior call so
+                // descriptor writes don't dangle.
+                return;
+            }
+            if (buf.size != size)
+            {
+                vulkan::DestroyBuffer(m_allocator, buf);
+                buf = vulkan::CreateHostVisibleBuffer(m_allocator, size, kSsboUsage);
+                any_recreated = true;
+            }
+            std::memcpy(buf.mapped, src, static_cast<size_t>(size));
+        };
+
+        sync(m_primitives,     d.primitives,     d.primitives_bytes);
+        sync(m_blas_nodes,     d.blas_nodes,     d.blas_nodes_bytes);
+        sync(m_tlas_nodes,     d.tlas_nodes,     d.tlas_nodes_bytes);
+        sync(m_tlas_instances, d.tlas_instances, d.tlas_instances_bytes);
+
+        if (any_recreated)
+        {
+            WriteSsboDescriptors();
+        }
     }
 
     bool TraversalHeatmapVulkanPass::CreatePerFrameUniforms()
@@ -203,60 +219,92 @@ namespace hybrid::renderer
 
     void TraversalHeatmapVulkanPass::SetOutputImageView(VkImageView view)
     {
+        WriteImageDescriptors(view);
+    }
+
+    void TraversalHeatmapVulkanPass::WriteImageDescriptors(VkImageView view)
+    {
         if (m_device == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return;
 
-        // Re-write all kMaxFramesInFlight sets. Each set gets:
-        //   binding 0  -> storage image (the one shared output view)
-        //   binding 1  -> this frame's UBO
-        //   binding 2  -> primitives SSBO
-        //   binding 7  -> blas_nodes SSBO
-        //   binding 9  -> tlas_nodes SSBO
-        //   binding 10 -> tlas_instances SSBO
-        std::array<VkDescriptorImageInfo,  kMaxFramesInFlight>     img_infos{};
-        std::array<VkDescriptorBufferInfo, kMaxFramesInFlight>     ub_infos{};
-        std::array<VkDescriptorBufferInfo, 4>                      ssbo_infos{};
-        ssbo_infos[0] = { m_primitives.handle,     0, m_primitives.size };
-        ssbo_infos[1] = { m_blas_nodes.handle,     0, m_blas_nodes.size };
-        ssbo_infos[2] = { m_tlas_nodes.handle,     0, m_tlas_nodes.size };
-        ssbo_infos[3] = { m_tlas_instances.handle, 0, m_tlas_instances.size };
-
-        std::array<VkWriteDescriptorSet, kMaxFramesInFlight * 6> writes{};
-        size_t w = 0;
-
+        std::array<VkDescriptorImageInfo, kMaxFramesInFlight>  imgs{};
+        std::array<VkWriteDescriptorSet,  kMaxFramesInFlight>  writes{};
         for (uint32_t f = 0; f < kMaxFramesInFlight; ++f)
         {
-            img_infos[f].imageView   = view;
-            img_infos[f].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            imgs[f].imageView   = view;
+            imgs[f].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+            writes[f].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[f].dstSet          = m_descriptor_sets[f];
+            writes[f].dstBinding      = 0;
+            writes[f].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[f].descriptorCount = 1;
+            writes[f].pImageInfo      = &imgs[f];
+        }
+        vkUpdateDescriptorSets(m_device,
+                               static_cast<uint32_t>(writes.size()), writes.data(),
+                               0, nullptr);
+    }
+
+    void TraversalHeatmapVulkanPass::WriteUboDescriptors()
+    {
+        if (m_device == VK_NULL_HANDLE) return;
+
+        std::array<VkDescriptorBufferInfo, kMaxFramesInFlight> ub_infos{};
+        std::array<VkWriteDescriptorSet,   kMaxFramesInFlight> writes{};
+        for (uint32_t f = 0; f < kMaxFramesInFlight; ++f)
+        {
             ub_infos[f].buffer = m_uniforms[f].handle;
             ub_infos[f].offset = 0;
             ub_infos[f].range  = VK_WHOLE_SIZE;
 
-            auto WriteEntry = [&](uint32_t binding, VkDescriptorType type,
-                                   const VkDescriptorImageInfo *img,
-                                   const VkDescriptorBufferInfo *buf) {
-                VkWriteDescriptorSet &out = writes[w++];
-                out = {};
-                out.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                out.dstSet          = m_descriptor_sets[f];
-                out.dstBinding      = binding;
-                out.descriptorType  = type;
-                out.descriptorCount = 1;
-                out.pImageInfo      = img;
-                out.pBufferInfo     = buf;
-            };
-
-            WriteEntry( 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &img_infos[f], nullptr);
-            WriteEntry( 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &ub_infos[f]);
-            WriteEntry( 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &ssbo_infos[0]);
-            WriteEntry( 7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &ssbo_infos[1]);
-            WriteEntry( 9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &ssbo_infos[2]);
-            WriteEntry(10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &ssbo_infos[3]);
+            writes[f].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[f].dstSet          = m_descriptor_sets[f];
+            writes[f].dstBinding      = 1;
+            writes[f].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[f].descriptorCount = 1;
+            writes[f].pBufferInfo     = &ub_infos[f];
         }
-
         vkUpdateDescriptorSets(m_device,
-                               static_cast<uint32_t>(writes.size()),
-                               writes.data(),
+                               static_cast<uint32_t>(writes.size()), writes.data(),
+                               0, nullptr);
+    }
+
+    void TraversalHeatmapVulkanPass::WriteSsboDescriptors()
+    {
+        if (m_device == VK_NULL_HANDLE) return;
+
+        // Bindings (2, 7, 9, 10) -> (primitives, blas_nodes, tlas_nodes,
+        // tlas_instances). One descriptor write per (frame, binding) pair.
+        struct Slot { uint32_t binding; const vulkan::Buffer *buf; };
+        const std::array<Slot, 4> slots{{
+            { 2,  &m_primitives },
+            { 7,  &m_blas_nodes },
+            { 9,  &m_tlas_nodes },
+            {10,  &m_tlas_instances },
+        }};
+
+        std::array<VkDescriptorBufferInfo, kMaxFramesInFlight * 4> infos{};
+        std::array<VkWriteDescriptorSet,   kMaxFramesInFlight * 4> writes{};
+        size_t w = 0;
+        for (uint32_t f = 0; f < kMaxFramesInFlight; ++f)
+        {
+            for (const Slot &s : slots)
+            {
+                if (s.buf->handle == VK_NULL_HANDLE) continue;
+                infos[w] = { s.buf->handle, 0, s.buf->size };
+
+                writes[w].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[w].dstSet          = m_descriptor_sets[f];
+                writes[w].dstBinding      = s.binding;
+                writes[w].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                writes[w].descriptorCount = 1;
+                writes[w].pBufferInfo     = &infos[w];
+                ++w;
+            }
+        }
+        if (w == 0) return;
+        vkUpdateDescriptorSets(m_device,
+                               static_cast<uint32_t>(w), writes.data(),
                                0, nullptr);
     }
 

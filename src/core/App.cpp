@@ -17,6 +17,10 @@
 
 #include "utils/Banner.h"
 
+#ifdef HYBRID_RHI_VULKAN
+#include "renderer/vulkan/VulkanRenderBackend.h"
+#endif
+
 #include <algorithm>
 #include <optional>
 #include <thread>
@@ -72,8 +76,8 @@ namespace hybrid::core
         LOG_INFO("Renderer module started");
 
         ui::Ui ui;
-#if defined(HYBRID_RHI_OPENGL)
         LOG_INFO("Starting UI module...");
+#if defined(HYBRID_RHI_OPENGL)
         if (!ui.Init(config.ui, platform.GetNativeHandle()))
         {
             LOG_CRITICAL("UI module failed to start, aborting...");
@@ -81,6 +85,37 @@ namespace hybrid::core
             platform.Shutdown();
             return 3;
         }
+#elif defined(HYBRID_RHI_VULKAN)
+        {
+            renderer::VulkanRenderBackend *backend = renderer.GetVulkanRenderBackend();
+            if (backend == nullptr)
+            {
+                LOG_CRITICAL("UI module: Vulkan backend missing, aborting...");
+                renderer.Shutdown();
+                platform.Shutdown();
+                return 3;
+            }
+            ui::VulkanUiContext vk_ctx{};
+            vk_ctx.instance        = backend->Instance().Handle();
+            vk_ctx.physical_device = backend->Device().Physical();
+            vk_ctx.device          = backend->Device().Logical();
+            vk_ctx.queue_family    = *backend->Device().Queues().graphics;
+            vk_ctx.queue           = backend->Device().GraphicsQueue();
+            vk_ctx.color_format    = backend->SwapchainFormat();
+            vk_ctx.min_image_count = renderer::VulkanRenderBackend::kMaxFramesInFlight;
+            vk_ctx.image_count     = backend->Swapchain().ImageCount();
+            if (!ui.InitVulkan(config.ui, platform.GetNativeHandle(), vk_ctx))
+            {
+                LOG_CRITICAL("UI module failed to start, aborting...");
+                renderer.Shutdown();
+                platform.Shutdown();
+                return 3;
+            }
+            renderer.SetUiRenderHook([&ui](VkCommandBuffer cmd) {
+                ui.RenderImGuiInto(cmd);
+            });
+        }
+#endif
         LOG_INFO("UI module started");
 
         // Cross-module panels that depend on renderer internals.
@@ -88,25 +123,20 @@ namespace hybrid::core
         ui.RegisterPanel(std::make_unique<ui::AccelerationStructurePanel>(
                              renderer.GetAccelerationStructureStats()),
                          ui::DockTarget::LeftBottom);
-#else
-        LOG_WARN("UI module skipped (Vulkan path is in Phase 0 of migration)");
-#endif
 
         LOG_INFO("Starting Asset Manager...");
         m_assets.SetDataSource(std::make_shared<assets::DiskAssetDataSource>());
         m_assets.RegisterLoader(std::make_unique<assets::StbImageLoader>());
         m_assets.RegisterLoader(std::make_unique<assets::AssimpSceneLoader>(&m_assets)); // pass a ref to the manager to load other assets
 
-        RequestSceneLoad("scenes/coffee_cart/CoffeeCart_01_2k.gltf");
+        RequestSceneLoad("scenes/helmet/DamagedHelmet.gltf");
         LOG_INFO("Asset module started");
 
         LOG_INFO("----------------- READY! -----------------");
 
         RunMainLoop(platform, ui, renderer);
 
-#if defined(HYBRID_RHI_OPENGL)
         ui.Shutdown();
-#endif
         renderer.Shutdown();
         platform.Shutdown();
         PerformanceTelemetry::Shutdown();
@@ -191,6 +221,7 @@ namespace hybrid::core
             renderer::RendererOutputs renderer_outputs{};
             renderer::RenderView resolved_view{};
             bool resolved_view_valid = false;
+            ui::CommandBuffer commands;
             if (renderer.BeginFrame(frame_context))
             {
                 if (active_scene_world)
@@ -213,7 +244,27 @@ namespace hybrid::core
                     resolved_view = view;
                     renderer.SubmitScene(*active_scene_world, view, m_render_settings);
                 }
+#if defined(HYBRID_RHI_VULKAN)
+                // Vulkan needs ImGui draw lists built before EndFrame so the
+                // renderer's UiRenderHook (called inside EndFrame) has draw
+                // data to record. Outputs from this frame aren't available
+                // yet — ui_state's per-frame texture fields stay default,
+                // ViewportPanel skips. Stage-1 doesn't surface a Vulkan
+                // texture there yet.
+                {
+                    ui::UiState early_ui_state{};
+                    early_ui_state.scene_world = active_scene_world;
+                    early_ui_state.viewport_render_extent = frame_context.render_extent;
+                    early_ui_state.viewport_render_view = resolved_view;
+                    early_ui_state.viewport_render_view_valid = resolved_view_valid;
+                    early_ui_state.render_settings = &m_render_settings;
+                    HYBRID_PROFILE_ZONE_N("App::UiFrame");
+                    commands = ui.Frame(delta_seconds, early_ui_state);
+                }
                 renderer_outputs = renderer.EndFrame();
+#else
+                renderer_outputs = renderer.EndFrame();
+#endif
             }
 
             const renderer::RendererStats &renderer_stats = renderer.GetStats();
@@ -265,8 +316,10 @@ namespace hybrid::core
                 ui_state.render_settings = &m_render_settings;
             }
 
-            ui::CommandBuffer commands;
 #if defined(HYBRID_RHI_OPENGL)
+            // GL: ui.Frame runs after EndFrame so ui_state has this frame's
+            // textures populated. Vulkan ran Frame earlier (see above) — its
+            // command list is already in `commands`.
             {
                 HYBRID_PROFILE_ZONE_N("App::UiFrame");
                 commands = ui.Frame(delta_seconds, ui_state);

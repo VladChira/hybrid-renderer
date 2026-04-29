@@ -6,6 +6,11 @@
 
 #include <memory>
 
+#ifdef HYBRID_RHI_VULKAN
+#include <vulkan/vulkan.h>
+#include <functional>
+#endif
+
 namespace hybrid::renderer::raytracing
 {
     struct AccelerationStructureStats;
@@ -13,6 +18,10 @@ namespace hybrid::renderer::raytracing
 
 namespace hybrid::renderer
 {
+#ifdef HYBRID_RHI_VULKAN
+    class VulkanRenderBackend;
+#endif
+
     class Renderer
     {
     public:
@@ -45,6 +54,20 @@ namespace hybrid::renderer
         // Pointer to the live acceleration-structure stats block owned by the
         // renderer. Valid for the renderer's lifetime.
         const raytracing::AccelerationStructureStats *GetAccelerationStructureStats() const;
+
+#ifdef HYBRID_RHI_VULKAN
+        // Hook called by EndFrame between the heatmap blit and present, with
+        // the swapchain image already in COLOR_ATTACHMENT_OPTIMAL and a
+        // dynamic-rendering scope open. Used by the Ui module to record
+        // ImGui draws into the renderer's command buffer. Set once at
+        // startup; null hook = no UI rendering.
+        using UiRenderHook = std::function<void(VkCommandBuffer)>;
+        void SetUiRenderHook(UiRenderHook hook);
+
+        // Backend accessor for the UI module to pull Vulkan handles
+        // (instance/device/queue/format/etc.) it needs at Init time.
+        VulkanRenderBackend *GetVulkanRenderBackend();
+#endif
 
     private:
         std::unique_ptr<Impl> m_impl;
