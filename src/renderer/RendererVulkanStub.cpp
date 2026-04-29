@@ -392,7 +392,6 @@ namespace hybrid::renderer
         }
 
         // -- Build per-primitive draw calls from the submitted instances ----
-        HYBRID_PROFILE_ZONE_N("Renderer::BuildDrawList");
         m_impl->draw_scratch.clear();
         auto emit_batch = [&](const std::vector<RenderMeshInstance> &batch)
         {
@@ -423,11 +422,14 @@ namespace hybrid::renderer
                 }
             }
         };
-        emit_batch(scene_data.opaque_mesh_instances);
-        emit_batch(scene_data.masked_mesh_instances);
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::BuildDrawList");
+            emit_batch(scene_data.opaque_mesh_instances);
+            emit_batch(scene_data.masked_mesh_instances);
+        }
 
+        {
         HYBRID_PROFILE_ZONE_N("Renderer::RecordCommands");
-
         VkCommandBuffer cmd       = m_impl->backend.CurrentCommandBuffer();
         VkImage         offscreen = m_impl->backend.OffscreenImage();
         VkImage         rt1       = m_impl->backend.Rt1Image();
@@ -538,6 +540,7 @@ namespace hybrid::renderer
                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
         m_impl->backend.EndFrame();
+        } // Renderer::RecordCommands zone
         m_impl->frame_active = false;
         return m_impl->outputs;
     }
