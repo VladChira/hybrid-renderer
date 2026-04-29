@@ -1,6 +1,17 @@
 #ifndef HYBRID_COMMON_GLSL
 #define HYBRID_COMMON_GLSL
 
+// Compat shim: descriptor-set qualifiers in `layout(...)` are Vulkan-only.
+// glslangValidator with `-V` auto-defines VULKAN; native GL drivers do not.
+// Use SET_BINDING(s, b) inside any layout(...) where the shader needs to
+// compile against both backends. In Vulkan it expands to `set=s, binding=b`;
+// under GL it drops `set` and emits binding only.
+#ifdef VULKAN
+#define SET_BINDING(s, b) set = s, binding = b
+#else
+#define SET_BINDING(s, b) binding = b
+#endif
+
 struct BvhNode
 {
     vec3  bmin;

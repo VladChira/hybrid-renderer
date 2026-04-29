@@ -179,7 +179,9 @@ function(hybrid_compile_shaders out_target)
     add_custom_command(
       OUTPUT  "${out}"
       COMMAND "${GLSLANG_VALIDATOR}" -V
-              -I"${SHC_SHADER_ROOT}/include"
+              # Match the GL ShaderManager search base: includes are written
+              # as "include/foo.glsl" and resolved against the shaders root.
+              "-I${SHC_SHADER_ROOT}"
               -o "${out}"
               "${src}"
       DEPENDS "${src}"
@@ -334,6 +336,7 @@ endif()
 if(HYBRID_RHI STREQUAL "vulkan" AND HYBRID_BUILD_SPIRV)
   set(_HYBRID_VULKAN_SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute/swapchain_clear.comp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute/traversal_heatmap.comp"
   )
   hybrid_compile_shaders(hybrid_shaders
     SHADER_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/shaders"

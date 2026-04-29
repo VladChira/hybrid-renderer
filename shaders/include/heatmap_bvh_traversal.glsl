@@ -3,12 +3,10 @@
 
 #include "common.glsl"
 
-layout(std430, binding = 2)  readonly buffer PrimitiveBuffer  { GpuPrimitive primitives[]; };
-layout(std430, binding = 7)  readonly buffer BlasNodes        { BvhNode blas_nodes[]; };
-layout(std430, binding = 9)  readonly buffer TlasNodes        { BvhNode tlas_nodes[]; };
-layout(std430, binding = 10) readonly buffer TlasInstances    { GpuTlasInstance tlas_instances[]; };
-
-uniform uint u_tlas_node_count;
+layout(std430, SET_BINDING(0, 2))  readonly buffer PrimitiveBuffer  { GpuPrimitive primitives[]; };
+layout(std430, SET_BINDING(0, 7))  readonly buffer BlasNodes        { BvhNode blas_nodes[]; };
+layout(std430, SET_BINDING(0, 9))  readonly buffer TlasNodes        { BvhNode tlas_nodes[]; };
+layout(std430, SET_BINDING(0, 10)) readonly buffer TlasInstances    { GpuTlasInstance tlas_instances[]; };
 
 const int kMaxStackDepth = 64;
 const float kNoHitDistance = 1e30;
@@ -111,9 +109,9 @@ uint TraverseBlas(vec3 origin, vec3 direction, uint primitive_id)
     return visits;
 }
 
-uint TraverseTlas(vec3 origin, vec3 direction)
+uint TraverseTlas(vec3 origin, vec3 direction, uint tlas_node_count)
 {
-    if (u_tlas_node_count == 0u)
+    if (tlas_node_count == 0u)
     {
         return 0u;
     }

@@ -1,16 +1,40 @@
 #version 460 core
 
+// glslang processes #include natively only when the extension is requested.
+// Under GL the in-tree ShaderManager inlines includes itself, and the Mac GL
+// driver doesn't know this extension — so guard it.
+#ifdef VULKAN
+#extension GL_GOOGLE_include_directive : require
+#endif
+
 #include "include/heatmap_bvh_traversal.glsl"
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(rgba8, binding = 0) uniform writeonly image2D o_heatmap;
+layout(rgba8, SET_BINDING(0, 0)) uniform writeonly image2D o_heatmap;
 
+// Per-dispatch parameters. Under Vulkan these live in a UBO (loose `uniform`
+// declarations are illegal in Vulkan/SPIR-V); under GL they remain plain
+// uniforms set via glUniform* in TraversalHeatmapPass.cpp. Members are
+// accessed as bare names in both modes.
+#ifdef VULKAN
+layout(std140, SET_BINDING(0, 1)) uniform HeatmapParams
+{
+    mat4  u_inv_view;
+    mat4  u_inv_projection;
+    vec4  u_camera_position;        // xyz = position, w unused (vec3 + std140 is awkward)
+    uvec2 u_output_size;
+    float u_heatmap_scale;
+    uint  u_tlas_node_count;
+};
+#else
 uniform mat4  u_inv_view;
 uniform mat4  u_inv_projection;
 uniform vec3  u_camera_position;
 uniform uvec2 u_output_size;
 uniform float u_heatmap_scale;      // divisor applied to visit counts before LUT sampling
+uniform uint  u_tlas_node_count;
+#endif
 
 vec3 HeatmapColor(float t)
 {
@@ -41,7 +65,7 @@ void main()
     vec3 view_dir = normalize(view.xyz / max(view.w, 1e-5));
     vec3 world_dir = normalize((u_inv_view * vec4(view_dir, 0.0)).xyz);
 
-    uint visits = TraverseTlas(u_camera_position, world_dir);
+    uint visits = TraverseTlas(u_camera_position.xyz, world_dir, u_tlas_node_count);
 
     float intensity = float(visits) / max(u_heatmap_scale, 1.0);
     intensity = log2(1.0 + intensity) / log2(1.0 + 8.0);  // soft log rolloff
