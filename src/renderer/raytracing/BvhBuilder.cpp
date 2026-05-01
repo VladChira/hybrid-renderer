@@ -71,6 +71,7 @@ namespace hybrid::renderer::raytracing
                            std::vector<uint32_t> &order,
                            uint32_t begin,
                            uint32_t end,
+                           const core::scene::Aabb &centroid_bounds,
                            const BvhSplitDecision &split)
         {
             if (begin >= end || split.axis > 2)
@@ -78,14 +79,44 @@ namespace hybrid::renderer::raytracing
                 return begin;
             }
 
+            if (split.use_sah_buckets)
+            {
+                if (!centroid_bounds.valid || split.bucket_count < 2)
+                {
+                    return begin;
+                }
+
+                const float axis_min = ComponentAt(centroid_bounds.min, split.axis);
+                const float axis_max = ComponentAt(centroid_bounds.max, split.axis);
+                const float extent   = axis_max - axis_min;
+                if (extent <= 0.0f)
+                {
+                    return begin;
+                }
+                const float inv_extent = static_cast<float>(split.bucket_count) / extent;
+
+                uint32_t mid = begin;
+                for (uint32_t i = begin; i < end; ++i)
+                {
+                    const float c = ComponentAt(inputs[order[i]].centroid, split.axis);
+                    const float offset = (c - axis_min) * inv_extent;
+                    const int32_t bucket =
+                        std::clamp(static_cast<int32_t>(offset), 0, static_cast<int32_t>(split.bucket_count) - 1);
+                    if (static_cast<uint32_t>(bucket) <= split.split_bucket)
+                    {
+                        std::swap(order[i], order[mid]);
+                        ++mid;
+                    }
+                }
+                return mid;
+            }
+
             auto first = order.begin() + static_cast<std::ptrdiff_t>(begin);
             auto last = order.begin() + static_cast<std::ptrdiff_t>(end);
-
             const auto mid_it = std::partition(first, last, [&](uint32_t input_index) {
                 const float c = ComponentAt(inputs[input_index].centroid, split.axis);
                 return c < split.split_position;
             });
-
             return static_cast<uint32_t>(std::distance(order.begin(), mid_it));
         }
 
@@ -229,7 +260,7 @@ namespace hybrid::renderer::raytracing
             // If we do decide to split, partition the node by that split
             // and push the new nodes to the stack
 
-            const uint32_t mid = Partition(inputs, order, item.begin, item.end, split);
+            const uint32_t mid = Partition(inputs, order, item.begin, item.end, centroid_bounds, split);
 
             if (mid == item.begin || mid == item.end)
             {

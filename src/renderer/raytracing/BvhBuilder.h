@@ -4,6 +4,7 @@
 #include "renderer/raytracing/Bvh.h"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -14,9 +15,10 @@ namespace hybrid::renderer::raytracing
 
     struct BvhBuildConfig
     {
-        BvhSplitStrategyKind split_strategy = BvhSplitStrategyKind::MiddleSplit;
+        BvhSplitStrategyKind split_strategy = BvhSplitStrategyKind::Sah;
         uint32_t max_leaf_primitives = 2;
         uint32_t max_depth           = 24;
+        uint32_t sah_bucket_count    = 16;
     };
 
     // Input record for the generic builder. `payload_index` is the caller's
@@ -54,6 +56,10 @@ namespace hybrid::renderer::raytracing
         bool     valid          = false;
         uint32_t axis           = 0;      // 0=x, 1=y, 2=z
         float    split_position = 0.0f;   // world-space along `axis`
+        bool     use_sah_buckets = false;
+        uint32_t split_bucket    = 0;     // valid only if `use_sah_buckets`
+        uint32_t bucket_count    = 0;     // valid only if `use_sah_buckets`
+        float    cost            = std::numeric_limits<float>::infinity();
     };
 
     struct BuildWorkItem
