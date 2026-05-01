@@ -151,10 +151,11 @@ namespace hybrid::assets
         {
             LOG_INFO("[AssimpSceneLoader] \t Processing lights...");
             bool has_hdri_light = false;
+            const std::string default_hdri_path = "hdris/shanghai_bund_2k.hdr";
             assets::AssetHandle<assets::ImageAsset> default_hdri{};
             if (assets != nullptr)
             {
-                default_hdri = assets->LoadHandle<assets::ImageAsset>("hdris/shanghai_bund_2k.hdr");
+                default_hdri = assets->LoadHandle<assets::ImageAsset>(default_hdri_path);
                 if (!default_hdri.IsValid())
                 {
                     LOG_WARN("[AssimpSceneLoader] Failed to load default HDRI");
@@ -232,9 +233,16 @@ namespace hybrid::assets
                 }
                 case aiLightSource_AMBIENT:
                 {
+                    if (has_hdri_light)
+                    {
+                        LOG_WARN("[AssimpSceneLoader] Skipping extra ambient/HDRI light '" + entity_name + "': only one HDRI light is supported.");
+                        break;
+                    }
+
                     hybrid::core::scene::HdriLightComponent ambient{};
                     ambient.yaw_radians = 0.0f;
                     ambient.texture = default_hdri;
+                    ambient.texture_path = default_hdri_path;
                     scene.AddHdriLight(light_entity, common, ambient);
                     has_hdri_light = true;
                     break;
@@ -253,6 +261,7 @@ namespace hybrid::assets
                 hybrid::core::scene::HdriLightComponent ambient{};
                 ambient.yaw_radians = 0.0f;
                 ambient.texture = default_hdri;
+                ambient.texture_path = default_hdri_path;
                 scene.AddHdriLight(default_hdri_entity, common, ambient);
             }
         }

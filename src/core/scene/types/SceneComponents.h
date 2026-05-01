@@ -90,6 +90,7 @@ namespace hybrid::core::scene
         // 0.0 means no explicit rotation override.
         float yaw_radians = 0.0f;
         assets::AssetHandle<assets::ImageAsset> texture;
+        std::string texture_path;
     };
 
 } // namespace hybrid::core::scene

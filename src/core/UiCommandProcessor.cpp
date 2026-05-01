@@ -208,6 +208,14 @@ namespace hybrid::core
                         {
                             scene::HdriLightComponent updated = *existing;
                             updated.yaw_radians = typed_command.yaw_radians;
+                            if (!typed_command.texture_path.empty())
+                            {
+                                updated.texture = assets.LoadHandle<assets::ImageAsset>(typed_command.texture_path);
+                                if (updated.texture.IsValid())
+                                {
+                                    updated.texture_path = typed_command.texture_path;
+                                }
+                            }
                             active_scene_world->SetHdriLight(typed_command.entity, updated);
                         }
                     }

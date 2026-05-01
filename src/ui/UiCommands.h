@@ -101,6 +101,7 @@ namespace hybrid::ui
     {
         entt::entity entity = entt::null;
         float yaw_radians = 0.0f;
+        std::string texture_path;
     };
 
     enum class MaterialScalarProperty
