@@ -28,7 +28,7 @@ namespace hybrid::ui
                            extension.begin(),
                            [](unsigned char c)
                            { return static_cast<char>(std::tolower(c)); });
-            return extension == ".gltf";
+            return extension == ".gltf" || extension == ".glb";
         }
     } // namespace
 

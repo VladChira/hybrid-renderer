@@ -23,7 +23,7 @@ layout(std430, binding = 8)  readonly buffer BlasTriangles   { uint blas_triangl
 layout(std430, binding = 9)  readonly buffer TlasNodes       { BvhNode tlas_nodes[]; };
 layout(std430, binding = 10) readonly buffer TlasInstances   { GpuTlasInstance tlas_instances[]; };
 
-const int kRayStackDepth = 32;
+const int kRayStackDepth = 24;
 
 // Moller-Trumbore triangle intersection. Returns true and writes distance and
 // barycentric (u, v) on hit. Barycentric w = 1 - u - v is implicit.
