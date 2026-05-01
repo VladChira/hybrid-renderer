@@ -31,7 +31,7 @@ uniform vec3  u_light_position;    // point, area
 uniform vec2  u_light_size;        // area
 
 const float kPi = 3.14159265359;
-const uint kEnvSampleCount = 5u;
+const uint kEnvSampleCount = 1u;
 
 vec3 ReconstructWorldPos(vec2 uv, float depth)
 {

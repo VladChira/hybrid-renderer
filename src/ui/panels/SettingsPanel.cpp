@@ -57,6 +57,12 @@ namespace hybrid::ui
 
         if (ImGui::Checkbox("Enable Ray-Traced Shadows", &m_pending_render_settings.enable_ray_traced_shadows))
         {
+            if (!m_pending_render_settings.enable_ray_traced_shadows)
+            {
+                // Environment visibility tracing depends on the ray-traced
+                // shadow path. Turning shadows off must also disable it.
+                m_pending_render_settings.enable_ray_traced_hdri_visibility = false;
+            }
             MarkEdited();
         }
 
@@ -73,11 +79,13 @@ namespace hybrid::ui
             }
         }
 
+        ImGui::BeginDisabled(!m_pending_render_settings.enable_ray_traced_shadows);
         if (ImGui::Checkbox("Experimental: HDRI Visibility (1 spp)",
                             &m_pending_render_settings.enable_ray_traced_hdri_visibility))
         {
             MarkEdited();
         }
+        ImGui::EndDisabled();
 
         if (ImGui::Checkbox("Denoise Shadow Masks (Spatio-Temporal)",
                             &m_pending_render_settings.enable_shadow_denoise))
