@@ -2,6 +2,8 @@
 
 #include "ui/UiState.h"
 
+#include <algorithm>
+
 #include <imgui.h>
 
 namespace hybrid::ui
@@ -52,6 +54,24 @@ namespace hybrid::ui
                 m_commit_requested = true;
             }
         };
+
+        ImGui::TextUnformatted("Render Settings");
+
+        int render_width = static_cast<int>(m_pending_render_settings.render_extent.width);
+        if (ImGui::DragInt("Render Width", &render_width, 1.0f, 1, 8192, "%d"))
+        {
+            m_pending_render_settings.render_extent.width = static_cast<uint32_t>(std::clamp(render_width, 1, 8192));
+            MarkEdited();
+        }
+
+        int render_height = static_cast<int>(m_pending_render_settings.render_extent.height);
+        if (ImGui::DragInt("Render Height", &render_height, 1.0f, 1, 8192, "%d"))
+        {
+            m_pending_render_settings.render_extent.height = static_cast<uint32_t>(std::clamp(render_height, 1, 8192));
+            MarkEdited();
+        }
+
+        ImGui::Separator();
 
         ImGui::TextUnformatted("Ray tracing Settings");
 
