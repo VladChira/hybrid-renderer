@@ -270,7 +270,7 @@ void main()
     vec3 albedo = clamp(rt0.rgb, 0.0, 1.0);
     float metallic = clamp(rt0.a, 0.0, 1.0);
     vec3 normal = normalize(rt1.xyz * 2.0 - 1.0);
-    float roughness = clamp(rt1.a, 0.045, 1.0);
+    float roughness = clamp(rt1.a, 0.0, 1.0);
 
     vec3 world_position = ReconstructWorldPosition(v_uv, depth);
     vec3 V = normalize(u_camera_position - world_position);
@@ -414,7 +414,7 @@ void main()
     {
         vec3 R = reflect(-V, normal);
         vec3 reflection_direction = RotateAroundY(R, u_skybox_yaw_radians);
-        const float MAX_REFLECTION_LOD = 4.0;
+        const float MAX_REFLECTION_LOD = 7.0;
         vec3 prefiltered_color =
             textureLod(u_prefiltered_env_cubemap, reflection_direction, roughness * MAX_REFLECTION_LOD).rgb *
             max(u_skybox_intensity, 0.0);
