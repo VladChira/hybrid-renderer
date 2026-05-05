@@ -75,12 +75,19 @@ namespace hybrid::renderer
         m_gbuffer_rt1_g.Destroy();
         m_gbuffer_rt1_b.Destroy();
         m_gbuffer_rt1_a.Destroy();
+        m_raytrace_primary_albedo.Destroy();
+        m_raytrace_reflections_raw.Destroy();
+        m_raytrace_reflections.Destroy();
         m_raytrace_heatmap.Destroy();
         m_raytrace_shadow_masks.Destroy();
         m_raytrace_shadow_history_a.Destroy();
         m_raytrace_shadow_history_b.Destroy();
         m_raytrace_shadow_atrous_ping.Destroy();
         m_raytrace_shadow_atrous_pong.Destroy();
+        m_raytrace_reflection_history_a.Destroy();
+        m_raytrace_reflection_history_b.Destroy();
+        m_raytrace_reflection_atrous_ping.Destroy();
+        m_raytrace_reflection_atrous_pong.Destroy();
         m_prev_gbuffer_depth.Destroy();
         m_prev_gbuffer_rt1.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
@@ -134,6 +141,12 @@ namespace hybrid::renderer
             return m_gbuffer_entity_id.Id();
         case FrameTarget::GBufferDepth:
             return m_gbuffer_depth.Id();
+        case FrameTarget::RaytracePrimaryAlbedo:
+            return m_raytrace_primary_albedo.Id();
+        case FrameTarget::RaytraceReflectionsRaw:
+            return m_raytrace_reflections_raw.Id();
+        case FrameTarget::RaytraceReflections:
+            return m_raytrace_reflections.Id();
         case FrameTarget::RaytraceHeatmap:
             return m_raytrace_heatmap.Id();
         case FrameTarget::RaytraceShadowMasks:
@@ -146,6 +159,14 @@ namespace hybrid::renderer
             return m_raytrace_shadow_atrous_ping.Id();
         case FrameTarget::RaytraceShadowAtrousPong:
             return m_raytrace_shadow_atrous_pong.Id();
+        case FrameTarget::RaytraceReflectionHistoryA:
+            return m_raytrace_reflection_history_a.Id();
+        case FrameTarget::RaytraceReflectionHistoryB:
+            return m_raytrace_reflection_history_b.Id();
+        case FrameTarget::RaytraceReflectionAtrousPing:
+            return m_raytrace_reflection_atrous_ping.Id();
+        case FrameTarget::RaytraceReflectionAtrousPong:
+            return m_raytrace_reflection_atrous_pong.Id();
         case FrameTarget::PrevGBufferDepth:
             return m_prev_gbuffer_depth.Id();
         case FrameTarget::PrevGBufferRt1:
@@ -421,6 +442,54 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_raytrace_primary_albedo.IsValid() && !m_raytrace_primary_albedo.Create(GL_TEXTURE_2D))
+        {
+            LOG_ERROR("[FrameResources] Failed to create raytrace primary albedo texture");
+            return false;
+        }
+
+        m_raytrace_primary_albedo.Bind();
+        m_raytrace_primary_albedo.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        m_raytrace_primary_albedo.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_raytrace_primary_albedo.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_raytrace_primary_albedo.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_raytrace_primary_albedo.SetImage2D(0,
+                                             GL_RGBA8,
+                                             static_cast<GLsizei>(extent.width),
+                                             static_cast<GLsizei>(extent.height),
+                                             GL_RGBA,
+                                             GL_UNSIGNED_BYTE,
+                                             nullptr);
+
+        auto allocate_rgba16f_2d = [extent](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {}", label);
+                return false;
+            }
+
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA16F,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               GL_RGBA,
+                               GL_HALF_FLOAT,
+                               nullptr);
+            return true;
+        };
+
+        if (!allocate_rgba16f_2d(m_raytrace_reflections_raw, "raytrace reflections raw texture") ||
+            !allocate_rgba16f_2d(m_raytrace_reflections, "raytrace reflections texture"))
+        {
+            return false;
+        }
+
         if (!m_raytrace_heatmap.IsValid() && !m_raytrace_heatmap.Create(GL_TEXTURE_2D))
         {
             LOG_ERROR("[FrameResources] Failed to create raytrace heatmap texture");
@@ -486,6 +555,14 @@ namespace hybrid::renderer
             !allocate_r16f_array(m_raytrace_shadow_history_b, "raytrace shadow history B array") ||
             !allocate_r16f_array(m_raytrace_shadow_atrous_ping, "raytrace shadow atrous ping array") ||
             !allocate_r16f_array(m_raytrace_shadow_atrous_pong, "raytrace shadow atrous pong array"))
+        {
+            return false;
+        }
+
+        if (!allocate_rgba16f_2d(m_raytrace_reflection_history_a, "raytrace reflection history A texture") ||
+            !allocate_rgba16f_2d(m_raytrace_reflection_history_b, "raytrace reflection history B texture") ||
+            !allocate_rgba16f_2d(m_raytrace_reflection_atrous_ping, "raytrace reflection atrous ping texture") ||
+            !allocate_rgba16f_2d(m_raytrace_reflection_atrous_pong, "raytrace reflection atrous pong texture"))
         {
             return false;
         }

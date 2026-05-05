@@ -191,6 +191,9 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/passes/HdriPrecomputePass.cpp
   src/renderer/passes/AreaLightVisualizationPass.cpp
   src/renderer/passes/RenderTargetChannelsPass.cpp
+  src/renderer/passes/RayTracedPrimaryAlbedoPass.cpp
+  src/renderer/passes/RayTracedReflectionPass.cpp
+  src/renderer/passes/ReflectionDenoisePass.cpp
   src/renderer/ShaderManager.cpp
   src/renderer/SceneWorldSnapshot.cpp
   src/renderer/opengl/GLBuffer.cpp

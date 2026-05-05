@@ -10,6 +10,7 @@ uniform samplerCube u_irradiance_cubemap;
 uniform samplerCube u_prefiltered_env_cubemap;
 uniform sampler2D u_brdf_lut;
 uniform sampler2DArray u_shadow_mask_array;
+uniform sampler2D u_reflection_texture;
 uniform mat4 u_inv_view;
 uniform mat4 u_inv_projection;
 uniform vec3 u_camera_position;
@@ -26,6 +27,7 @@ uniform int u_has_skybox;
 uniform int u_has_irradiance;
 uniform int u_has_prefiltered_env;
 uniform int u_has_specular_ibl;
+uniform int u_has_ray_traced_reflections;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 uniform float u_env_shadow_layer;
@@ -419,8 +421,21 @@ void main()
             textureLod(u_prefiltered_env_cubemap, reflection_direction, roughness * MAX_REFLECTION_LOD).rgb *
             max(u_skybox_intensity, 0.0);
         vec2 env_brdf = texture(u_brdf_lut, vec2(ndotv, roughness)).rg;
-        vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
-        ambient += specular_ibl * env_visibility;
+        if (u_has_ray_traced_reflections != 0)
+        {
+            vec3 reflection_radiance = max(texture(u_reflection_texture, v_uv).rgb, 0.0);
+            ambient += reflection_radiance;
+        }
+        else
+        {
+            vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
+            ambient += specular_ibl * env_visibility;
+        }
+    }
+    else if (u_has_ray_traced_reflections != 0)
+    {
+        vec3 reflection_radiance = max(texture(u_reflection_texture, v_uv).rgb, 0.0);
+        ambient += reflection_radiance;
     }
 
     vec3 color = ambient + Lo;

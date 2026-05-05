@@ -280,4 +280,218 @@ bool TraceAnyHit(vec3 origin, vec3 direction, uint tlas_node_count, float t_max)
     return false;
 }
 
+bool TraceClosestHit(vec3 origin, vec3 direction, uint tlas_node_count, float t_max, out RayHit out_hit)
+{
+    out_hit.tlas_instance_index = 0u;
+    out_hit.triangle_in_blas = 0u;
+    out_hit.t = t_max;
+    out_hit.bary = vec2(0.0);
+
+    if (tlas_node_count == 0u)
+    {
+        return false;
+    }
+
+    vec3 tlas_inv_dir = 1.0 / direction;
+
+    int stack[kRayStackDepth];
+    int stack_size = 0;
+
+    int root_index = 0;
+    BvhNode root_node = tlas_nodes[root_index];
+    float root_near_t = IntersectAabbNearT(origin, tlas_inv_dir, root_node.bmin, root_node.bmax, 0.0, t_max);
+    if (root_near_t >= t_max)
+    {
+        return false;
+    }
+
+    stack[stack_size] = root_index;
+    stack_size += 1;
+
+    int pending_first = 0;
+    int pending_count = 0;
+    int pending_next = 0;
+    bool has_pending_instances = false;
+
+    vec3 blas_origin = vec3(0.0);
+    vec3 blas_direction = vec3(0.0);
+    vec3 blas_inv_dir = vec3(0.0);
+    GpuPrimitive blas_primitive;
+    uint current_instance_index = 0u;
+
+    float closest_t = t_max;
+    bool found_hit = false;
+
+    while (true)
+    {
+        if (has_pending_instances)
+        {
+            bool top_is_blas = (stack_size > 0) && (stack[stack_size - 1] < 0);
+            if (!top_is_blas)
+            {
+                bool pushed_blas = false;
+
+                while (pending_next < pending_count)
+                {
+                    uint instance_index = uint(pending_first + pending_next);
+                    GpuTlasInstance inst = tlas_instances[instance_index];
+                    GpuPrimitive prim = primitives[inst.primitive_id];
+                    pending_next += 1;
+
+                    if (prim.index_count == 0u)
+                    {
+                        continue;
+                    }
+
+                    vec3 local_origin = (inst.local_from_world * vec4(origin, 1.0)).xyz;
+                    vec3 local_direction = (inst.local_from_world * vec4(direction, 0.0)).xyz;
+                    vec3 local_inv_dir = 1.0 / local_direction;
+
+                    int blas_root_index = int(prim.blas_root);
+                    BvhNode blas_root = blas_nodes[blas_root_index];
+                    float blas_root_near_t = IntersectAabbNearT(local_origin,
+                                                                local_inv_dir,
+                                                                blas_root.bmin,
+                                                                blas_root.bmax,
+                                                                0.0,
+                                                                closest_t);
+                    if (blas_root_near_t >= closest_t)
+                    {
+                        continue;
+                    }
+
+                    if (stack_size >= kRayStackDepth)
+                    {
+                        break;
+                    }
+
+                    blas_origin = local_origin;
+                    blas_direction = local_direction;
+                    blas_inv_dir = local_inv_dir;
+                    blas_primitive = prim;
+                    current_instance_index = instance_index;
+
+                    stack[stack_size] = -(blas_root_index + 1);
+                    stack_size += 1;
+                    pushed_blas = true;
+                    break;
+                }
+
+                if (pending_next >= pending_count)
+                {
+                    has_pending_instances = false;
+                }
+
+                if (pushed_blas)
+                {
+                    continue;
+                }
+            }
+        }
+
+        if (stack_size == 0)
+        {
+            break;
+        }
+
+        stack_size -= 1;
+        int encoded_node = stack[stack_size];
+        bool in_blas = encoded_node < 0;
+        int node_index = in_blas ? (-encoded_node - 1) : encoded_node;
+
+        BvhNode node = in_blas ? blas_nodes[node_index] : tlas_nodes[node_index];
+
+        while (true)
+        {
+            if (node.right_or_count < 0)
+            {
+                int first = node.left_or_first;
+                int count = -node.right_or_count;
+
+                if (in_blas)
+                {
+                    for (int i = 0; i < count; ++i)
+                    {
+                        uint tri = blas_triangles[blas_primitive.blas_triangle_offset + uint(first + i)];
+                        uint i0 = indices[blas_primitive.index_offset + tri * 3u + 0u];
+                        uint i1 = indices[blas_primitive.index_offset + tri * 3u + 1u];
+                        uint i2 = indices[blas_primitive.index_offset + tri * 3u + 2u];
+                        vec3 v0 = vertices[blas_primitive.vertex_offset + i0].position;
+                        vec3 v1 = vertices[blas_primitive.vertex_offset + i1].position;
+                        vec3 v2 = vertices[blas_primitive.vertex_offset + i2].position;
+                        float t, u, v;
+                        if (IntersectTriangle(blas_origin, blas_direction, v0, v1, v2, 0.0, closest_t, t, u, v))
+                        {
+                            closest_t = t;
+                            out_hit.tlas_instance_index = current_instance_index;
+                            out_hit.triangle_in_blas = tri;
+                            out_hit.t = t;
+                            out_hit.bary = vec2(u, v);
+                            found_hit = true;
+                        }
+                    }
+                }
+                else
+                {
+                    pending_first = first;
+                    pending_count = count;
+                    pending_next = 0;
+                    has_pending_instances = count > 0;
+                }
+
+                break;
+            }
+
+            int left_index = node.left_or_first;
+            int right_index = node.right_or_count;
+
+            BvhNode left_node = in_blas ? blas_nodes[left_index] : tlas_nodes[left_index];
+            BvhNode right_node = in_blas ? blas_nodes[right_index] : tlas_nodes[right_index];
+
+            vec3 ray_origin = in_blas ? blas_origin : origin;
+            vec3 ray_inv_dir = in_blas ? blas_inv_dir : tlas_inv_dir;
+
+            float left_near_t = IntersectAabbNearT(ray_origin, ray_inv_dir, left_node.bmin, left_node.bmax, 0.0, closest_t);
+            float right_near_t = IntersectAabbNearT(ray_origin, ray_inv_dir, right_node.bmin, right_node.bmax, 0.0, closest_t);
+            bool left_hit = left_near_t < closest_t;
+            bool right_hit = right_near_t < closest_t;
+
+            if (!left_hit && !right_hit)
+            {
+                break;
+            }
+
+            if (left_hit && right_hit)
+            {
+                bool left_is_near = left_near_t <= right_near_t;
+                int near_index = left_is_near ? left_index : right_index;
+                BvhNode near_node = left_is_near ? left_node : right_node;
+                int far_index = left_is_near ? right_index : left_index;
+
+                if (stack_size < kRayStackDepth)
+                {
+                    stack[stack_size] = in_blas ? -(far_index + 1) : far_index;
+                    stack_size += 1;
+                }
+
+                node_index = near_index;
+                node = near_node;
+                continue;
+            }
+
+            if (left_hit)
+            {
+                node_index = left_index;
+                node = left_node;
+                continue;
+            }
+
+            node_index = right_index;
+            node = right_node;
+        }
+    }
+
+    return found_hit;
+}
+
 #endif

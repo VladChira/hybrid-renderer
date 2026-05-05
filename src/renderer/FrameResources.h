@@ -32,12 +32,19 @@ namespace hybrid::renderer
         GBufferRt1A,
         GBufferEntityId,
         GBufferDepth,
+        RaytracePrimaryAlbedo,
+        RaytraceReflectionsRaw,
+        RaytraceReflections,
         RaytraceHeatmap,
         RaytraceShadowMasks,
         RaytraceShadowHistoryA,
         RaytraceShadowHistoryB,
         RaytraceShadowAtrousPing,
         RaytraceShadowAtrousPong,
+        RaytraceReflectionHistoryA,
+        RaytraceReflectionHistoryB,
+        RaytraceReflectionAtrousPing,
+        RaytraceReflectionAtrousPong,
         // Copies of the previous frame's gbuffer used by the temporal
         // accumulation pass for disocclusion-aware history rejection.
         PrevGBufferDepth,
@@ -99,12 +106,19 @@ namespace hybrid::renderer
         GLTexture m_gbuffer_rt1_b{};
         GLTexture m_gbuffer_rt1_a{};
 
+        GLTexture m_raytrace_primary_albedo{};
+        GLTexture m_raytrace_reflections_raw{};
+        GLTexture m_raytrace_reflections{};
         GLTexture m_raytrace_heatmap{};
         GLTexture m_raytrace_shadow_masks{};
         GLTexture m_raytrace_shadow_history_a{};
         GLTexture m_raytrace_shadow_history_b{};
         GLTexture m_raytrace_shadow_atrous_ping{};
         GLTexture m_raytrace_shadow_atrous_pong{};
+        GLTexture m_raytrace_reflection_history_a{};
+        GLTexture m_raytrace_reflection_history_b{};
+        GLTexture m_raytrace_reflection_atrous_ping{};
+        GLTexture m_raytrace_reflection_atrous_pong{};
         GLTexture m_prev_gbuffer_depth{};
         GLTexture m_prev_gbuffer_rt1{};
     };

@@ -17,6 +17,9 @@
 #include "renderer/passes/GBufferPass.h"
 #include "renderer/passes/HdriPrecomputePass.h"
 #include "renderer/passes/AreaLightVisualizationPass.h"
+#include "renderer/passes/ReflectionDenoisePass.h"
+#include "renderer/passes/RayTracedPrimaryAlbedoPass.h"
+#include "renderer/passes/RayTracedReflectionPass.h"
 #include "renderer/passes/RenderTargetChannelsPass.h"
 #include "renderer/passes/TraversalHeatmapPass.h"
 #include "renderer/passes/RayTracedShadowPass.h"
@@ -32,6 +35,20 @@ namespace hybrid::renderer
 
     namespace
     {
+        void CopyTexture2D(GlTextureId source, GlTextureId destination, const RenderExtent &extent)
+        {
+            if (source == 0 || destination == 0 || !extent.IsValid())
+            {
+                return;
+            }
+
+            glCopyImageSubData(source, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               destination, GL_TEXTURE_2D, 0, 0, 0, 0,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               1);
+        }
+
         RendererOutputs BuildOutputs(const FrameResources &resources)
         {
             RendererOutputs outputs{};
@@ -55,6 +72,8 @@ namespace hybrid::renderer
             outputs.gbuffer_rt1_channels.g = resources.Get(FrameTarget::GBufferRt1G);
             outputs.gbuffer_rt1_channels.b = resources.Get(FrameTarget::GBufferRt1B);
             outputs.gbuffer_rt1_channels.a = resources.Get(FrameTarget::GBufferRt1A);
+            outputs.raytrace_primary_albedo = resources.Get(FrameTarget::RaytracePrimaryAlbedo);
+            outputs.raytrace_reflections = resources.Get(FrameTarget::RaytraceReflections);
             outputs.raytrace_heatmap = resources.Get(FrameTarget::RaytraceHeatmap);
             return outputs;
         }
@@ -74,10 +93,14 @@ namespace hybrid::renderer
         GLShaderProgram brdf_lut_shader{};
         GLShaderProgram extract_channel_shader{};
         GLShaderProgram area_light_visualization_shader{};
+        GLShaderProgram raytrace_primary_albedo_shader{};
+        GLShaderProgram raytrace_reflection_shader{};
         GLShaderProgram traversal_heatmap_shader{};
         GLShaderProgram raytrace_shadow_shader{};
         GLShaderProgram temporal_accumulation_shader{};
         GLShaderProgram atrous_denoise_shader{};
+        GLShaderProgram reflection_temporal_accumulation_shader{};
+        GLShaderProgram reflection_atrous_denoise_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -90,9 +113,12 @@ namespace hybrid::renderer
         std::unique_ptr<HdriPrecomputePass> hdri_precompute_pass{};
         std::unique_ptr<AreaLightVisualizationPass> area_light_visualization_pass{};
         std::unique_ptr<RenderTargetChannelsPass> render_target_channels_pass{};
+        std::unique_ptr<RayTracedPrimaryAlbedoPass> raytrace_primary_albedo_pass{};
+        std::unique_ptr<RayTracedReflectionPass> raytrace_reflection_pass{};
         std::unique_ptr<TraversalHeatmapPass> traversal_heatmap_pass{};
         std::unique_ptr<RayTracedShadowPass> raytrace_shadow_pass{};
         std::unique_ptr<SpatioTemporalDenoisePass> shadow_denoise_pass{};
+        std::unique_ptr<ReflectionDenoisePass> reflection_denoise_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -110,6 +136,8 @@ namespace hybrid::renderer
         bool prev_gbuffer_valid = false;
         bool shadow_history_prev_is_a = true;
         bool shadow_history_valid = false;
+        bool reflection_history_prev_is_a = true;
+        bool reflection_history_valid = false;
     };
 
     Renderer::Renderer()
@@ -222,6 +250,20 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/raytrace_primary_albedo.comp",
+                                                                  m_impl->raytrace_primary_albedo_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: raytrace primary albedo compute program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/raytrace_reflections.comp",
+                                                                  m_impl->raytrace_reflection_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: raytrace reflections compute program build failed");
+            return false;
+        }
+
         if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/raytrace_shadow.comp",
                                                                   m_impl->raytrace_shadow_shader))
         {
@@ -240,6 +282,20 @@ namespace hybrid::renderer
                                                                   m_impl->atrous_denoise_shader))
         {
             LOG_ERROR("[Renderer] Init failed: atrous denoise compute program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/reflection_temporal_accumulation.comp",
+                                                                  m_impl->reflection_temporal_accumulation_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: reflection temporal accumulation compute program build failed");
+            return false;
+        }
+
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/reflection_atrous_denoise.comp",
+                                                                  m_impl->reflection_atrous_denoise_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: reflection atrous denoise compute program build failed");
             return false;
         }
 
@@ -276,6 +332,14 @@ namespace hybrid::renderer
                                                                             &m_impl->brdf_lut_shader);
         m_impl->area_light_visualization_pass = std::make_unique<AreaLightVisualizationPass>(&m_impl->area_light_visualization_shader);
         m_impl->render_target_channels_pass = std::make_unique<RenderTargetChannelsPass>(&m_impl->extract_channel_shader);
+        m_impl->raytrace_primary_albedo_pass = std::make_unique<RayTracedPrimaryAlbedoPass>(&m_impl->raytrace_primary_albedo_shader,
+                                                                                             &m_impl->geometry_store,
+                                                                                             &m_impl->material_store,
+                                                                                             &m_impl->as_cache);
+        m_impl->raytrace_reflection_pass = std::make_unique<RayTracedReflectionPass>(&m_impl->raytrace_reflection_shader,
+                                                                                      &m_impl->geometry_store,
+                                                                                      &m_impl->material_store,
+                                                                                      &m_impl->as_cache);
         m_impl->traversal_heatmap_pass = std::make_unique<TraversalHeatmapPass>(&m_impl->traversal_heatmap_shader,
                                                                                 &m_impl->geometry_store,
                                                                                 &m_impl->as_cache);
@@ -284,6 +348,9 @@ namespace hybrid::renderer
                                                                              &m_impl->as_cache);
         m_impl->shadow_denoise_pass = std::make_unique<SpatioTemporalDenoisePass>(&m_impl->temporal_accumulation_shader,
                                                                                    &m_impl->atrous_denoise_shader);
+        m_impl->reflection_denoise_pass =
+            std::make_unique<ReflectionDenoisePass>(&m_impl->reflection_temporal_accumulation_shader,
+                                                    &m_impl->reflection_atrous_denoise_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
@@ -291,9 +358,12 @@ namespace hybrid::renderer
         LOG_INFO("[Renderer] \t - Deferred Lighting Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Area Light Visualization Pass [OpenGL Raster]");
         LOG_INFO("[Renderer] \t - Render Target Channels Pass [OpenGL Raster]");
+        LOG_INFO("[Renderer] \t - Ray traced primary albedo debug [OpenGL Compute Shader]");
+        LOG_INFO("[Renderer] \t - Ray traced reflections [OpenGL Compute Shader]");
         LOG_INFO("[Renderer] \t - Ray tracing heatmap visualization [OpenGL Compute Shader]");
         LOG_INFO("[Renderer] \t - Ray traced shadows [OpenGL Compute Shader]");
         LOG_INFO("[Renderer] \t - Generic spatio-temporal denoise [OpenGL Compute Shader]");
+        LOG_INFO("[Renderer] \t - Reflection spatio-temporal denoise [OpenGL Compute Shader]");
 
         if (m_impl->current_extent.IsValid())
         {
@@ -325,6 +395,12 @@ namespace hybrid::renderer
         m_impl->hdri_precompute_pass.reset();
         m_impl->area_light_visualization_pass.reset();
         m_impl->render_target_channels_pass.reset();
+        m_impl->raytrace_primary_albedo_pass.reset();
+        m_impl->raytrace_reflection_pass.reset();
+        m_impl->traversal_heatmap_pass.reset();
+        m_impl->raytrace_shadow_pass.reset();
+        m_impl->shadow_denoise_pass.reset();
+        m_impl->reflection_denoise_pass.reset();
         m_impl->geometry_store.Clear();
         m_impl->material_store.Clear();
         m_impl->as_cache.Clear();
@@ -337,14 +413,15 @@ namespace hybrid::renderer
         m_impl->brdf_lut_shader.Destroy();
         m_impl->extract_channel_shader.Destroy();
         m_impl->area_light_visualization_shader.Destroy();
+        m_impl->raytrace_primary_albedo_shader.Destroy();
+        m_impl->raytrace_reflection_shader.Destroy();
         m_impl->traversal_heatmap_shader.Destroy();
         m_impl->raytrace_shadow_shader.Destroy();
         m_impl->temporal_accumulation_shader.Destroy();
         m_impl->atrous_denoise_shader.Destroy();
+        m_impl->reflection_temporal_accumulation_shader.Destroy();
+        m_impl->reflection_atrous_denoise_shader.Destroy();
         m_impl->frame_resources.Reset();
-        m_impl->traversal_heatmap_pass.reset();
-        m_impl->raytrace_shadow_pass.reset();
-        m_impl->shadow_denoise_pass.reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -355,6 +432,8 @@ namespace hybrid::renderer
         m_impl->prev_gbuffer_valid = false;
         m_impl->shadow_history_prev_is_a = true;
         m_impl->shadow_history_valid = false;
+        m_impl->reflection_history_prev_is_a = true;
+        m_impl->reflection_history_valid = false;
     }
 
     void Renderer::Resize(const RenderExtent &extent)
@@ -373,6 +452,8 @@ namespace hybrid::renderer
         m_impl->outputs = BuildOutputs(m_impl->frame_resources);
         m_impl->shadow_history_valid = false;
         m_impl->shadow_history_prev_is_a = true;
+        m_impl->reflection_history_valid = false;
+        m_impl->reflection_history_prev_is_a = true;
     }
 
     bool Renderer::BeginFrame(const FrameContext &frame)
@@ -415,6 +496,8 @@ namespace hybrid::renderer
         {
             m_impl->shadow_history_valid = false;
             m_impl->shadow_history_prev_is_a = true;
+            m_impl->reflection_history_valid = false;
+            m_impl->reflection_history_prev_is_a = true;
         }
 
         m_impl->outputs = BuildOutputs(m_impl->frame_resources);
@@ -538,6 +621,32 @@ namespace hybrid::renderer
         const bool should_compute_bvh_heatmap =
             m_impl->submitted_settings.compute_bvh_heatmap &&
             (m_impl->traversal_heatmap_pass != nullptr);
+
+        const bool should_compute_primary_albedo =
+            m_impl->submitted_settings.compute_ray_traced_primary_albedo &&
+            (m_impl->raytrace_primary_albedo_pass != nullptr);
+
+        if (should_compute_primary_albedo)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::RayTracedPrimaryAlbedoPass");
+            RayTracedPrimaryAlbedoPassInput primary_albedo_input{};
+            primary_albedo_input.settings = &m_impl->submitted_settings;
+            primary_albedo_input.effective_view = &m_impl->effective_view;
+            primary_albedo_input.output_texture = m_impl->frame_resources.Get(FrameTarget::RaytracePrimaryAlbedo);
+            if (!m_impl->raytrace_primary_albedo_pass->Execute(primary_albedo_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_primary_albedo_pass->Name());
+            }
+        }
+        else
+        {
+            const GlTextureId albedo_texture = m_impl->frame_resources.Get(FrameTarget::RaytracePrimaryAlbedo);
+            if (albedo_texture != 0)
+            {
+                constexpr std::array<GLubyte, 4> kZeroAlbedo = {0, 0, 0, 255};
+                glClearTexImage(albedo_texture, 0, GL_RGBA, GL_UNSIGNED_BYTE, kZeroAlbedo.data());
+            }
+        }
 
         if (should_compute_bvh_heatmap)
         {
@@ -684,6 +793,106 @@ namespace hybrid::renderer
             }
         }
 
+        if (m_impl->raytrace_reflection_pass != nullptr)
+        {
+            const GlTextureId reflection_raw_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionsRaw);
+            const GlTextureId reflection_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceReflections);
+            if (m_impl->submitted_settings.enable_ray_traced_reflections)
+            {
+                HYBRID_PROFILE_ZONE_N("Renderer::RayTracedReflectionPass");
+                RayTracedReflectionPassInput reflection_input{};
+                reflection_input.settings = &m_impl->submitted_settings;
+                reflection_input.effective_view = &m_impl->effective_view;
+                reflection_input.gbuffer_rt0 = m_impl->frame_resources.Get(FrameTarget::GBufferRt0);
+                reflection_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+                reflection_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+                reflection_input.output_texture = reflection_raw_texture;
+                reflection_input.has_skybox = hdri_output.has_skybox;
+                reflection_input.skybox_cubemap = hdri_output.skybox_cubemap;
+                reflection_input.convoluted_cubemap = hdri_output.convoluted_cubemap;
+                reflection_input.prefiltered_cubemap = hdri_output.prefiltered_cubemap;
+                reflection_input.brdf_lut = hdri_output.brdf_lut;
+                reflection_input.skybox_intensity = hdri_output.skybox_intensity;
+                reflection_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
+                reflection_input.frame_index = static_cast<uint32_t>(m_impl->frame_context.frame_index);
+
+                if (!m_impl->raytrace_reflection_pass->Execute(reflection_input))
+                {
+                    LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->raytrace_reflection_pass->Name());
+                    m_impl->reflection_history_valid = false;
+                    m_impl->reflection_history_prev_is_a = true;
+                    if (reflection_texture != 0)
+                    {
+                        constexpr std::array<float, 4> kZeroReflection = {0.0f, 0.0f, 0.0f, 0.0f};
+                        glClearTexImage(reflection_texture, 0, GL_RGBA, GL_FLOAT, kZeroReflection.data());
+                    }
+                }
+                else if (m_impl->submitted_settings.enable_reflection_denoise &&
+                         m_impl->reflection_denoise_pass != nullptr)
+                {
+                    HYBRID_PROFILE_ZONE_N("Renderer::ReflectionDenoisePass");
+                    const GlTextureId history_prev = m_impl->reflection_history_prev_is_a
+                                                         ? m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionHistoryA)
+                                                         : m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionHistoryB);
+                    const GlTextureId history_out = m_impl->reflection_history_prev_is_a
+                                                        ? m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionHistoryB)
+                                                        : m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionHistoryA);
+
+                    ReflectionDenoisePassInput denoise_input{};
+                    denoise_input.effective_view = &m_impl->effective_view;
+                    denoise_input.extent = m_impl->submitted_settings.render_extent;
+                    denoise_input.current_signal = reflection_raw_texture;
+                    denoise_input.history_prev = history_prev;
+                    denoise_input.history_out = history_out;
+                    denoise_input.atrous_ping = m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionAtrousPing);
+                    denoise_input.atrous_pong = m_impl->frame_resources.Get(FrameTarget::RaytraceReflectionAtrousPong);
+                    denoise_input.gbuffer_rt1 = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
+                    denoise_input.gbuffer_depth = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+                    denoise_input.gbuffer_rt1_prev = m_impl->frame_resources.Get(FrameTarget::PrevGBufferRt1);
+                    denoise_input.gbuffer_depth_prev = m_impl->frame_resources.Get(FrameTarget::PrevGBufferDepth);
+                    denoise_input.history_valid = m_impl->reflection_history_valid &&
+                                                 m_impl->prev_view_projection_valid &&
+                                                 m_impl->prev_gbuffer_valid;
+                    denoise_input.prev_view_projection = m_impl->prev_view_projection;
+                    denoise_input.camera_near = m_impl->effective_view.near_plane;
+                    denoise_input.camera_far = m_impl->effective_view.far_plane;
+                    denoise_input.temporal_alpha = m_impl->submitted_settings.reflection_denoise_temporal_alpha;
+                    denoise_input.atrous_iterations = m_impl->submitted_settings.reflection_denoise_atrous_iterations;
+                    denoise_input.c_phi = m_impl->submitted_settings.reflection_denoise_c_phi;
+                    denoise_input.n_phi = m_impl->submitted_settings.reflection_denoise_n_phi;
+                    denoise_input.p_phi = m_impl->submitted_settings.reflection_denoise_p_phi;
+
+                    ReflectionDenoisePassOutput denoise_output{};
+                    if (!m_impl->reflection_denoise_pass->Execute(denoise_input, denoise_output))
+                    {
+                        LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->reflection_denoise_pass->Name());
+                        m_impl->reflection_history_valid = false;
+                        m_impl->reflection_history_prev_is_a = true;
+                        CopyTexture2D(reflection_raw_texture, reflection_texture, m_impl->current_extent);
+                    }
+                    else
+                    {
+                        m_impl->reflection_history_valid = true;
+                        m_impl->reflection_history_prev_is_a = !m_impl->reflection_history_prev_is_a;
+                        CopyTexture2D(denoise_output.denoised, reflection_texture, m_impl->current_extent);
+                    }
+                }
+                else
+                {
+                    m_impl->reflection_history_valid = false;
+                    m_impl->reflection_history_prev_is_a = true;
+                    CopyTexture2D(reflection_raw_texture, reflection_texture, m_impl->current_extent);
+                }
+            }
+            else if (reflection_texture != 0)
+            {
+                constexpr std::array<float, 4> kZeroReflection = {0.0f, 0.0f, 0.0f, 0.0f};
+                glClearTexImage(reflection_texture, 0, GL_RGBA, GL_FLOAT, kZeroReflection.data());
+                m_impl->reflection_history_valid = false;
+                m_impl->reflection_history_prev_is_a = true;
+            }
+        }
+
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {
             HYBRID_PROFILE_ZONE_N("Renderer::DeferredLightingPass");
@@ -703,6 +912,7 @@ namespace hybrid::renderer
             deferred_input.brdf_lut = hdri_output.brdf_lut;
             deferred_input.skybox_intensity = hdri_output.skybox_intensity;
             deferred_input.skybox_yaw_radians = hdri_output.skybox_yaw_radians;
+            deferred_input.reflection_texture = m_impl->frame_resources.Get(FrameTarget::RaytraceReflections);
             deferred_input.shadow_mask_array = resolved_shadow_mask_array;
 
             DeferredLightingPassOutput deferred_output{};

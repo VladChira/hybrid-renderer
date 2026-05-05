@@ -25,13 +25,15 @@ namespace hybrid::ui
             const char *label;
         };
 
-        constexpr std::array<TargetEntry, 6> kTargets = {{
+        constexpr std::array<TargetEntry, 8> kTargets = {{
             {"Final color",            UiViewportVisualization::FinalColor},
             {"G-buffer RT0 (albedo+metallic)", UiViewportVisualization::GBufferRt0},
             {"G-buffer RT1 (normal+roughness)", UiViewportVisualization::GBufferRt1},
             {"G-buffer depth",         UiViewportVisualization::GBufferDepth},
             {"G-buffer entity id",     UiViewportVisualization::GBufferEntityId},
             {"BVH traversal heatmap",  UiViewportVisualization::RaytraceHeatmap},
+            {"RT primary albedo",      UiViewportVisualization::RaytracePrimaryAlbedo},
+            {"RT reflections",         UiViewportVisualization::RaytraceReflections},
         }};
 
         constexpr std::array<ChannelEntry, 6> kChannels = {{
@@ -81,6 +83,8 @@ namespace hybrid::ui
             case UiViewportVisualization::GBufferDepth:    return state.viewport_gbuffer_depth_texture;
             case UiViewportVisualization::GBufferEntityId: return state.viewport_entity_id_texture;
             case UiViewportVisualization::RaytraceHeatmap: return state.viewport_raytrace_heatmap_texture;
+            case UiViewportVisualization::RaytracePrimaryAlbedo: return state.viewport_raytrace_primary_albedo_texture;
+            case UiViewportVisualization::RaytraceReflections: return state.viewport_raytrace_reflections_texture;
             }
             return 0;
         }

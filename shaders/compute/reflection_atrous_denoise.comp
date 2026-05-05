@@ -1,0 +1,86 @@
+#version 460 core
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba16f, binding = 0) uniform writeonly image2D o_filtered;
+
+uniform sampler2D u_input_signal;
+uniform sampler2D u_gbuffer_rt1;
+uniform sampler2D u_gbuffer_depth;
+
+uniform uvec2 u_output_size;
+uniform int u_stepwidth;
+uniform float u_c_phi;
+uniform float u_n_phi;
+uniform float u_p_phi;
+
+const int kKernelSize = 9;
+const float kKernel[kKernelSize] = float[](
+    1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0,
+    1.0 / 8.0,  1.0 / 4.0, 1.0 / 8.0,
+    1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0
+);
+const ivec2 kOffset[kKernelSize] = ivec2[](
+    ivec2(-1, -1), ivec2( 0, -1), ivec2( 1, -1),
+    ivec2(-1,  0), ivec2( 0,  0), ivec2( 1,  0),
+    ivec2(-1,  1), ivec2( 0,  1), ivec2( 1,  1)
+);
+
+float Luminance(vec3 color)
+{
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+
+    vec4 center = texelFetch(u_input_signal, pixel, 0);
+    float depth_center = texelFetch(u_gbuffer_depth, pixel, 0).r;
+    if (depth_center >= 1.0)
+    {
+        imageStore(o_filtered, pixel, vec4(0.0));
+        return;
+    }
+
+    vec3 normal_center = normalize(texelFetch(u_gbuffer_rt1, pixel, 0).xyz * 2.0 - 1.0);
+    ivec2 max_coord = ivec2(u_output_size) - ivec2(1);
+
+    vec3 sum = vec3(0.0);
+    float cum_w = 0.0;
+    float center_luma = Luminance(center.rgb);
+
+    for (int i = 0; i < kKernelSize; ++i)
+    {
+        ivec2 sample_coord = clamp(pixel + kOffset[i] * u_stepwidth, ivec2(0), max_coord);
+        float depth_sample = texelFetch(u_gbuffer_depth, sample_coord, 0).r;
+        if (depth_sample >= 1.0)
+        {
+            continue;
+        }
+
+        vec3 normal_sample = normalize(texelFetch(u_gbuffer_rt1, sample_coord, 0).xyz * 2.0 - 1.0);
+        float n_w = max(dot(normal_center, normal_sample), 0.0);
+        if (n_w < 1e-3)
+        {
+            continue;
+        }
+
+        vec3 value = texelFetch(u_input_signal, sample_coord, 0).rgb;
+        float sample_luma = Luminance(value);
+        float c_diff = center_luma - sample_luma;
+        float c_w = max(1.0 - (c_diff * c_diff) / max(u_c_phi, 1e-6), 0.0);
+        float p_w = max(1.0 - abs(depth_center - depth_sample) / max(u_p_phi, 1e-6), 0.0);
+        float weight = c_w * p_w * pow(n_w, max(u_n_phi, 1.0)) * kKernel[i];
+
+        sum += value * weight;
+        cum_w += weight;
+    }
+
+    vec3 filtered = (cum_w > 1e-6) ? (sum / cum_w) : center.rgb;
+    imageStore(o_filtered, pixel, vec4(filtered, 1.0));
+}

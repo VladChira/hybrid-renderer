@@ -75,6 +75,7 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_prefiltered_env_cubemap", 5);
         m_deferred_shader->SetUniform1i("u_brdf_lut", 6);
         m_deferred_shader->SetUniform1i("u_shadow_mask_array", 7);
+        m_deferred_shader->SetUniform1i("u_reflection_texture", 8);
         m_deferred_shader->SetUniformMat4("u_inv_view", glm::affineInverse(effective_view.view));
         m_deferred_shader->SetUniformMat4("u_inv_projection", glm::inverse(effective_view.projection));
         m_deferred_shader->SetUniformVec3("u_camera_position", effective_view.position);
@@ -97,6 +98,8 @@ namespace hybrid::renderer
         m_deferred_shader->SetUniform1i("u_has_irradiance", has_irradiance_cubemap ? 1 : 0);
         m_deferred_shader->SetUniform1i("u_has_prefiltered_env", has_prefiltered_env_cubemap ? 1 : 0);
         m_deferred_shader->SetUniform1i("u_has_specular_ibl", has_specular_ibl ? 1 : 0);
+        m_deferred_shader->SetUniform1i("u_has_ray_traced_reflections",
+                                        (settings.enable_ray_traced_reflections && input.reflection_texture != 0) ? 1 : 0);
         m_deferred_shader->SetUniform1f("u_skybox_intensity", input.skybox_intensity);
         m_deferred_shader->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
         m_deferred_shader->SetUniform1f("u_env_shadow_layer",
@@ -127,12 +130,16 @@ namespace hybrid::renderer
 
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, input.shadow_mask_array);
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, input.reflection_texture);
 
         m_impl->fullscreen_vao.Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
         glActiveTexture(GL_TEXTURE6);

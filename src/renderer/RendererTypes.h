@@ -62,16 +62,25 @@ namespace hybrid::renderer
         bool show_bounds = false;
 
         bool compute_bvh_heatmap = false;
+        bool compute_ray_traced_primary_albedo = false;
         float bvh_heatmap_scale = 256.0f;
         bool enable_ray_traced_shadows = true;
+        bool enable_ray_traced_reflections = true;
         bool enable_ray_traced_hdri_visibility = false; // Experimental brute-force env visibility (1 spp).
         float raytrace_shadow_normal_bias = 0.02f;
+        float raytrace_reflection_normal_bias = 0.02f;
         bool enable_shadow_denoise = true;
+        bool enable_reflection_denoise = true;
         float shadow_denoise_temporal_alpha = 0.9f;
         uint32_t shadow_denoise_atrous_iterations = 3;
         float shadow_denoise_c_phi = 0.15f;
         float shadow_denoise_n_phi = 32.0f;
         float shadow_denoise_p_phi = 0.02f;
+        float reflection_denoise_temporal_alpha = 0.92f;
+        uint32_t reflection_denoise_atrous_iterations = 4;
+        float reflection_denoise_c_phi = 8.0f;
+        float reflection_denoise_n_phi = 32.0f;
+        float reflection_denoise_p_phi = 0.02f;
 
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;
@@ -203,6 +212,8 @@ namespace hybrid::renderer
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;
+        GlTextureId raytrace_primary_albedo = 0;
+        GlTextureId raytrace_reflections = 0;
         GlTextureId raytrace_heatmap = 0;
         RenderChannelOutputs color_channels{};
         RenderChannelOutputs gbuffer_rt0_channels{};

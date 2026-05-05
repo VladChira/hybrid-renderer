@@ -86,6 +86,11 @@ namespace hybrid::ui
             MarkEdited();
         }
 
+        if (ImGui::Checkbox("Enable Ray-Traced Reflections", &m_pending_render_settings.enable_ray_traced_reflections))
+        {
+            MarkEdited();
+        }
+
         if (m_pending_render_settings.enable_ray_traced_shadows)
         {
             if (ImGui::SliderFloat("Shadow Normal Bias",
@@ -148,6 +153,51 @@ namespace hybrid::ui
             {
                 MarkEdited();
             }
+        }
+
+        if (m_pending_render_settings.enable_ray_traced_reflections)
+        {
+            if (ImGui::SliderFloat("Reflection Normal Bias",
+                                   &m_pending_render_settings.raytrace_reflection_normal_bias,
+                                   0.0001f,
+                                   0.2f,
+                                   "%.5f",
+                                   ImGuiSliderFlags_Logarithmic))
+            {
+                MarkEdited();
+            }
+
+            if (ImGui::Checkbox("Denoise Reflections (Spatio-Temporal)",
+                                &m_pending_render_settings.enable_reflection_denoise))
+            {
+                MarkEdited();
+            }
+
+            if (m_pending_render_settings.enable_reflection_denoise)
+            {
+                if (ImGui::SliderFloat("Reflection Temporal Alpha",
+                                       &m_pending_render_settings.reflection_denoise_temporal_alpha,
+                                       0.0f,
+                                       0.99f,
+                                       "%.3f"))
+                {
+                    MarkEdited();
+                }
+
+                int reflection_atrous_iterations =
+                    static_cast<int>(m_pending_render_settings.reflection_denoise_atrous_iterations);
+                if (ImGui::SliderInt("Reflection A-Trous Iterations", &reflection_atrous_iterations, 0, 6))
+                {
+                    m_pending_render_settings.reflection_denoise_atrous_iterations =
+                        static_cast<uint32_t>(reflection_atrous_iterations);
+                    MarkEdited();
+                }
+            }
+        }
+
+        if (ImGui::Checkbox("Compute RT Primary Albedo", &m_pending_render_settings.compute_ray_traced_primary_albedo))
+        {
+            MarkEdited();
         }
 
         ImGui::Separator();
