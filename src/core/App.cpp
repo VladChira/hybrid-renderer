@@ -312,7 +312,10 @@ namespace hybrid::core
                 }
             }
 
-            platform.SwapBuffers();
+            {
+                HYBRID_PROFILE_ZONE_N("App::SwapBuffers");
+                platform.SwapBuffers();
+            }
             HYBRID_PROFILE_FRAME();
         }
     }

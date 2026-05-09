@@ -751,7 +751,10 @@ namespace hybrid::renderer
         }
 
         m_impl->backend.EndFrame();
-        HYBRID_PROFILE_GL_COLLECT();
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::TracyGpuCollect");
+            HYBRID_PROFILE_GL_COLLECT();
+        }
 
         const auto frame_end = std::chrono::steady_clock::now();
         m_impl->stats.cpu_frame_ms =
