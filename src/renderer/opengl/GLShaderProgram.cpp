@@ -148,6 +148,8 @@ namespace hybrid::renderer
 
     void GLShaderProgram::Destroy()
     {
+        m_uniform_location_cache.clear();
+
         if (m_id == 0)
         {
             return;
@@ -169,7 +171,19 @@ namespace hybrid::renderer
 
     GLint GLShaderProgram::GetUniformLocation(const char *name) const
     {
-        return glGetUniformLocation(m_id, name);
+        if (name == nullptr || m_id == 0)
+        {
+            return -1;
+        }
+
+        if (const auto it = m_uniform_location_cache.find(name); it != m_uniform_location_cache.end())
+        {
+            return it->second;
+        }
+
+        const GLint location = glGetUniformLocation(m_id, name);
+        m_uniform_location_cache.emplace(name, location);
+        return location;
     }
 
     void GLShaderProgram::SetUniform1i(const char *name, GLint value) const

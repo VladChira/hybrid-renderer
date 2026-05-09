@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_map>
 #include <string>
 #include <string_view>
 
@@ -48,6 +49,7 @@ namespace hybrid::renderer
         static std::string GetProgramInfoLog(GLuint program);
 
         GLuint m_id = 0;
+        mutable std::unordered_map<std::string, GLint> m_uniform_location_cache;
     };
 
 } // namespace hybrid::renderer
