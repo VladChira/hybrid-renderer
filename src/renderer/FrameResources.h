@@ -41,7 +41,14 @@ namespace hybrid::renderer
         // Copies of the previous frame's gbuffer used by the temporal
         // accumulation pass for disocclusion-aware history rejection.
         PrevGBufferDepth,
-        PrevGBufferRt1
+        PrevGBufferRt1,
+
+        // Raytraced reflection radiance and denoising temporaries (rgba16f).
+        RaytraceReflectionRadiance,
+        RaytraceReflectionHistoryA,
+        RaytraceReflectionHistoryB,
+        RaytraceReflectionAtrousPing,
+        RaytraceReflectionAtrousPong,
     };
 
     enum class FrameFramebuffer
@@ -107,6 +114,12 @@ namespace hybrid::renderer
         GLTexture m_raytrace_shadow_atrous_pong{};
         GLTexture m_prev_gbuffer_depth{};
         GLTexture m_prev_gbuffer_rt1{};
+
+        GLTexture m_raytrace_reflection_radiance{};
+        GLTexture m_raytrace_reflection_history_a{};
+        GLTexture m_raytrace_reflection_history_b{};
+        GLTexture m_raytrace_reflection_atrous_ping{};
+        GLTexture m_raytrace_reflection_atrous_pong{};
     };
 
 } // namespace hybrid::renderer

@@ -83,6 +83,11 @@ namespace hybrid::renderer
         m_raytrace_shadow_atrous_pong.Destroy();
         m_prev_gbuffer_depth.Destroy();
         m_prev_gbuffer_rt1.Destroy();
+        m_raytrace_reflection_radiance.Destroy();
+        m_raytrace_reflection_history_a.Destroy();
+        m_raytrace_reflection_history_b.Destroy();
+        m_raytrace_reflection_atrous_ping.Destroy();
+        m_raytrace_reflection_atrous_pong.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -150,6 +155,16 @@ namespace hybrid::renderer
             return m_prev_gbuffer_depth.Id();
         case FrameTarget::PrevGBufferRt1:
             return m_prev_gbuffer_rt1.Id();
+        case FrameTarget::RaytraceReflectionRadiance:
+            return m_raytrace_reflection_radiance.Id();
+        case FrameTarget::RaytraceReflectionHistoryA:
+            return m_raytrace_reflection_history_a.Id();
+        case FrameTarget::RaytraceReflectionHistoryB:
+            return m_raytrace_reflection_history_b.Id();
+        case FrameTarget::RaytraceReflectionAtrousPing:
+            return m_raytrace_reflection_atrous_ping.Id();
+        case FrameTarget::RaytraceReflectionAtrousPong:
+            return m_raytrace_reflection_atrous_pong.Id();
         default:
             return 0;
         }
@@ -527,6 +542,38 @@ namespace hybrid::renderer
                                       GL_RGBA,
                                       GL_HALF_FLOAT,
                                       nullptr);
+
+        // Reflection radiance and denoising temporaries — all rgba16f, 2D (not arrayed).
+        auto allocate_rgba16f = [extent](GLTexture &texture, const char *label) -> bool
+        {
+            if (!texture.IsValid() && !texture.Create(GL_TEXTURE_2D))
+            {
+                LOG_ERROR("[FrameResources] Failed to create {}", label);
+                return false;
+            }
+            texture.Bind();
+            texture.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            texture.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            texture.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            texture.SetImage2D(0,
+                               GL_RGBA16F,
+                               static_cast<GLsizei>(extent.width),
+                               static_cast<GLsizei>(extent.height),
+                               GL_RGBA,
+                               GL_HALF_FLOAT,
+                               nullptr);
+            return true;
+        };
+
+        if (!allocate_rgba16f(m_raytrace_reflection_radiance,  "raytrace reflection radiance texture")  ||
+            !allocate_rgba16f(m_raytrace_reflection_history_a, "raytrace reflection history A texture") ||
+            !allocate_rgba16f(m_raytrace_reflection_history_b, "raytrace reflection history B texture") ||
+            !allocate_rgba16f(m_raytrace_reflection_atrous_ping, "raytrace reflection atrous ping texture") ||
+            !allocate_rgba16f(m_raytrace_reflection_atrous_pong, "raytrace reflection atrous pong texture"))
+        {
+            return false;
+        }
 
         return true;
     }

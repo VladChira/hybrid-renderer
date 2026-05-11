@@ -73,6 +73,15 @@ namespace hybrid::renderer
         float shadow_denoise_n_phi = 32.0f;
         float shadow_denoise_p_phi = 0.02f;
 
+        bool enable_ray_traced_reflections        = false;
+        float raytrace_reflection_normal_bias     = 0.005f;
+        bool enable_reflection_denoise            = true;
+        float reflection_denoise_temporal_alpha   = 0.9f;
+        uint32_t reflection_denoise_atrous_iterations = 3;
+        float reflection_denoise_c_phi            = 0.15f;
+        float reflection_denoise_n_phi            = 32.0f;
+        float reflection_denoise_p_phi            = 0.02f;
+
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;
         float legacy_curve_strength = 1.0f;

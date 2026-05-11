@@ -28,6 +28,10 @@ namespace hybrid::renderer
         float skybox_yaw_radians = 0.0f;
 
         GlTextureId shadow_mask_array = 0;
+
+        // Optional raytraced reflection radiance. When non-zero the deferred
+        // shader uses this instead of the IBL specular term.
+        GlTextureId reflection_radiance = 0;
     };
 
     struct DeferredLightingPassOutput

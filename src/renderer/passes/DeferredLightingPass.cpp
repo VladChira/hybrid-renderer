@@ -128,11 +128,18 @@ namespace hybrid::renderer
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, input.shadow_mask_array);
 
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, input.reflection_radiance != 0 ? input.reflection_radiance : 0);
+        m_deferred_shader->SetUniform1i("u_reflection_radiance",     8);
+        m_deferred_shader->SetUniform1i("u_has_reflection_radiance", input.reflection_radiance != 0 ? 1 : 0);
+
         m_impl->fullscreen_vao.Bind();
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
         glActiveTexture(GL_TEXTURE6);

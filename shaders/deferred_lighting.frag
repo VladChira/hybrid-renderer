@@ -30,6 +30,9 @@ uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 uniform float u_env_shadow_layer;
 
+uniform sampler2D u_reflection_radiance;
+uniform int u_has_reflection_radiance;
+
 uniform uint u_directional_light_count;
 uniform uint u_point_light_count;
 uniform uint u_area_light_count;
@@ -410,7 +413,7 @@ void main()
         ambient += kD_ibl * diffuse_ibl * env_visibility;
     }
 
-    if (u_has_specular_ibl != 0)
+    if (u_has_specular_ibl != 0 && u_has_reflection_radiance == 0)
     {
         vec3 R = reflect(-V, normal);
         vec3 reflection_direction = RotateAroundY(R, u_skybox_yaw_radians);
@@ -421,6 +424,11 @@ void main()
         vec2 env_brdf = texture(u_brdf_lut, vec2(ndotv, roughness)).rg;
         vec3 specular_ibl = prefiltered_color * (F_ibl * env_brdf.x + env_brdf.y);
         ambient += specular_ibl * env_visibility;
+    }
+
+    if (u_has_reflection_radiance != 0)
+    {
+        ambient += texture(u_reflection_radiance, v_uv).rgb;
     }
 
     vec3 color = ambient + Lo;
