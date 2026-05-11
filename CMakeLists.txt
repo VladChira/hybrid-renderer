@@ -205,6 +205,8 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/raytracing/AccelerationStructureCache.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/passes/RayTracedShadowPass.cpp
+  src/renderer/passes/RayTracedReflectionPass.cpp
+  src/renderer/passes/ReflectionDenoisePass.cpp
   src/renderer/passes/SpatioTemporalDenoisePass.cpp
 
   src/ui/panels/AccelerationStructurePanel.cpp
