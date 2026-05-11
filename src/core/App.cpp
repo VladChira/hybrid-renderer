@@ -251,6 +251,7 @@ namespace hybrid::core
                 ui_state.viewport_gbuffer_rt1_channels.b = renderer_outputs.gbuffer_rt1_channels.b;
                 ui_state.viewport_gbuffer_rt1_channels.a = renderer_outputs.gbuffer_rt1_channels.a;
                 ui_state.viewport_raytrace_heatmap_texture = renderer_outputs.raytrace_heatmap;
+                ui_state.viewport_reflection_radiance_texture = renderer_outputs.reflection_radiance;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
                 ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
                 ui_state.viewport_render_extent = frame_context.render_extent;

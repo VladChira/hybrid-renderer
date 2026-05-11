@@ -24,7 +24,8 @@ namespace hybrid::ui
         GBufferRt1 = 2,
         GBufferDepth = 3,
         GBufferEntityId = 4,
-        RaytraceHeatmap = 5
+        RaytraceHeatmap = 5,
+        RaytraceReflectionRadiance = 6
     };
 
     struct UiMaterialEntry
@@ -84,6 +85,7 @@ namespace hybrid::ui
         uint64_t viewport_entity_id_texture = 0;
         uint64_t viewport_gbuffer_depth_texture = 0;
         uint64_t viewport_raytrace_heatmap_texture = 0;
+        uint64_t viewport_reflection_radiance_texture = 0;
         
         UiViewportVisualization viewport_visualization = UiViewportVisualization::FinalColor;
         renderer::RenderExtent viewport_render_extent{};

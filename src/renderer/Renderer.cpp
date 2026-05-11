@@ -824,6 +824,7 @@ namespace hybrid::renderer
             m_impl->reflection_history_valid = false;
             m_impl->reflection_history_prev_is_a = true;
         }
+        m_impl->outputs.reflection_radiance = resolved_reflection;
 
         if (m_impl->submitted_settings.mode == RenderMode::Lit && m_impl->deferred_lighting_pass)
         {

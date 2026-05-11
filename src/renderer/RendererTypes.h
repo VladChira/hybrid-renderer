@@ -213,6 +213,7 @@ namespace hybrid::renderer
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;
         GlTextureId raytrace_heatmap = 0;
+        GlTextureId reflection_radiance = 0;
         RenderChannelOutputs color_channels{};
         RenderChannelOutputs gbuffer_rt0_channels{};
         RenderChannelOutputs gbuffer_rt1_channels{};
