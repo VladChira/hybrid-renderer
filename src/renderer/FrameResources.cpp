@@ -88,6 +88,7 @@ namespace hybrid::renderer
         m_raytrace_reflection_history_b.Destroy();
         m_raytrace_reflection_atrous_ping.Destroy();
         m_raytrace_reflection_atrous_pong.Destroy();
+        m_shadow_debug_occlusion.Destroy();
         m_debug_channel_extract_framebuffer.Destroy();
         m_extent = {};
         m_valid = false;
@@ -165,6 +166,8 @@ namespace hybrid::renderer
             return m_raytrace_reflection_atrous_ping.Id();
         case FrameTarget::RaytraceReflectionAtrousPong:
             return m_raytrace_reflection_atrous_pong.Id();
+        case FrameTarget::ShadowDebugOcclusion:
+            return m_shadow_debug_occlusion.Id();
         default:
             return 0;
         }
@@ -574,6 +577,25 @@ namespace hybrid::renderer
         {
             return false;
         }
+
+        // Single-channel R8 texture for shadow mask debug visualization.
+        if (!m_shadow_debug_occlusion.IsValid() && !m_shadow_debug_occlusion.Create(GL_TEXTURE_2D))
+        {
+            LOG_ERROR("[FrameResources] Failed to create shadow debug occlusion texture");
+            return false;
+        }
+        m_shadow_debug_occlusion.Bind();
+        m_shadow_debug_occlusion.SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        m_shadow_debug_occlusion.SetParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_shadow_debug_occlusion.SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        m_shadow_debug_occlusion.SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_shadow_debug_occlusion.SetImage2D(0,
+                                            GL_R8,
+                                            static_cast<GLsizei>(extent.width),
+                                            static_cast<GLsizei>(extent.height),
+                                            GL_RED,
+                                            GL_UNSIGNED_BYTE,
+                                            nullptr);
 
         return true;
     }

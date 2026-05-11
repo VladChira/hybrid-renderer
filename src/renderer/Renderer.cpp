@@ -23,6 +23,7 @@
 #include "renderer/passes/SpatioTemporalDenoisePass.h"
 #include "renderer/passes/RayTracedReflectionPass.h"
 #include "renderer/passes/ReflectionDenoisePass.h"
+#include "renderer/passes/ShadowMaskReducePass.h"
 
 #include <array>
 #include <chrono>
@@ -83,6 +84,7 @@ namespace hybrid::renderer
         GLShaderProgram raytrace_reflection_shader{};
         GLShaderProgram reflection_temporal_shader{};
         GLShaderProgram reflection_atrous_shader{};
+        GLShaderProgram shadow_mask_reduce_shader{};
         FrameResources frame_resources{};
         OpenGLRenderBackend backend{};
         GeometryStore geometry_store{};
@@ -100,6 +102,7 @@ namespace hybrid::renderer
         std::unique_ptr<SpatioTemporalDenoisePass> shadow_denoise_pass{};
         std::unique_ptr<RayTracedReflectionPass> raytrace_reflection_pass{};
         std::unique_ptr<ReflectionDenoisePass> reflection_denoise_pass{};
+        std::unique_ptr<ShadowMaskReducePass> shadow_mask_reduce_pass{};
         SceneFrameCache scene_frame_cache{};
 
         FrameContext frame_context{};
@@ -273,6 +276,13 @@ namespace hybrid::renderer
             return false;
         }
 
+        if (!m_impl->shader_manager.CompileComputeProgramFromFile("compute/shadow_mask_reduce.comp",
+                                                                  m_impl->shadow_mask_reduce_shader))
+        {
+            LOG_ERROR("[Renderer] Init failed: shadow mask reduce compute program build failed");
+            return false;
+        }
+
         if (!m_impl->geometry_store.Init())
         {
             LOG_ERROR("[Renderer] Init failed: geometry store initialization failed");
@@ -319,6 +329,7 @@ namespace hybrid::renderer
                                                                                       &m_impl->as_cache);
         m_impl->reflection_denoise_pass = std::make_unique<ReflectionDenoisePass>(&m_impl->reflection_temporal_shader,
                                                                                    &m_impl->reflection_atrous_shader);
+        m_impl->shadow_mask_reduce_pass = std::make_unique<ShadowMaskReducePass>(&m_impl->shadow_mask_reduce_shader);
 
         LOG_INFO("[Renderer] Current rendering passes:");
         LOG_INFO("[Renderer] \t - Hdri Precompute pass [OpenGL Raster]");
@@ -381,12 +392,14 @@ namespace hybrid::renderer
         m_impl->raytrace_reflection_shader.Destroy();
         m_impl->reflection_temporal_shader.Destroy();
         m_impl->reflection_atrous_shader.Destroy();
+        m_impl->shadow_mask_reduce_shader.Destroy();
         m_impl->frame_resources.Reset();
         m_impl->traversal_heatmap_pass.reset();
         m_impl->raytrace_shadow_pass.reset();
         m_impl->shadow_denoise_pass.reset();
         m_impl->raytrace_reflection_pass.reset();
         m_impl->reflection_denoise_pass.reset();
+        m_impl->shadow_mask_reduce_pass.reset();
         m_impl->current_extent = {};
         m_impl->submitted_scene_world = nullptr;
         m_impl->submitted_view = {};
@@ -716,6 +729,20 @@ namespace hybrid::renderer
             m_impl->shadow_history_valid = false;
             m_impl->shadow_history_prev_is_a = true;
         }
+
+        if (m_impl->shadow_mask_reduce_pass != nullptr)
+        {
+            HYBRID_PROFILE_ZONE_N("Renderer::ShadowMaskReducePass");
+            ShadowMaskReducePassInput reduce_input{};
+            reduce_input.shadow_mask_array = resolved_shadow_mask_array;
+            reduce_input.occlusion_out     = m_impl->frame_resources.Get(FrameTarget::ShadowDebugOcclusion);
+            reduce_input.extent            = m_impl->submitted_settings.render_extent;
+            if (!m_impl->shadow_mask_reduce_pass->Execute(reduce_input))
+            {
+                LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->shadow_mask_reduce_pass->Name());
+            }
+        }
+        m_impl->outputs.shadow_debug_occlusion = m_impl->frame_resources.Get(FrameTarget::ShadowDebugOcclusion);
 
         // Precompute any new/stale HDRIs here before we shade.
         HdriPrecomputePassOutput hdri_output{};

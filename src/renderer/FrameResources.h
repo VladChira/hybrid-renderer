@@ -49,6 +49,9 @@ namespace hybrid::renderer
         RaytraceReflectionHistoryB,
         RaytraceReflectionAtrousPing,
         RaytraceReflectionAtrousPong,
+
+        // Product-reduced shadow occlusion for debug visualization.
+        ShadowDebugOcclusion,
     };
 
     enum class FrameFramebuffer
@@ -120,6 +123,8 @@ namespace hybrid::renderer
         GLTexture m_raytrace_reflection_history_b{};
         GLTexture m_raytrace_reflection_atrous_ping{};
         GLTexture m_raytrace_reflection_atrous_pong{};
+
+        GLTexture m_shadow_debug_occlusion{};
     };
 
 } // namespace hybrid::renderer
