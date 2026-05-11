@@ -111,7 +111,8 @@ namespace hybrid::renderer
 
         m_program->SetUniform1ui("u_tlas_node_count", m_as_cache->Stats().tlas_nodes);
         m_program->SetUniform1ui("u_frame_index",     input.frame_index);
-        m_program->SetUniform1f("u_normal_bias",      settings.raytrace_reflection_normal_bias);
+        m_program->SetUniform1f("u_normal_bias",                   settings.raytrace_reflection_normal_bias);
+        m_program->SetUniform1f("u_secondary_irradiance_scale",    settings.reflection_secondary_irradiance_scale);
 
         const GLint output_size_loc = m_program->GetUniformLocation("u_output_size");
         if (output_size_loc >= 0)

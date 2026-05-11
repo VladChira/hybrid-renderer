@@ -75,6 +75,7 @@ namespace hybrid::renderer
 
         bool enable_ray_traced_reflections        = false;
         float raytrace_reflection_normal_bias     = 0.005f;
+        float reflection_secondary_irradiance_scale = 0.3f;
         bool enable_reflection_denoise            = true;
         float reflection_denoise_temporal_alpha   = 0.9f;
         uint32_t reflection_denoise_atrous_iterations = 3;

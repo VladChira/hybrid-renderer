@@ -152,6 +152,15 @@ namespace hybrid::ui
                 MarkEdited();
             }
 
+            if (ImGui::SliderFloat("Secondary Irradiance Scale",
+                                   &m_pending_render_settings.reflection_secondary_irradiance_scale,
+                                   0.0f,
+                                   1.0f,
+                                   "%.3f"))
+            {
+                MarkEdited();
+            }
+
             if (ImGui::Checkbox("Denoise Reflections (Spatio-Temporal)",
                                 &m_pending_render_settings.enable_reflection_denoise))
             {
