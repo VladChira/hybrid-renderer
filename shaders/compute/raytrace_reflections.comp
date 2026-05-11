@@ -1,9 +1,9 @@
 #version 460 core
 #extension GL_ARB_bindless_texture : require
 
-// One-sample GGX-importance-sampled reflection pass.
+// Two-sample GGX-importance-sampled reflection pass.
 // H is drawn from the GGX NDF so the D term cancels in the MC weight,
-// leaving weight = F·G·hdotv / (ndoth·ndotv) — bounded even at roughness→0
+// leaving weight = F*G*hdotv / (ndoth*ndotv), bounded even at roughness->0
 // where the distribution collapses to a delta (pure mirror).
 // Downstream temporal + A-Trous filtering stabilises the result.
 
@@ -39,10 +39,10 @@ uniform int   u_has_specular_ibl;
 uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 
-const float kMaxReflectionLod    = 7.0;
-const uint  kMaxTransparentLayers = 8u;
-const float kPi                  = 3.14159265359;
-const float kRadianceClamp       = 32.0;
+const float kMaxReflectionLod         = 7.0;
+const uint  kReflectionSamplesPerPixel = 5u;
+const float kPi                       = 3.14159265359;
+const float kRadianceClamp            = 32.0;
 
 vec3 ReconstructWorldPosition(vec2 uv, float depth)
 {
@@ -169,66 +169,58 @@ void main()
         return;
     }
 
-    // GGX importance sampling: draw H from the GGX NDF via CDF inversion.
-    // For roughness→0 this collapses to H=N, L=reflect(-V,N) (pure mirror).
-    vec2  Xi    = Hash2PerPixel(pixel, u_frame_index, 1u);
     float alpha = roughness * roughness;
-    float phi   = 2.0 * kPi * Xi.x;
+    vec3  up      = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3  tangent = normalize(cross(up, normal));
+    vec3  bitan   = cross(normal, tangent);
+    vec3  F0      = mix(vec3(0.04), albedo, metallic);
+    vec3  reflection = vec3(0.0);
 
-    float cos_theta = sqrt((1.0 - Xi.y) / max(1.0 + (alpha * alpha - 1.0) * Xi.y, 1e-7));
-    float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
-    vec3  H_local   = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
-
-    vec3 up      = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(up, normal));
-    vec3 bitan   = cross(normal, tangent);
-    vec3 H       = normalize(tangent * H_local.x + bitan * H_local.y + normal * H_local.z);
-    vec3 L       = normalize(reflect(-V, H));
-
-    float ndotl = max(dot(normal, L), 0.0);
-    float ndoth = max(dot(normal, H), 0.0);
-    float hdotv = max(dot(H, V),      0.0);
-
-    if (ndotl <= 1e-4 || hdotv <= 1e-4)
+    for (uint sample_index = 0u; sample_index < kReflectionSamplesPerPixel; ++sample_index)
     {
-        imageStore(o_reflection_radiance, pixel, vec4(0.0));
-        return;
-    }
+        // GGX importance sampling: draw H from the GGX NDF via CDF inversion.
+        // For roughness->0 this collapses to H=N, L=reflect(-V,N) (pure mirror).
+        vec2  Xi    = Hash2PerPixel(pixel, u_frame_index, sample_index + 1u);
+        float phi   = 2.0 * kPi * Xi.x;
 
-    vec3 F0      = mix(vec3(0.04), albedo, metallic);
-    vec3 ray_origin = world_pos + normal * u_normal_bias + L * u_normal_bias;
+        float cos_theta = sqrt((1.0 - Xi.y) / max(1.0 + (alpha * alpha - 1.0) * Xi.y, 1e-7));
+        float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+        vec3  H_local   = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
 
-    // Default to environment in the sampled direction.
-    vec3 incident_radiance = SampleEnvironment(L, 0.0);
+        vec3 H = normalize(tangent * H_local.x + bitan * H_local.y + normal * H_local.z);
+        vec3 L = normalize(reflect(-V, H));
 
-    for (uint layer = 0u; layer < kMaxTransparentLayers; ++layer)
-    {
-        RayHit hit;
-        if (!TraceClosestHit(ray_origin, L, u_tlas_node_count, 1e30, hit))
+        float ndotl = max(dot(normal, L), 0.0);
+        float ndoth = max(dot(normal, H), 0.0);
+        float hdotv = max(dot(H, V), 0.0);
+        if (ndotl <= 1e-4 || hdotv <= 1e-4)
         {
-            break;
-        }
-
-        HitGeometry geo = FetchHitGeometry(hit, ray_origin, L);
-        if (!PassesAlphaTest(geo.material_index, geo.uv0, geo.uv1))
-        {
-            ray_origin = geo.world_position + L * u_normal_bias;
             continue;
         }
 
-        ShadedSurface surface = FetchSurface(geo.material_index, geo.uv0, geo.uv1);
-        incident_radiance     = ShadeHit(geo, surface, -L);
-        break;
+        vec3 ray_origin = world_pos + normal * u_normal_bias + L * u_normal_bias;
+
+        // Default to environment in the sampled direction.
+        vec3 incident_radiance = SampleEnvironment(L, 0.0);
+
+        RayHit hit;
+        if (TraceClosestHit(ray_origin, L, u_tlas_node_count, 1e30, hit))
+        {
+            HitGeometry geo = FetchHitGeometry(hit, ray_origin, L);
+            ShadedSurface surface = FetchSurface(geo.material_index, geo.uv0, geo.uv1);
+            incident_radiance     = ShadeHit(geo, surface, -L);
+        }
+
+        // GGX importance sampling weight.
+        // PDF(H) = D(H)*ndoth / (4*hdotv), so D cancels with the BRDF numerator:
+        // weight = BRDF * ndotl / PDF = F * G2 * hdotv / (ndoth * ndotv)
+        vec3  F      = FresnelSchlick(hdotv, F0);
+        float G      = GeometrySmithIbl(normal, V, L, roughness);
+        vec3  weight = F * G * hdotv / max(ndoth * ndotv, 1e-6);
+
+        reflection += clamp(incident_radiance * weight, 0.0, kRadianceClamp);
     }
 
-    // GGX importance sampling weight.
-    // PDF(H) = D(H)*ndoth / (4*hdotv)  →  D cancels with the BRDF numerator:
-    // weight = BRDF * ndotl / PDF = F * G2 * hdotv / (ndoth * ndotv)
-    vec3  F = FresnelSchlick(hdotv, F0);
-    float G = GeometrySmithIbl(normal, V, L, roughness);
-
-    vec3 weight = F * G * hdotv / max(ndoth * ndotv, 1e-6);
-
-    vec3 reflection = clamp(incident_radiance * weight, 0.0, kRadianceClamp);
+    reflection /= float(kReflectionSamplesPerPixel);
     imageStore(o_reflection_radiance, pixel, vec4(reflection, 1.0));
 }
