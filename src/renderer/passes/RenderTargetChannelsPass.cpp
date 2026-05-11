@@ -50,9 +50,12 @@ namespace hybrid::renderer
             m_impl == nullptr ||
             !input.extent.IsValid() ||
             input.debug_framebuffer_id == 0 ||
+            input.effective_view == nullptr ||
             input.source_color == 0 ||
             input.source_gbuffer_rt0 == 0 ||
             input.source_gbuffer_rt1 == 0 ||
+            input.source_gbuffer_depth == 0 ||
+            input.out_gbuffer_depth_linear == 0 ||
             !HasAllChannels(input.out_color_channels) ||
             !HasAllChannels(input.out_gbuffer_rt0_channels) ||
             !HasAllChannels(input.out_gbuffer_rt1_channels))
@@ -85,6 +88,9 @@ namespace hybrid::renderer
 
         m_extract_shader->Use();
         m_extract_shader->SetUniform1i("u_source_texture", 0);
+        m_extract_shader->SetUniform1i("u_output_mode", 0);
+        m_extract_shader->SetUniform1f("u_depth_near_plane", input.effective_view->near_plane);
+        m_extract_shader->SetUniform1f("u_depth_far_plane", input.effective_view->far_plane);
 
         for (const ExtractionBatch &batch : batches)
         {
@@ -122,6 +128,27 @@ namespace hybrid::renderer
                 glDrawArrays(GL_TRIANGLES, 0, 3);
             }
         }
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, input.source_gbuffer_depth);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D,
+                               input.out_gbuffer_depth_linear,
+                               0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            GLShaderProgram::Unuse();
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glDepthMask(GL_TRUE);
+            GLFramebuffer::BindDefault(GL_FRAMEBUFFER);
+            return false;
+        }
+
+        m_extract_shader->SetUniform1i("u_output_mode", 1);
+        m_extract_shader->SetUniform1i("u_channel_index", 0);
+        m_impl->fullscreen_vao.Bind();
+        glDrawArrays(GL_TRIANGLES, 0, 3);
 
         GLVertexArray::Unbind();
         GLShaderProgram::Unuse();

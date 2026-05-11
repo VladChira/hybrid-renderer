@@ -135,6 +135,7 @@ target_sources(hybrid_engine PRIVATE
   src/engine/Engine.cpp
 
   src/core/App.cpp
+  src/core/FrameCaptureExporter.cpp
   src/core/Log.cpp
   src/core/PerformanceTelemetry.cpp
   src/core/ResourceMonitor.cpp

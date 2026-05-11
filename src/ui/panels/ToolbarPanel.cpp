@@ -162,6 +162,18 @@ namespace hybrid::ui
         ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
         ImGui::SameLine();
 
+        if (ImGui::Button("Save"))
+        {
+            if (context.commands != nullptr)
+            {
+                EnqueueCommand(*context.commands, SaveFrameCaptureCommand{});
+            }
+        }
+
+        ImGui::SameLine();
+        ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+        ImGui::SameLine();
+
         if (DrawToggleIconButton("##toolbar_tool_translate",
                                  "Translate Tool",
                                  active_tool == TransformTool::Translate,

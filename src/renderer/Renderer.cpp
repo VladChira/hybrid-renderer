@@ -40,6 +40,7 @@ namespace hybrid::renderer
             RendererOutputs outputs{};
             outputs.color = resources.Get(FrameTarget::SceneColor);
             outputs.depth = resources.Get(FrameTarget::GBufferDepth);
+            outputs.depth_visualization = resources.Get(FrameTarget::GBufferDepthLinear);
             outputs.gbuffer_rt0 = resources.Get(FrameTarget::GBufferRt0);
             outputs.gbuffer_rt1 = resources.Get(FrameTarget::GBufferRt1);
             outputs.gbuffer_entity_id = resources.Get(FrameTarget::GBufferEntityId);
@@ -908,12 +909,15 @@ namespace hybrid::renderer
             RenderTargetChannelsPassInput channel_input{};
             channel_input.extent = m_impl->current_extent;
             channel_input.debug_framebuffer_id = m_impl->frame_resources.GetFbo(FrameFramebuffer::DebugChannelExtract);
+            channel_input.effective_view = &m_impl->effective_view;
             channel_input.source_color = m_impl->outputs.color;
             channel_input.source_gbuffer_rt0 = m_impl->outputs.gbuffer_rt0;
             channel_input.source_gbuffer_rt1 = m_impl->outputs.gbuffer_rt1;
+            channel_input.source_gbuffer_depth = m_impl->outputs.depth;
             channel_input.out_color_channels = m_impl->outputs.color_channels;
             channel_input.out_gbuffer_rt0_channels = m_impl->outputs.gbuffer_rt0_channels;
             channel_input.out_gbuffer_rt1_channels = m_impl->outputs.gbuffer_rt1_channels;
+            channel_input.out_gbuffer_depth_linear = m_impl->outputs.depth_visualization;
             if (!m_impl->render_target_channels_pass->Execute(channel_input))
             {
                 LOG_ERROR("[Renderer] Pass '{}' failed", m_impl->render_target_channels_pass->Name());

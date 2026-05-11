@@ -210,6 +210,7 @@ namespace hybrid::renderer
     {
         GlTextureId color = 0;
         GlTextureId depth = 0;
+        GlTextureId depth_visualization = 0;
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;

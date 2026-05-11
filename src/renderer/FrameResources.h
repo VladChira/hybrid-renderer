@@ -32,6 +32,7 @@ namespace hybrid::renderer
         GBufferRt1A,
         GBufferEntityId,
         GBufferDepth,
+        GBufferDepthLinear,
         RaytraceHeatmap,
         RaytraceShadowMasks,
         RaytraceShadowHistoryA,
@@ -108,6 +109,7 @@ namespace hybrid::renderer
         GLTexture m_gbuffer_rt1_g{};
         GLTexture m_gbuffer_rt1_b{};
         GLTexture m_gbuffer_rt1_a{};
+        GLTexture m_gbuffer_depth_linear{};
 
         GLTexture m_raytrace_heatmap{};
         GLTexture m_raytrace_shadow_masks{};

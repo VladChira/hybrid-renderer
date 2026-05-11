@@ -85,6 +85,7 @@ namespace hybrid::ui
         UiChannelTextures viewport_gbuffer_rt1_channels{};
         uint64_t viewport_entity_id_texture = 0;
         uint64_t viewport_gbuffer_depth_texture = 0;
+        uint64_t viewport_gbuffer_depth_visualization_texture = 0;
         uint64_t viewport_raytrace_heatmap_texture = 0;
         uint64_t viewport_reflection_radiance_texture = 0;
         uint64_t viewport_shadow_occlusion_texture = 0;

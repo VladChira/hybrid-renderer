@@ -59,6 +59,7 @@ namespace hybrid::renderer
         m_gbuffer_rt1.Destroy();
         m_gbuffer_entity_id.Destroy();
         m_gbuffer_depth.Destroy();
+        m_gbuffer_depth_linear.Destroy();
         m_gbuffer_framebuffer.Destroy();
         m_scene_color_rgb.Destroy();
         m_scene_color_r.Destroy();
@@ -140,6 +141,8 @@ namespace hybrid::renderer
             return m_gbuffer_entity_id.Id();
         case FrameTarget::GBufferDepth:
             return m_gbuffer_depth.Id();
+        case FrameTarget::GBufferDepthLinear:
+            return m_gbuffer_depth_linear.Id();
         case FrameTarget::RaytraceHeatmap:
             return m_raytrace_heatmap.Id();
         case FrameTarget::RaytraceShadowMasks:
@@ -412,7 +415,8 @@ namespace hybrid::renderer
             !allocate_debug_texture(m_gbuffer_rt1_r, "gbuffer rt1 R channel texture") ||
             !allocate_debug_texture(m_gbuffer_rt1_g, "gbuffer rt1 G channel texture") ||
             !allocate_debug_texture(m_gbuffer_rt1_b, "gbuffer rt1 B channel texture") ||
-            !allocate_debug_texture(m_gbuffer_rt1_a, "gbuffer rt1 A channel texture"))
+            !allocate_debug_texture(m_gbuffer_rt1_a, "gbuffer rt1 A channel texture") ||
+            !allocate_debug_texture(m_gbuffer_depth_linear, "gbuffer depth linear preview texture"))
         {
             return false;
         }
