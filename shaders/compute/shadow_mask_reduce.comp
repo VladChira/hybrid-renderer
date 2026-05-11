@@ -1,0 +1,26 @@
+#version 460 core
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Output: single-channel R8 occlusion texture (1.0 = fully lit, 0.0 = fully shadowed).
+layout(r8, binding = 0) uniform writeonly image2D o_occlusion;
+
+// Resolved (denoised) shadow mask array — one layer per shadow-casting light.
+// Unused layers are cleared to 1.0 before the shadow pass, so multiplying
+// all 8 layers is safe regardless of how many lights are active.
+uniform sampler2DArray u_shadow_masks;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size  = imageSize(o_occlusion);
+    if (any(greaterThanEqual(pixel, size)))
+        return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+
+    float lit = 1.0;
+    for (int i = 0; i < 8; ++i)
+        lit *= texture(u_shadow_masks, vec3(uv, float(i))).r;
+
+    imageStore(o_occlusion, pixel, vec4(lit, 0.0, 0.0, 1.0));
+}

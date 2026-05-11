@@ -135,6 +135,7 @@ target_sources(hybrid_engine PRIVATE
   src/engine/Engine.cpp
 
   src/core/App.cpp
+  src/core/FrameCaptureExporter.cpp
   src/core/Log.cpp
   src/core/PerformanceTelemetry.cpp
   src/core/ResourceMonitor.cpp
@@ -205,7 +206,10 @@ target_sources(hybrid_engine PRIVATE
   src/renderer/raytracing/AccelerationStructureCache.cpp
   src/renderer/passes/TraversalHeatmapPass.cpp
   src/renderer/passes/RayTracedShadowPass.cpp
+  src/renderer/passes/RayTracedReflectionPass.cpp
+  src/renderer/passes/ReflectionDenoisePass.cpp
   src/renderer/passes/SpatioTemporalDenoisePass.cpp
+  src/renderer/passes/ShadowMaskReducePass.cpp
 
   src/ui/panels/AccelerationStructurePanel.cpp
 

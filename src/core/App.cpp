@@ -9,6 +9,7 @@
 #include "core/scene/SceneWorld.h"
 #include "core/scene/SceneCameraResolver.h"
 #include "core/Log.h"
+#include "core/FrameCaptureExporter.h"
 #include "core/Profiling.h"
 #include "core/PerformanceTelemetry.h"
 #include "core/UiCommandProcessor.h"
@@ -251,8 +252,11 @@ namespace hybrid::core
                 ui_state.viewport_gbuffer_rt1_channels.b = renderer_outputs.gbuffer_rt1_channels.b;
                 ui_state.viewport_gbuffer_rt1_channels.a = renderer_outputs.gbuffer_rt1_channels.a;
                 ui_state.viewport_raytrace_heatmap_texture = renderer_outputs.raytrace_heatmap;
+                ui_state.viewport_reflection_radiance_texture = renderer_outputs.reflection_radiance;
+                ui_state.viewport_shadow_occlusion_texture = renderer_outputs.shadow_debug_occlusion;
                 ui_state.viewport_entity_id_texture = renderer_outputs.gbuffer_entity_id;
                 ui_state.viewport_gbuffer_depth_texture = renderer_outputs.depth;
+                ui_state.viewport_gbuffer_depth_visualization_texture = renderer_outputs.depth_visualization;
                 ui_state.viewport_render_extent = frame_context.render_extent;
                 ui_state.viewport_render_view = resolved_view;
                 ui_state.viewport_render_view_valid = resolved_view_valid;
@@ -266,6 +270,7 @@ namespace hybrid::core
             }
 
             std::optional<std::string> requested_scene_path;
+            bool requested_frame_capture = false;
             {
                 HYBRID_PROFILE_ZONE_N("App::ProcessUiCommands");
                 ui::CommandBuffer mutation_commands;
@@ -280,6 +285,11 @@ namespace hybrid::core
                         }
                         continue;
                     }
+                    if (ui::IsCommandType<ui::SaveFrameCaptureCommand>(command))
+                    {
+                        requested_frame_capture = true;
+                        continue;
+                    }
 
                     mutation_commands.push_back(command);
                 }
@@ -288,6 +298,22 @@ namespace hybrid::core
                 if (active_scene_world && !mutation_commands.empty())
                 {
                     active_scene_world->FlushPendingChanges();
+                }
+            }
+            if (requested_frame_capture)
+            {
+                HYBRID_PROFILE_ZONE_N("App::ExportFrameCapture");
+                const FrameCaptureExportResult export_result =
+                    ExportFrameCapture(renderer_outputs, frame_context.render_extent, resolved_view);
+                if (export_result.success)
+                {
+                    LOG_INFO("[App] Exported {} frame target image(s) to '{}'",
+                             export_result.files_written,
+                             export_result.directory);
+                }
+                else
+                {
+                    LOG_WARN("[App] Frame export did not produce any images");
                 }
             }
             {

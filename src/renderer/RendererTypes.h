@@ -73,6 +73,16 @@ namespace hybrid::renderer
         float shadow_denoise_n_phi = 32.0f;
         float shadow_denoise_p_phi = 0.02f;
 
+        bool enable_ray_traced_reflections        = false;
+        float raytrace_reflection_normal_bias     = 0.005f;
+        float reflection_secondary_irradiance_scale = 0.3f;
+        bool enable_reflection_denoise            = true;
+        float reflection_denoise_temporal_alpha   = 0.9f;
+        uint32_t reflection_denoise_atrous_iterations = 3;
+        float reflection_denoise_c_phi            = 0.15f;
+        float reflection_denoise_n_phi            = 32.0f;
+        float reflection_denoise_p_phi            = 0.02f;
+
         float exposure = 1.0f;
         ToneMapper tone_mapper = ToneMapper::ACES;
         float legacy_curve_strength = 1.0f;
@@ -200,10 +210,13 @@ namespace hybrid::renderer
     {
         GlTextureId color = 0;
         GlTextureId depth = 0;
+        GlTextureId depth_visualization = 0;
         GlTextureId gbuffer_rt0 = 0;
         GlTextureId gbuffer_rt1 = 0;
         GlTextureId gbuffer_entity_id = 0;
         GlTextureId raytrace_heatmap = 0;
+        GlTextureId reflection_radiance = 0;
+        GlTextureId shadow_debug_occlusion = 0;
         RenderChannelOutputs color_channels{};
         RenderChannelOutputs gbuffer_rt0_channels{};
         RenderChannelOutputs gbuffer_rt1_channels{};

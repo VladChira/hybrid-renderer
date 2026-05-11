@@ -71,6 +71,10 @@ namespace hybrid::ui
     {
     };
 
+    struct SaveFrameCaptureCommand
+    {
+    };
+
     struct EditLightCommonCommand
     {
         entt::entity entity = entt::null;
@@ -169,6 +173,7 @@ namespace hybrid::ui
                                    AddPointLightCommand,
                                    AddAreaLightCommand,
                                    AddDirectionalLightCommand,
+                                   SaveFrameCaptureCommand,
                                    EditLightCommonCommand,
                                    EditPointLightCommand,
                                    EditAreaLightCommand,

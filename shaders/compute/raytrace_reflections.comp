@@ -1,0 +1,217 @@
+#version 460 core
+#extension GL_ARB_bindless_texture : require
+
+// Two-sample GGX-importance-sampled reflection pass.
+// H is drawn from the GGX NDF so the D term cancels in the MC weight,
+// leaving weight = F*G*hdotv / (ndoth*ndotv), bounded even at roughness->0
+// where the distribution collapses to a delta (pure mirror).
+// Downstream temporal + A-Trous filtering stabilises the result.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba16f, binding = 0) uniform writeonly image2D o_reflection_radiance;
+
+uniform sampler2D   u_gbuffer_rt0;
+uniform sampler2D   u_gbuffer_rt1;
+uniform sampler2D   u_gbuffer_depth;
+uniform samplerCube u_skybox_cubemap;
+uniform samplerCube u_irradiance_cubemap;
+uniform samplerCube u_prefiltered_env_cubemap;
+
+#include "include/bvh_traversal.glsl"
+#include "include/geometry_fetch.glsl"
+#include "include/material_fetch.glsl"
+#include "include/random.glsl"
+
+uniform mat4  u_inv_view;
+uniform mat4  u_inv_projection;
+uniform vec3  u_camera_position;
+uniform uint  u_tlas_node_count;
+uniform uint  u_frame_index;
+uniform uvec2 u_output_size;
+uniform float u_normal_bias;
+
+uniform int   u_has_skybox;
+uniform int   u_has_irradiance;
+uniform int   u_has_prefiltered_env;
+uniform float u_skybox_intensity;
+uniform float u_skybox_yaw_radians;
+uniform float u_secondary_irradiance_scale;
+
+const float kMaxReflectionLod         = 7.0;
+const uint  kReflectionSamplesPerPixel = 5u;
+const float kPi                       = 3.14159265359;
+const float kRadianceClamp            = 32.0;
+
+vec3 ReconstructWorldPosition(vec2 uv, float depth)
+{
+    vec4 ndc  = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 view = u_inv_projection * ndc;
+    view /= max(view.w, 1e-5);
+    return (u_inv_view * vec4(view.xyz, 1.0)).xyz;
+}
+
+vec3 RotateAroundY(vec3 d, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return vec3(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+}
+
+vec3 FresnelSchlick(float cosTheta, vec3 F0)
+{
+    return F0 + (vec3(1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// IBL/importance-sampling geometry term: k = alpha^2/2 (no direct-lighting bias).
+float GeometrySchlickGGXIbl(float ndotv, float roughness)
+{
+    float a = roughness * roughness;
+    float k = a * 0.5;
+    return ndotv / max(ndotv * (1.0 - k) + k, 1e-5);
+}
+
+float GeometrySmithIbl(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    return GeometrySchlickGGXIbl(max(dot(N, V), 0.0), roughness) *
+           GeometrySchlickGGXIbl(max(dot(N, L), 0.0), roughness);
+}
+
+vec3 SampleEnvironment(vec3 direction, float roughness)
+{
+    vec3  rotated   = RotateAroundY(normalize(direction), u_skybox_yaw_radians);
+    float intensity = max(u_skybox_intensity, 0.0);
+
+    if (u_has_prefiltered_env != 0)
+    {
+        return textureLod(u_prefiltered_env_cubemap,
+                          rotated,
+                          clamp(roughness, 0.0, 1.0) * kMaxReflectionLod).rgb * intensity;
+    }
+    if (u_has_skybox != 0)
+    {
+        return texture(u_skybox_cubemap, rotated).rgb * intensity;
+    }
+    return vec3(0.0);
+}
+
+vec3 ShadeHit(HitGeometry geo, ShadedSurface surface, vec3 view_direction)
+{
+    mat3 tbn    = BuildHitTbn(geo);
+    vec3 N      = normalize(tbn * surface.normal_tangent);
+    vec3 V      = normalize(view_direction);
+    if (dot(N, V) < 0.0)
+    {
+        N = -N;
+    }
+
+    float ndotv = max(dot(N, V), 0.0);
+    vec3  F0    = mix(vec3(0.04), surface.albedo, surface.metallic);
+    vec3  F     = FresnelSchlickRoughness(ndotv, F0, surface.roughness);
+    vec3  kS    = F;
+    vec3  kD    = (vec3(1.0) - kS) * (1.0 - surface.metallic);
+
+    vec3 radiance = surface.emissive;
+
+    if (u_has_irradiance != 0)
+    {
+        vec3 irr_dir    = RotateAroundY(N, u_skybox_yaw_radians);
+        vec3 irradiance = texture(u_irradiance_cubemap, irr_dir).rgb * max(u_skybox_intensity, 0.0);
+        radiance += kD * irradiance * surface.albedo * u_secondary_irradiance_scale;
+    }
+
+    return radiance;
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(u_output_size.x) || pixel.y >= int(u_output_size.y))
+    {
+        return;
+    }
+
+    vec2  uv    = (vec2(pixel) + vec2(0.5)) / vec2(u_output_size);
+    float depth = texture(u_gbuffer_depth, uv).r;
+    if (depth >= 1.0)
+    {
+        imageStore(o_reflection_radiance, pixel, vec4(0.0));
+        return;
+    }
+
+    vec4  rt0      = texture(u_gbuffer_rt0, uv);
+    vec4  rt1      = texture(u_gbuffer_rt1, uv);
+    vec3  normal   = normalize(rt1.xyz * 2.0 - 1.0);
+    vec3  albedo   = clamp(rt0.rgb, 0.0, 1.0);
+    float metallic = clamp(rt0.a,   0.0, 1.0);
+    float roughness = clamp(rt1.a,  0.0, 1.0);
+
+    vec3 world_pos = ReconstructWorldPosition(uv, depth);
+    vec3 V         = normalize(u_camera_position - world_pos);
+    float ndotv    = max(dot(normal, V), 0.0);
+    if (ndotv <= 1e-4)
+    {
+        imageStore(o_reflection_radiance, pixel, vec4(0.0));
+        return;
+    }
+
+    float alpha = roughness * roughness;
+    vec3  up      = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3  tangent = normalize(cross(up, normal));
+    vec3  bitan   = cross(normal, tangent);
+    vec3  F0      = mix(vec3(0.04), albedo, metallic);
+    vec3  reflection = vec3(0.0);
+
+    for (uint sample_index = 0u; sample_index < kReflectionSamplesPerPixel; ++sample_index)
+    {
+        // GGX importance sampling: draw H from the GGX NDF via CDF inversion.
+        // For roughness->0 this collapses to H=N, L=reflect(-V,N) (pure mirror).
+        vec2  Xi    = Hash2PerPixel(pixel, u_frame_index, sample_index + 1u);
+        float phi   = 2.0 * kPi * Xi.x;
+
+        float cos_theta = sqrt((1.0 - Xi.y) / max(1.0 + (alpha * alpha - 1.0) * Xi.y, 1e-7));
+        float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+        vec3  H_local   = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
+
+        vec3 H = normalize(tangent * H_local.x + bitan * H_local.y + normal * H_local.z);
+        vec3 L = normalize(reflect(-V, H));
+
+        float ndotl = max(dot(normal, L), 0.0);
+        float ndoth = max(dot(normal, H), 0.0);
+        float hdotv = max(dot(H, V), 0.0);
+        if (ndotl <= 1e-4 || hdotv <= 1e-4)
+        {
+            continue;
+        }
+
+        vec3 ray_origin = world_pos + normal * u_normal_bias + L * u_normal_bias;
+
+        // Default to environment in the sampled direction.
+        vec3 incident_radiance = SampleEnvironment(L, 0.0);
+
+        RayHit hit;
+        if (TraceClosestHit(ray_origin, L, u_tlas_node_count, 1e30, hit))
+        {
+            HitGeometry geo = FetchHitGeometry(hit, ray_origin, L);
+            ShadedSurface surface = FetchSurface(geo.material_index, geo.uv0, geo.uv1);
+            incident_radiance     = ShadeHit(geo, surface, -L);
+        }
+
+        // GGX importance sampling weight.
+        // PDF(H) = D(H)*ndoth / (4*hdotv), so D cancels with the BRDF numerator:
+        // weight = BRDF * ndotl / PDF = F * G2 * hdotv / (ndoth * ndotv)
+        vec3  F      = FresnelSchlick(hdotv, F0);
+        float G      = GeometrySmithIbl(normal, V, L, roughness);
+        vec3  weight = F * G * hdotv / max(ndoth * ndotv, 1e-6);
+
+        reflection += clamp(incident_radiance * weight, 0.0, kRadianceClamp);
+    }
+
+    reflection /= float(kReflectionSamplesPerPixel);
+    imageStore(o_reflection_radiance, pixel, vec4(reflection, 1.0));
+}

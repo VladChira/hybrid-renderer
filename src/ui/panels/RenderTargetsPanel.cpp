@@ -25,13 +25,15 @@ namespace hybrid::ui
             const char *label;
         };
 
-        constexpr std::array<TargetEntry, 6> kTargets = {{
+        constexpr std::array<TargetEntry, 8> kTargets = {{
             {"Final color",            UiViewportVisualization::FinalColor},
             {"G-buffer RT0 (albedo+metallic)", UiViewportVisualization::GBufferRt0},
             {"G-buffer RT1 (normal+roughness)", UiViewportVisualization::GBufferRt1},
             {"G-buffer depth",         UiViewportVisualization::GBufferDepth},
             {"G-buffer entity id",     UiViewportVisualization::GBufferEntityId},
             {"BVH traversal heatmap",  UiViewportVisualization::RaytraceHeatmap},
+            {"RT reflection radiance", UiViewportVisualization::RaytraceReflectionRadiance},
+            {"RT shadow occlusion",    UiViewportVisualization::ShadowOcclusion},
         }};
 
         constexpr std::array<ChannelEntry, 6> kChannels = {{
@@ -45,8 +47,8 @@ namespace hybrid::ui
 
         bool SupportsChannelSelection(UiViewportVisualization visualization)
         {
-            return visualization == UiViewportVisualization::FinalColor ||
-                   visualization == UiViewportVisualization::GBufferRt0 ||
+            return visualization == UiViewportVisualization::FinalColor  ||
+                   visualization == UiViewportVisualization::GBufferRt0  ||
                    visualization == UiViewportVisualization::GBufferRt1;
         }
 
@@ -78,9 +80,11 @@ namespace hybrid::ui
             case UiViewportVisualization::GBufferRt1:
                 return channel_index == 0 ? state.viewport_gbuffer_rt1_texture
                                           : ResolveChannelTexture(state.viewport_gbuffer_rt1_channels, channel_index);
-            case UiViewportVisualization::GBufferDepth:    return state.viewport_gbuffer_depth_texture;
-            case UiViewportVisualization::GBufferEntityId: return state.viewport_entity_id_texture;
-            case UiViewportVisualization::RaytraceHeatmap: return state.viewport_raytrace_heatmap_texture;
+            case UiViewportVisualization::GBufferDepth:              return state.viewport_gbuffer_depth_visualization_texture;
+            case UiViewportVisualization::GBufferEntityId:            return state.viewport_entity_id_texture;
+            case UiViewportVisualization::RaytraceHeatmap:            return state.viewport_raytrace_heatmap_texture;
+            case UiViewportVisualization::RaytraceReflectionRadiance: return state.viewport_reflection_radiance_texture;
+            case UiViewportVisualization::ShadowOcclusion:            return state.viewport_shadow_occlusion_texture;
             }
             return 0;
         }
