@@ -230,3 +230,11 @@ Not implemented yet (major roadmap items):
 ## Notes
 
 You cannot run builds in your sandboxed environment. Let me do it.
+
+Material texture replacement UI is partially scaffolded in `src/ui/panels/components/MaterialComponentDrawer.cpp`: picker buttons exist, but the actual swap path is intentionally not wired yet.
+
+When revisiting material texture swapping later, expected touchpoints are:
+
+- `src/ui/UiCommands.h`: add a material-texture edit command covering slot selection + new texture path.
+- `src/core/UiCommandProcessor.cpp`: resolve the new image handle and update the selected `MaterialAsset` texture slot.
+- `src/renderer/stores/MaterialStore.*`: add a reliable invalidation/reupload path so edited material texture bindings and GPU records refresh deterministically.
