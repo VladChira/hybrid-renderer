@@ -100,10 +100,16 @@ git -C "$CHECKOUT_DIR" submodule sync --recursive
 git -C "$CHECKOUT_DIR" submodule update --init --recursive
 
 log "Configuring with preset $BUILD_PRESET"
-cmake --preset "$BUILD_PRESET" -S "$CHECKOUT_DIR"
+(
+  cd "$CHECKOUT_DIR"
+  cmake --preset "$BUILD_PRESET"
+)
 
 log "Building with preset $BUILD_PRESET"
-cmake --build --preset "$BUILD_PRESET" -S "$CHECKOUT_DIR"
+(
+  cd "$CHECKOUT_DIR"
+  cmake --build --preset "$BUILD_PRESET"
+)
 
 log "Setup complete"
 cat <<EOF
