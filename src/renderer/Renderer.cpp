@@ -327,6 +327,8 @@ namespace hybrid::renderer
                                                                                    &m_impl->atrous_denoise_shader);
         m_impl->raytrace_reflection_pass = std::make_unique<RayTracedReflectionPass>(&m_impl->raytrace_reflection_shader,
                                                                                       &m_impl->geometry_store,
+                                                                                      &m_impl->material_store,
+                                                                                      &m_impl->light_store,
                                                                                       &m_impl->as_cache);
         m_impl->reflection_denoise_pass = std::make_unique<ReflectionDenoisePass>(&m_impl->reflection_temporal_shader,
                                                                                    &m_impl->reflection_atrous_shader);
@@ -776,6 +778,7 @@ namespace hybrid::renderer
             reflection_input.gbuffer_rt0           = m_impl->frame_resources.Get(FrameTarget::GBufferRt0);
             reflection_input.gbuffer_rt1           = m_impl->frame_resources.Get(FrameTarget::GBufferRt1);
             reflection_input.gbuffer_depth         = m_impl->frame_resources.Get(FrameTarget::GBufferDepth);
+            reflection_input.shadow_occlusion      = m_impl->outputs.shadow_debug_occlusion;
             reflection_input.reflection_radiance_out = reflection_radiance;
             reflection_input.frame_index           = static_cast<uint32_t>(m_impl->frame_context.frame_index);
             reflection_input.has_skybox            = hdri_output.has_skybox;

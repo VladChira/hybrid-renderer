@@ -2,6 +2,8 @@
 
 #include "core/Profiling.h"
 #include "renderer/stores/GeometryStore.h"
+#include "renderer/stores/LightStore.h"
+#include "renderer/stores/MaterialStore.h"
 #include "renderer/raytracing/AccelerationStructureCache.h"
 #include "renderer/opengl/GLShaderProgram.h"
 
@@ -21,6 +23,7 @@ namespace hybrid::renderer
         constexpr GLuint kIrradianceTexUnit          = 4;
         constexpr GLuint kPrefilteredEnvTexUnit      = 5;
         constexpr GLuint kBrdfLutTexUnit             = 6;
+        constexpr GLuint kShadowOcclusionTexUnit     = 7;
 
         GLuint CeilDiv(GLuint value, GLuint divisor)
         {
@@ -30,9 +33,13 @@ namespace hybrid::renderer
 
     RayTracedReflectionPass::RayTracedReflectionPass(GLShaderProgram *program,
                                                      GeometryStore *geometry_store,
+                                                     MaterialStore *material_store,
+                                                     LightStore *light_store,
                                                      raytracing::AccelerationStructureCache *as_cache)
         : m_program(program),
           m_geometry_store(geometry_store),
+          m_material_store(material_store),
+          m_light_store(light_store),
           m_as_cache(as_cache)
     {
     }
@@ -44,12 +51,15 @@ namespace hybrid::renderer
 
         if (m_program == nullptr ||
             m_geometry_store == nullptr ||
+            m_material_store == nullptr ||
+            m_light_store == nullptr ||
             m_as_cache == nullptr ||
             input.settings == nullptr ||
             input.effective_view == nullptr ||
             input.gbuffer_rt0 == 0 ||
             input.gbuffer_rt1 == 0 ||
             input.gbuffer_depth == 0 ||
+            input.shadow_occlusion == 0 ||
             input.reflection_radiance_out == 0)
         {
             return false;
@@ -66,6 +76,8 @@ namespace hybrid::renderer
         m_program->Use();
 
         m_geometry_store->BindSsbos();
+        m_material_store->BindSsbo();
+        m_light_store->BindSsbos();
         m_as_cache->BindSsbos();
 
         glActiveTexture(GL_TEXTURE0 + kGbufferRt0TexUnit);
@@ -74,10 +86,13 @@ namespace hybrid::renderer
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_rt1);
         glActiveTexture(GL_TEXTURE0 + kGbufferDepthTexUnit);
         glBindTexture(GL_TEXTURE_2D, input.gbuffer_depth);
+        glActiveTexture(GL_TEXTURE0 + kShadowOcclusionTexUnit);
+        glBindTexture(GL_TEXTURE_2D, input.shadow_occlusion);
 
         m_program->SetUniform1i("u_gbuffer_rt0",   static_cast<GLint>(kGbufferRt0TexUnit));
         m_program->SetUniform1i("u_gbuffer_rt1",   static_cast<GLint>(kGbufferRt1TexUnit));
         m_program->SetUniform1i("u_gbuffer_depth", static_cast<GLint>(kGbufferDepthTexUnit));
+        m_program->SetUniform1i("u_shadow_occlusion", static_cast<GLint>(kShadowOcclusionTexUnit));
 
         const bool has_skybox         = input.has_skybox && input.skybox_cubemap      != 0;
         const bool has_irradiance     = input.has_skybox && input.irradiance_cubemap  != 0;
@@ -105,6 +120,8 @@ namespace hybrid::renderer
         m_program->SetUniform1f("u_skybox_intensity",  input.skybox_intensity);
         m_program->SetUniform1f("u_skybox_yaw_radians", input.skybox_yaw_radians);
 
+        m_program->SetUniformMat4("u_view",           view.view);
+        m_program->SetUniformMat4("u_projection",     view.projection);
         m_program->SetUniformMat4("u_inv_view",       glm::affineInverse(view.view));
         m_program->SetUniformMat4("u_inv_projection", glm::inverse(view.projection));
         m_program->SetUniformVec3("u_camera_position", view.position);
@@ -113,6 +130,7 @@ namespace hybrid::renderer
         m_program->SetUniform1ui("u_frame_index",     input.frame_index);
         m_program->SetUniform1f("u_normal_bias",                   settings.raytrace_reflection_normal_bias);
         m_program->SetUniform1f("u_secondary_irradiance_scale",    settings.reflection_secondary_irradiance_scale);
+        m_program->SetUniform1ui("u_area_light_count",             m_light_store->AreaCount());
 
         const GLint output_size_loc = m_program->GetUniformLocation("u_output_size");
         if (output_size_loc >= 0)
@@ -140,6 +158,8 @@ namespace hybrid::renderer
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
         glActiveTexture(GL_TEXTURE0 + kSkyboxTexUnit);
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+        glActiveTexture(GL_TEXTURE0 + kShadowOcclusionTexUnit);
+        glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE0 + kGbufferDepthTexUnit);
         glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE0 + kGbufferRt1TexUnit);

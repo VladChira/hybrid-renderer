@@ -13,6 +13,16 @@ struct HitGeometry
     uint  material_index;
 };
 
+vec3 SafeNormalizeHit(vec3 value, vec3 fallback)
+{
+    float len2 = dot(value, value);
+    if (len2 <= 1e-10)
+    {
+        return fallback;
+    }
+    return value * inversesqrt(len2);
+}
+
 // Reconstruct interpolated world-space geometry from a closest-hit record.
 // ray_origin and ray_direction are in world space; world_position = origin + t * direction.
 HitGeometry FetchHitGeometry(RayHit hit, vec3 ray_origin, vec3 ray_direction)
@@ -41,8 +51,9 @@ HitGeometry FetchHitGeometry(RayHit hit, vec3 ray_origin, vec3 ray_direction)
 
     // Normal matrix: transpose(inverse(world_from_local)) = transpose(local_from_world)
     mat3 normal_mat      = transpose(mat3(inst.local_from_world));
-    vec3 world_normal    = normalize(normal_mat * local_normal);
-    vec3 world_tangent_xyz = normalize(mat3(inst.world_from_local) * local_tangent.xyz);
+    vec3 world_normal      = SafeNormalizeHit(normal_mat * local_normal, vec3(0.0, 1.0, 0.0));
+    vec3 world_tangent_xyz = SafeNormalizeHit(mat3(inst.world_from_local) * local_tangent.xyz,
+                                              vec3(1.0, 0.0, 0.0));
 
     HitGeometry geo;
     geo.world_position = ray_origin + hit.t * ray_direction;
@@ -56,10 +67,15 @@ HitGeometry FetchHitGeometry(RayHit hit, vec3 ray_origin, vec3 ray_direction)
 
 mat3 BuildHitTbn(HitGeometry geo)
 {
-    vec3 N = normalize(geo.world_normal);
-    vec3 T = normalize(geo.world_tangent.xyz);
-    T = normalize(T - dot(T, N) * N);
-    vec3 B = cross(N, T) * geo.world_tangent.w;
+    vec3 N = SafeNormalizeHit(geo.world_normal, vec3(0.0, 1.0, 0.0));
+    vec3 T = SafeNormalizeHit(geo.world_tangent.xyz, vec3(1.0, 0.0, 0.0));
+    float handedness = abs(geo.world_tangent.w) > 0.5 ? geo.world_tangent.w : 1.0;
+    T = SafeNormalizeHit(T - dot(T, N) * N,
+                         SafeNormalizeHit(cross(abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0)
+                                                                 : vec3(0.0, 1.0, 0.0),
+                                                N),
+                                          vec3(1.0, 0.0, 0.0)));
+    vec3 B = SafeNormalizeHit(cross(N, T), vec3(0.0, 0.0, 1.0)) * handedness;
     return mat3(T, B, N);
 }
 

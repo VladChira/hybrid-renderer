@@ -16,14 +16,27 @@ out vec3 v_world_bitangent;
 out vec2 v_uv0;
 out vec2 v_uv1;
 
+vec3 SafeNormalize(vec3 value, vec3 fallback)
+{
+    float len2 = dot(value, value);
+    if (len2 <= 1e-10)
+    {
+        return fallback;
+    }
+    return value * inversesqrt(len2);
+}
+
 void main()
 {
     vec4 world_position = u_model * vec4(a_position, 1.0);
     mat3 normal_matrix = mat3(transpose(inverse(u_model)));
-    vec3 world_normal = normalize(normal_matrix * a_normal);
-    vec3 world_tangent = normalize(normal_matrix * a_tangent.xyz);
-    world_tangent = normalize(world_tangent - world_normal * dot(world_normal, world_tangent));
-    vec3 world_bitangent = normalize(cross(world_normal, world_tangent)) * a_tangent.w;
+    vec3 world_normal = SafeNormalize(normal_matrix * a_normal, vec3(0.0, 1.0, 0.0));
+    vec3 world_tangent = SafeNormalize(normal_matrix * a_tangent.xyz, vec3(1.0, 0.0, 0.0));
+    world_tangent = SafeNormalize(world_tangent - world_normal * dot(world_normal, world_tangent),
+                                  SafeNormalize(cross(abs(world_normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0),
+                                                      world_normal),
+                                                vec3(1.0, 0.0, 0.0)));
+    vec3 world_bitangent = SafeNormalize(cross(world_normal, world_tangent), vec3(0.0, 0.0, 1.0)) * a_tangent.w;
 
     v_world_normal = world_normal;
     v_world_tangent = world_tangent;

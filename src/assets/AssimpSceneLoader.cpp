@@ -15,6 +15,7 @@
 #include <atomic>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <future>
 #include <filesystem>
 #include <functional>
@@ -31,6 +32,12 @@ namespace hybrid::assets
 {
     namespace
     {
+        double ElapsedMilliseconds(const std::chrono::steady_clock::time_point start_time,
+                                   const std::chrono::steady_clock::time_point end_time)
+        {
+            return std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        }
+
         glm::quat RotationFromTo(const glm::vec3 &from, const glm::vec3 &to)
         {
             const glm::vec3 from_normalized = NormalizeOrDefault(from, glm::vec3(0.0f, -1.0f, 0.0f));
@@ -290,6 +297,7 @@ namespace hybrid::assets
             return {};
         }
 
+        const auto total_load_start = std::chrono::steady_clock::now();
         LOG_INFO("[AssimpSceneLoader] Loading glTF scene file");
 
         std::string hint = request.extension;
@@ -317,8 +325,12 @@ namespace hybrid::assets
         const std::filesystem::path base_path(resolved_path);
         const std::string base_dir = base_path.parent_path().make_preferred().string();
 
-        const unsigned int flags = aiProcess_Triangulate | aiProcess_CalcTangentSpace;
+        const unsigned int flags = aiProcess_Triangulate |
+                                   aiProcess_GenNormals |
+                                   aiProcess_CalcTangentSpace;
+        const auto scene_parse_start = std::chrono::steady_clock::now();
         const aiScene *scene = importer.ReadFile(resolved_path.c_str(), flags);
+        const auto scene_parse_end = std::chrono::steady_clock::now();
         if (!scene)
         {
             LOG_ERROR(std::string("[AssimpSceneLoader] Failed to parse scene file: ") + importer.GetErrorString());
@@ -333,6 +345,7 @@ namespace hybrid::assets
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MaterialAsset>> material_handles(scene->mNumMaterials);
         AssimpTextureCache texture_cache(m_assets, request.path);
+        const auto material_load_start = std::chrono::steady_clock::now();
 
         auto load_material = [&](unsigned int i) -> assets::AssetHandle<hybrid::core::scene::MaterialAsset>
         {
@@ -460,10 +473,12 @@ namespace hybrid::assets
                 worker.get();
             }
         }
+        const auto material_load_end = std::chrono::steady_clock::now();
 
         std::vector<assets::AssetHandle<hybrid::core::scene::MeshAsset>> mesh_handles(scene->mNumMeshes);
         std::atomic<unsigned int> meshes_missing_normals{0};
         std::atomic<unsigned int> meshes_missing_tangents{0};
+        const auto geometry_load_start = std::chrono::steady_clock::now();
 
         LOG_INFO("[AssimpSceneLoader] \t Loading meshes...");
 
@@ -630,14 +645,15 @@ namespace hybrid::assets
                 worker.get();
             }
         }
+        const auto geometry_load_end = std::chrono::steady_clock::now();
 
         const unsigned int missing_normals = meshes_missing_normals.load(std::memory_order_relaxed);
         const unsigned int missing_tangents = meshes_missing_tangents.load(std::memory_order_relaxed);
         if (missing_normals > 0)
         {
-            LOG_CRITICAL("[AssimpSceneLoader] Meshes without normals: " +
+            LOG_CRITICAL("[AssimpSceneLoader] Meshes without normals after import processing: " +
                      std::to_string(missing_normals) + "/" + std::to_string(mesh_count) +
-                     " . Enable aiProcess_GenNormals for this scene.");
+                     " . This scene may not shade correctly.");
         }
         if (missing_tangents > 0)
         {
@@ -679,6 +695,12 @@ namespace hybrid::assets
             AppendLights(*scene, entities_by_name, m_assets, *result);
         }
 
+        const auto total_load_end = std::chrono::steady_clock::now();
+        LOG_INFO("[AssimpSceneLoader] Load timings:");
+        LOG_INFO("[AssimpSceneLoader] \t Assimp parse: " + std::to_string(ElapsedMilliseconds(scene_parse_start, scene_parse_end)) + " ms");
+        LOG_INFO("[AssimpSceneLoader] \t Materials: " + std::to_string(ElapsedMilliseconds(material_load_start, material_load_end)) + " ms");
+        LOG_INFO("[AssimpSceneLoader] \t Geometry: " + std::to_string(ElapsedMilliseconds(geometry_load_start, geometry_load_end)) + " ms");
+        LOG_INFO("[AssimpSceneLoader] \t Total: " + std::to_string(ElapsedMilliseconds(total_load_start, total_load_end)) + " ms");
         LOG_INFO("[AssimpSceneLoader] glTF scene loaded");
         return result;
     }

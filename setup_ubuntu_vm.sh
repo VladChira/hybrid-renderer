@@ -2,11 +2,15 @@
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/VladChira/hybrid-renderer.git}"
-REPO_BRANCH="${REPO_BRANCH:-main}"
-CHECKOUT_DIR="${CHECKOUT_DIR:-$HOME/hybrid-renderer}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CHECKOUT_DIR="${CHECKOUT_DIR:-$SCRIPT_DIR}"
 VCPKG_DIR="${VCPKG_DIR:-$HOME/vcpkg}"
 BUILD_PRESET="${BUILD_PRESET:-linux-ninja}"
+CMAKE_VERSION="${CMAKE_VERSION:-3.31.8}"
+TRACY_REPO_URL="${TRACY_REPO_URL:-https://github.com/wolfpld/tracy.git}"
+TRACY_TAG="${TRACY_TAG:-v0.13.1}"
+TRACY_DIR="${TRACY_DIR:-$HOME/tracy}"
+TRACY_BUILD_DIR="${TRACY_BUILD_DIR:-$TRACY_DIR/out/build/linux-release}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -19,6 +23,49 @@ require_cmd() {
   fi
 }
 
+resolve_cmake_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64)
+      printf 'x86_64'
+      ;;
+    aarch64|arm64)
+      printf 'aarch64'
+      ;;
+    *)
+      echo "Unsupported architecture for Kitware CMake installer: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+install_cmake() {
+  local requested_version="$1"
+  local install_root="/opt/cmake-${requested_version}"
+
+  if command -v cmake >/dev/null 2>&1; then
+    local current_version
+    current_version="$(cmake --version | awk 'NR==1 { print $3 }')"
+    if [ "$current_version" = "$requested_version" ]; then
+      log "CMake $requested_version already installed"
+      return
+    fi
+  fi
+
+  local arch
+  arch="$(resolve_cmake_arch)"
+  local installer_name="cmake-${requested_version}-linux-${arch}.sh"
+  local installer_url="https://github.com/Kitware/CMake/releases/download/v${requested_version}/${installer_name}"
+  local installer_path="/tmp/${installer_name}"
+
+  log "Installing CMake ${requested_version} from GitHub release"
+  curl -L --fail --retry 3 -o "$installer_path" "$installer_url"
+  chmod +x "$installer_path"
+  sudo "$installer_path" --skip-license --prefix="$install_root"
+  sudo ln -sf "${install_root}/bin/cmake" /usr/local/bin/cmake
+  sudo ln -sf "${install_root}/bin/ctest" /usr/local/bin/ctest
+  sudo ln -sf "${install_root}/bin/cpack" /usr/local/bin/cpack
+}
+
 log "Updating apt metadata"
 sudo apt-get update
 
@@ -26,10 +73,11 @@ log "Installing system dependencies"
 sudo apt-get install -y \
   build-essential \
   ca-certificates \
-  cmake \
   curl \
   git \
   libgl1-mesa-dev \
+  libglm-dev \
+  libglfw3-dev \
   libwayland-dev \
   libx11-dev \
   libxcursor-dev \
@@ -44,6 +92,8 @@ sudo apt-get install -y \
   tar \
   unzip \
   zip
+
+install_cmake "$CMAKE_VERSION"
 
 log "Checking OpenGL availability"
 if command -v glxinfo >/dev/null 2>&1; then
@@ -85,10 +135,8 @@ if ! grep -Fq 'export VCPKG_ROOT=' "$HOME/.bashrc" 2>/dev/null; then
 fi
 
 if [ ! -d "$CHECKOUT_DIR/.git" ]; then
-  log "Cloning repository into $CHECKOUT_DIR"
-  git clone --branch "$REPO_BRANCH" --recurse-submodules "$REPO_URL" "$CHECKOUT_DIR"
-else
-  log "Repository already exists at $CHECKOUT_DIR"
+  echo "Expected an existing repository checkout at: $CHECKOUT_DIR" >&2
+  exit 1
 fi
 
 require_cmd cmake
@@ -98,6 +146,23 @@ require_cmd git
 log "Synchronizing submodules"
 git -C "$CHECKOUT_DIR" submodule sync --recursive
 git -C "$CHECKOUT_DIR" submodule update --init --recursive
+
+if [ ! -d "$TRACY_DIR/.git" ]; then
+  log "Cloning Tracy into $TRACY_DIR"
+  git clone "$TRACY_REPO_URL" "$TRACY_DIR"
+else
+  log "Tracy already exists at $TRACY_DIR"
+fi
+
+log "Checking out Tracy $TRACY_TAG"
+git -C "$TRACY_DIR" fetch --tags
+git -C "$TRACY_DIR" checkout "$TRACY_TAG"
+
+log "Configuring Tracy standalone profiler"
+cmake -S "$TRACY_DIR/profiler" -B "$TRACY_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release -DLEGACY=ON -DWAYLAND=OFF
+
+log "Building Tracy standalone profiler"
+cmake --build "$TRACY_BUILD_DIR"
 
 log "Configuring with preset $BUILD_PRESET"
 (
@@ -117,9 +182,12 @@ cat <<EOF
 Repo:        $CHECKOUT_DIR
 vcpkg:       $VCPKG_DIR
 VCPKG_ROOT:  $VCPKG_ROOT
+Tracy:       $TRACY_DIR
+Tracy build: $TRACY_BUILD_DIR
 
 Next steps:
 1. Copy your assets directory into: $CHECKOUT_DIR/assets
 2. Run the editor from: $CHECKOUT_DIR/out/build/$BUILD_PRESET/bin
+3. Run the Tracy profiler from: $TRACY_BUILD_DIR/tracy-profiler
 
 EOF

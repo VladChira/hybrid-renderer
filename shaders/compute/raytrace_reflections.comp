@@ -14,6 +14,7 @@ layout(rgba16f, binding = 0) uniform writeonly image2D o_reflection_radiance;
 uniform sampler2D   u_gbuffer_rt0;
 uniform sampler2D   u_gbuffer_rt1;
 uniform sampler2D   u_gbuffer_depth;
+uniform sampler2D   u_shadow_occlusion;
 uniform samplerCube u_skybox_cubemap;
 uniform samplerCube u_irradiance_cubemap;
 uniform samplerCube u_prefiltered_env_cubemap;
@@ -23,11 +24,14 @@ uniform samplerCube u_prefiltered_env_cubemap;
 #include "include/material_fetch.glsl"
 #include "include/random.glsl"
 
+uniform mat4  u_view;
+uniform mat4  u_projection;
 uniform mat4  u_inv_view;
 uniform mat4  u_inv_projection;
 uniform vec3  u_camera_position;
 uniform uint  u_tlas_node_count;
 uniform uint  u_frame_index;
+uniform uint  u_area_light_count;
 uniform uvec2 u_output_size;
 uniform float u_normal_bias;
 
@@ -38,10 +42,31 @@ uniform float u_skybox_intensity;
 uniform float u_skybox_yaw_radians;
 uniform float u_secondary_irradiance_scale;
 
+struct GpuAreaLight
+{
+    vec4 position_intensity;   // xyz = position, w = intensity
+    vec4 direction_size_x;     // xyz = direction (unit), w = size.x
+    vec4 color_size_y;         // xyz = color,    w = size.y
+    vec4 two_sided_shadow_pad; // x = two_sided, y = shadow layer (-1 = none)
+};
+
+layout(std430, binding = 6) readonly buffer AreaLightBuffer
+{
+    GpuAreaLight area_lights[];
+};
+
 const float kMaxReflectionLod         = 7.0;
-const uint  kReflectionSamplesPerPixel = 5u;
+const uint  kReflectionSamplesPerPixel = 2u;
 const float kPi                       = 3.14159265359;
 const float kRadianceClamp            = 32.0;
+const int   kAreaLightSampleGridSize  = 4;
+
+void BuildOrthonormalBasis(vec3 n, out vec3 tangent, out vec3 bitangent)
+{
+    vec3 helper = abs(n.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    tangent = normalize(cross(helper, n));
+    bitangent = normalize(cross(n, tangent));
+}
 
 vec3 ReconstructWorldPosition(vec2 uv, float depth)
 {
@@ -49,6 +74,49 @@ vec3 ReconstructWorldPosition(vec2 uv, float depth)
     vec4 view = u_inv_projection * ndc;
     view /= max(view.w, 1e-5);
     return (u_inv_view * vec4(view.xyz, 1.0)).xyz;
+}
+
+bool TryReuseScreenSpaceShadowOcclusion(vec3 world_position, vec3 world_normal, out float visibility)
+{
+    vec4 clip = u_projection * u_view * vec4(world_position, 1.0);
+    if (clip.w <= 1e-5)
+    {
+        return false;
+    }
+
+    vec3 ndc = clip.xyz / clip.w;
+    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < -1.0 || ndc.z > 1.0)
+    {
+        return false;
+    }
+
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    float depth = texture(u_gbuffer_depth, uv).r;
+    if (depth >= 1.0)
+    {
+        return false;
+    }
+
+    vec3 visible_world_position = ReconstructWorldPosition(uv, depth);
+    vec3 world_delta = visible_world_position - world_position;
+    if (dot(world_delta, world_delta) > 0.01)
+    {
+        return false;
+    }
+
+    vec3 visible_normal = normalize(texture(u_gbuffer_rt1, uv).xyz * 2.0 - 1.0);
+    vec3 compare_normal = normalize(world_normal);
+    if (dot(compare_normal, visible_normal) < 0.0)
+    {
+        compare_normal = -compare_normal;
+    }
+    if (dot(compare_normal, visible_normal) < 0.8)
+    {
+        return false;
+    }
+
+    visibility = texture(u_shadow_occlusion, uv).r;
+    return true;
 }
 
 vec3 RotateAroundY(vec3 d, float angle)
@@ -82,6 +150,52 @@ float GeometrySmithIbl(vec3 N, vec3 V, vec3 L, float roughness)
            GeometrySchlickGGXIbl(max(dot(N, L), 0.0), roughness);
 }
 
+float DistributionGGX(vec3 N, vec3 H, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float ndoth = max(dot(N, H), 0.0);
+    float ndoth2 = ndoth * ndoth;
+    float denom = ndoth2 * (a2 - 1.0) + 1.0;
+    return a2 / max(kPi * denom * denom, 1e-5);
+}
+
+float GeometrySchlickGGX(float ndotv, float roughness)
+{
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    return ndotv / max(ndotv * (1.0 - k) + k, 1e-5);
+}
+
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    float ndotv = max(dot(N, V), 0.0);
+    float ndotl = max(dot(N, L), 0.0);
+    return GeometrySchlickGGX(ndotl, roughness) * GeometrySchlickGGX(ndotv, roughness);
+}
+
+vec3 ShadeCookTorrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float roughness, vec3 F0)
+{
+    float ndotv = max(dot(N, V), 0.0);
+    float ndotl = max(dot(N, L), 0.0);
+    if (ndotl <= 0.0)
+    {
+        return vec3(0.0);
+    }
+
+    vec3 H = normalize(V + L);
+    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+    float D = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    vec3 numerator = D * G * F;
+    float denominator = max(4.0 * ndotv * ndotl, 1e-5);
+    vec3 specular = numerator / denominator;
+    vec3 kS = F;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+    vec3 diffuse = kD * albedo / kPi;
+    return (diffuse + specular) * radiance * ndotl;
+}
+
 vec3 SampleEnvironment(vec3 direction, float roughness)
 {
     vec3  rotated   = RotateAroundY(normalize(direction), u_skybox_yaw_radians);
@@ -98,6 +212,148 @@ vec3 SampleEnvironment(vec3 direction, float roughness)
         return texture(u_skybox_cubemap, rotated).rgb * intensity;
     }
     return vec3(0.0);
+}
+
+vec3 SampleAreaLightFallback(vec3 world_position,
+                             vec3 N,
+                             vec3 V,
+                             vec3 albedo,
+                             float metallic,
+                             float roughness)
+{
+    if (u_area_light_count == 0u)
+    {
+        return vec3(0.0);
+    }
+
+    GpuAreaLight light = area_lights[0];
+    vec3 light_position = light.position_intensity.xyz;
+    float intensity = light.position_intensity.w;
+    vec3 light_direction = light.direction_size_x.xyz;
+    vec2 clamped_size = max(vec2(light.direction_size_x.w, light.color_size_y.w), vec2(1e-3));
+    vec3 light_color = light.color_size_y.rgb;
+    bool two_sided = light.two_sided_shadow_pad.x > 0.5;
+
+    vec3 light_normal = normalize(light_direction);
+    vec3 light_tangent = vec3(0.0);
+    vec3 light_bitangent = vec3(0.0);
+    BuildOrthonormalBasis(light_normal, light_tangent, light_bitangent);
+
+    vec2 half_size = clamped_size * 0.5;
+    float light_area = clamped_size.x * clamped_size.y;
+    float sample_grid_size_f = float(kAreaLightSampleGridSize);
+    float sample_count = sample_grid_size_f * sample_grid_size_f;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 accumulated = vec3(0.0);
+
+    for (int sample_y = 0; sample_y < kAreaLightSampleGridSize; ++sample_y)
+    {
+        for (int sample_x = 0; sample_x < kAreaLightSampleGridSize; ++sample_x)
+        {
+            vec2 uv = (vec2(sample_x, sample_y) + vec2(0.5)) / sample_grid_size_f;
+            vec2 rect = (uv - 0.5) * 2.0;
+            vec3 sample_position =
+                light_position +
+                light_tangent * (rect.x * half_size.x) +
+                light_bitangent * (rect.y * half_size.y);
+
+            vec3 light_vector = sample_position - world_position;
+            float light_distance = length(light_vector);
+            if (light_distance <= 1e-5)
+            {
+                continue;
+            }
+
+            vec3 L = light_vector / light_distance;
+            float emitter_cos = dot(light_normal, -L);
+            if (two_sided)
+            {
+                emitter_cos = abs(emitter_cos);
+            }
+            else
+            {
+                emitter_cos = max(emitter_cos, 0.0);
+            }
+
+            if (emitter_cos <= 0.0)
+            {
+                continue;
+            }
+
+            float attenuation = 1.0 / max(light_distance * light_distance, 1e-4);
+            vec3 radiance =
+                light_color *
+                max(intensity, 0.0) *
+                light_area *
+                emitter_cos *
+                attenuation;
+
+            accumulated += ShadeCookTorrance(N, V, L, radiance, albedo, metallic, roughness, F0);
+        }
+    }
+
+    return accumulated / sample_count;
+}
+
+vec3 SampleVisibleAreaLight(vec3 ray_origin, vec3 ray_direction)
+{
+    if (u_area_light_count == 0u)
+    {
+        return vec3(0.0);
+    }
+
+    GpuAreaLight light = area_lights[0];
+    vec3 light_position = light.position_intensity.xyz;
+    float intensity = max(light.position_intensity.w, 0.0);
+    vec3 light_direction = light.direction_size_x.xyz;
+    vec2 clamped_size = max(vec2(light.direction_size_x.w, light.color_size_y.w), vec2(1e-3));
+    vec3 light_color = light.color_size_y.rgb;
+    bool two_sided = light.two_sided_shadow_pad.x > 0.5;
+
+    vec3 light_normal = normalize(light_direction);
+    float denom = dot(light_normal, ray_direction);
+    if (abs(denom) <= 1e-5)
+    {
+        return vec3(0.0);
+    }
+
+    float emitter_cos = dot(light_normal, -ray_direction);
+    if (two_sided)
+    {
+        emitter_cos = abs(emitter_cos);
+    }
+    else
+    {
+        emitter_cos = max(emitter_cos, 0.0);
+    }
+
+    if (emitter_cos <= 0.0)
+    {
+        return vec3(0.0);
+    }
+
+    float t = dot(light_position - ray_origin, light_normal) / denom;
+    if (t <= 0.0)
+    {
+        return vec3(0.0);
+    }
+
+    vec3 hit_position = ray_origin + ray_direction * t;
+    vec3 light_tangent = vec3(0.0);
+    vec3 light_bitangent = vec3(0.0);
+    BuildOrthonormalBasis(light_normal, light_tangent, light_bitangent);
+
+    vec3 to_hit = hit_position - light_position;
+    vec2 half_size = clamped_size * 0.5;
+    float local_x = dot(to_hit, light_tangent);
+    float local_y = dot(to_hit, light_bitangent);
+    if (abs(local_x) > half_size.x || abs(local_y) > half_size.y)
+    {
+        return vec3(0.0);
+    }
+
+    float light_area = clamped_size.x * clamped_size.y;
+    return light_color * intensity * light_area;
 }
 
 vec3 ShadeHit(HitGeometry geo, ShadedSurface surface, vec3 view_direction)
@@ -117,12 +373,31 @@ vec3 ShadeHit(HitGeometry geo, ShadedSurface surface, vec3 view_direction)
     vec3  kD    = (vec3(1.0) - kS) * (1.0 - surface.metallic);
 
     vec3 radiance = surface.emissive;
+    float env_intensity = max(u_skybox_intensity, 0.0);
 
-    if (u_has_irradiance != 0)
+    if (u_has_irradiance != 0 && env_intensity > 0.0)
     {
         vec3 irr_dir    = RotateAroundY(N, u_skybox_yaw_radians);
-        vec3 irradiance = texture(u_irradiance_cubemap, irr_dir).rgb * max(u_skybox_intensity, 0.0);
+        vec3 irradiance = texture(u_irradiance_cubemap, irr_dir).rgb * env_intensity;
         radiance += kD * irradiance * surface.albedo * u_secondary_irradiance_scale;
+    }
+    else
+    {
+        vec3 area_light = SampleAreaLightFallback(geo.world_position,
+                                                  N,
+                                                  V,
+                                                  surface.albedo,
+                                                  surface.metallic,
+                                                  surface.roughness);
+
+        float reused_visibility = 1.0;
+        if (dot(area_light, area_light) > 0.0 &&
+            TryReuseScreenSpaceShadowOcclusion(geo.world_position, N, reused_visibility))
+        {
+            area_light *= reused_visibility;
+        }
+
+        radiance += area_light;
     }
 
     return radiance;
@@ -195,11 +470,19 @@ void main()
         vec3 incident_radiance = SampleEnvironment(L, 0.0);
 
         RayHit hit;
-        if (TraceClosestHit(ray_origin, L, u_tlas_node_count, 1e30, hit))
+        if (TraceClosestHit(ray_origin, L, u_tlas_node_count, 50, hit))
         {
             HitGeometry geo = FetchHitGeometry(hit, ray_origin, L);
             ShadedSurface surface = FetchSurface(geo.material_index, geo.uv0, geo.uv1);
             incident_radiance     = ShadeHit(geo, surface, -L);
+        }
+        else
+        {
+            if ((u_has_skybox == 0 || max(u_skybox_intensity, 0.0) <= 0.0) &&
+                u_area_light_count > 0u)
+            {
+                incident_radiance = SampleVisibleAreaLight(ray_origin, L);
+            }
         }
 
         // GGX importance sampling weight.

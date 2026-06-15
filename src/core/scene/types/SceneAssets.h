@@ -100,7 +100,7 @@ namespace hybrid::core::scene
         std::string name;
 
         glm::vec4 base_color_factor{1.0f};
-        float metallic_factor = 1.0f;
+        float metallic_factor = 0.0f;
         float roughness_factor = 1.0f;
         glm::vec3 emissive_factor{0.0f};
 
@@ -114,7 +114,7 @@ namespace hybrid::core::scene
         MaterialTexture occlusion_texture{};
         MaterialTexture emissive_texture{};
 
-        float normal_scale = 0.6f;
+        float normal_scale = 1.0f;
         float occlusion_strength = 1.0f;
     };
 

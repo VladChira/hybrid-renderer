@@ -49,6 +49,16 @@ vec2 SelectUv(uint texcoord_bits, uint bit)
     return ((texcoord_bits >> bit) & 1u) == 1u ? v_uv1 : v_uv0;
 }
 
+vec3 SafeNormalize(vec3 value, vec3 fallback)
+{
+    float len2 = dot(value, value);
+    if (len2 <= 1e-10)
+    {
+        return fallback;
+    }
+    return value * inversesqrt(len2);
+}
+
 void main()
 {
     GpuMaterial material = materials[u_material_index];
@@ -70,28 +80,24 @@ void main()
     float metallic  = clamp(material.scalar_factors.x * mr_sample.b, 0.0, 1.0);
     float roughness = clamp(material.scalar_factors.y * mr_sample.g, 0.0, 1.0);
 
-    vec3 normal = normalize(v_world_normal);
-    if (dot(normal, normal) < 0.00001)
-    {
-        normal = vec3(0.0, 1.0, 0.0);
-    }
+    vec3 normal = SafeNormalize(v_world_normal, vec3(0.0, 1.0, 0.0));
 
     vec2 normal_uv = SelectUv(texcoord_bits, kTexcoordBitNormal);
     vec3 tangent_normal = texture(sampler2D(material.normal_handle), normal_uv).xyz * 2.0 - 1.0;
     tangent_normal.xy *= material.scalar_factors.z;
-    tangent_normal = normalize(tangent_normal);
+    tangent_normal = SafeNormalize(tangent_normal, vec3(0.0, 0.0, 1.0));
 
-    vec3 tangent = normalize(v_world_tangent);
-    vec3 bitangent = normalize(v_world_bitangent);
+    vec3 tangent = SafeNormalize(v_world_tangent, vec3(1.0, 0.0, 0.0));
+    vec3 bitangent = SafeNormalize(v_world_bitangent, vec3(0.0, 0.0, 1.0));
     if (dot(tangent, tangent) < 0.00001 || dot(bitangent, bitangent) < 0.00001)
     {
         vec3 helper_axis = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-        tangent = normalize(cross(helper_axis, normal));
-        bitangent = normalize(cross(normal, tangent));
+        tangent = SafeNormalize(cross(helper_axis, normal), vec3(1.0, 0.0, 0.0));
+        bitangent = SafeNormalize(cross(normal, tangent), vec3(0.0, 0.0, 1.0));
     }
 
     mat3 tbn = mat3(tangent, bitangent, normal);
-    normal = normalize(tbn * tangent_normal);
+    normal = SafeNormalize(tbn * tangent_normal, normal);
 
     o_rt0 = vec4(base_color, metallic);
     o_rt1 = vec4(normal * 0.5 + 0.5, roughness);
