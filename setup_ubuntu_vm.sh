@@ -56,14 +56,32 @@ install_cmake() {
   local installer_name="cmake-${requested_version}-linux-${arch}.sh"
   local installer_url="https://github.com/Kitware/CMake/releases/download/v${requested_version}/${installer_name}"
   local installer_path="/tmp/${installer_name}"
+  local install_bin_root="$install_root"
 
   log "Installing CMake ${requested_version} from GitHub release"
   curl -L --fail --retry 3 -o "$installer_path" "$installer_url"
   chmod +x "$installer_path"
-  sudo "$installer_path" --skip-license --prefix="$install_root"
-  sudo ln -sf "${install_root}/bin/cmake" /usr/local/bin/cmake
-  sudo ln -sf "${install_root}/bin/ctest" /usr/local/bin/ctest
-  sudo ln -sf "${install_root}/bin/cpack" /usr/local/bin/cpack
+  sudo mkdir -p "$install_root"
+  sudo "$installer_path" --skip-license --exclude-subdir --prefix="$install_root"
+
+  # Older installs may still have the default nested layout:
+  # /opt/cmake-<version>/cmake-<version>-linux-<arch>/bin
+  if [ ! -x "${install_bin_root}/bin/cmake" ]; then
+    local nested_install_root
+    nested_install_root="$(find "$install_root" -mindepth 1 -maxdepth 1 -type d -name "cmake-${requested_version}-linux-*" | head -n 1 || true)"
+    if [ -n "$nested_install_root" ] && [ -x "${nested_install_root}/bin/cmake" ]; then
+      install_bin_root="$nested_install_root"
+    fi
+  fi
+
+  if [ ! -x "${install_bin_root}/bin/cmake" ]; then
+    echo "CMake ${requested_version} install succeeded, but no cmake binary was found under ${install_root}" >&2
+    exit 1
+  fi
+
+  sudo ln -sf "${install_bin_root}/bin/cmake" /usr/local/bin/cmake
+  sudo ln -sf "${install_bin_root}/bin/ctest" /usr/local/bin/ctest
+  sudo ln -sf "${install_bin_root}/bin/cpack" /usr/local/bin/cpack
 }
 
 log "Updating apt metadata"
